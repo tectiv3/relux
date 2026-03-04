@@ -5,25 +5,9 @@ import SwiftUI
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
     let appState = AppState()
-    var statusItem: NSStatusItem?
     var panel: FloatingPanel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem?.button?.image = NSImage(
-            systemSymbolName: "note.text", accessibilityDescription: "Notty")
-
-        let menu = NSMenu()
-        menu.addItem(
-            NSMenuItem(title: "Re-index Notes", action: #selector(reindex), keyEquivalent: ""))
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(
-            NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ","))
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(
-            NSMenuItem(title: "Quit Notty", action: #selector(quit), keyEquivalent: "q"))
-        statusItem?.menu = menu
-
         try? appState.setup()
 
         setupPanel()
@@ -33,10 +17,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if appState.needsFirstRun {
-            // Open settings on first launch so user can select models
-            DispatchQueue.main.async { self.openSettings() }
+            DispatchQueue.main.async {
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            }
         } else {
-            // Restore previously selected models
             Task { await appState.restoreModels() }
         }
     }
@@ -78,14 +62,4 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.activate(ignoringOtherApps: true)
         }
     }
-
-    @objc func reindex() { appState.reindex() }
-    @objc func openSettings() {
-        if #available(macOS 14, *) {
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        } else {
-            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-        }
-    }
-    @objc func quit() { NSApp.terminate(nil) }
 }
