@@ -36,10 +36,12 @@ struct SettingsView: View {
                             .tag(Optional(model))
                     }
                 }
-                .onChange(of: selectedLLM) { _, newValue in
-                    guard let model = newValue else { return }
+                .onChange(of: selectedLLM) { oldValue, newValue in
+                    guard let model = newValue, oldValue != newValue else { return }
                     appState.savedLLMPath = model.path.path
                     appState.markSetupComplete()
+                    // Skip if already loaded (e.g. restored on launch)
+                    guard !appState.mlx.isLLMLoaded else { return }
                     Task {
                         try? await appState.mlx.loadLLM(model: model)
                     }
@@ -62,9 +64,10 @@ struct SettingsView: View {
                             .tag(Optional(model))
                     }
                 }
-                .onChange(of: selectedEmbedder) { _, newValue in
-                    guard let model = newValue else { return }
+                .onChange(of: selectedEmbedder) { oldValue, newValue in
+                    guard let model = newValue, oldValue != newValue else { return }
                     appState.savedEmbedderPath = model.path.path
+                    guard !appState.mlx.isEmbedderLoaded else { return }
                     Task {
                         try? await appState.mlx.loadEmbedder(model: model)
                     }

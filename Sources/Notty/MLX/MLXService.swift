@@ -16,10 +16,10 @@ final class MLXService {
 
     func loadLLM(model: LocalModel) async throws {
         loadingStatus = "Loading \(model.name)..."
+        defer { loadingStatus = "" }
         let config = MLXLMCommon.ModelConfiguration(directory: model.path)
         llmContainer = try await LLMModelFactory.shared.loadContainer(configuration: config)
         isLLMLoaded = true
-        loadingStatus = ""
     }
 
     func generate(prompt: String, maxTokens: Int = 1024) -> AsyncStream<String> {
@@ -49,10 +49,10 @@ final class MLXService {
 
     func loadEmbedder(model: LocalModel) async throws {
         loadingStatus = "Loading embedder..."
+        defer { loadingStatus = "" }
         let config = MLXEmbedders.ModelConfiguration(directory: model.path)
         embedContainer = try await MLXEmbedders.loadModelContainer(configuration: config)
         isEmbedderLoaded = true
-        loadingStatus = ""
     }
 
     func embed(_ texts: [String]) async throws -> [[Float]] {
