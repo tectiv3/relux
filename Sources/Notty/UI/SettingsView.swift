@@ -13,7 +13,15 @@ struct SettingsView: View {
             shortcutsTab.tabItem { Label("Shortcuts", systemImage: "keyboard") }
         }
         .frame(width: 450, height: 350)
-        .onAppear { discoveredModels = ModelDiscovery.discoverModels() }
+        .onAppear {
+            discoveredModels = ModelDiscovery.discoverModels()
+            if let path = appState.savedLLMPath {
+                selectedLLM = discoveredModels.first { $0.path.path == path }
+            }
+            if let path = appState.savedEmbedderPath {
+                selectedEmbedder = discoveredModels.first { $0.path.path == path }
+            }
+        }
     }
 
     // MARK: - Models Tab
