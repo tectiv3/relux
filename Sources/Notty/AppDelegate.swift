@@ -1,4 +1,5 @@
 import AppKit
+import KeyboardShortcuts
 import SwiftUI
 
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -22,6 +23,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.menu = menu
 
         setupPanel()
+
+        KeyboardShortcuts.onKeyUp(for: .toggleNotty) { [weak self] in
+            self?.togglePanel()
+        }
     }
 
     func setupPanel() {
