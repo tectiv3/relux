@@ -6,7 +6,9 @@
       "WebFetch(domain:gist.github.com)",
       "Bash(git:*)",
       "Bash(swift package:*)",
-      "Bash(swift build:*)"
+      "Bash(swift build:*)",
+      "Bash(xcodegen generate:*)",
+      "Bash(xcodebuild build:*)"
     ]
   }
 }

@@ -148,7 +148,7 @@ struct OverlayView: View {
                 isGenerating = false
                 return
             }
-            for await result in ext.handle(query: query) {
+            for await result in await ext.handle(query: query) {
                 switch result.kind {
                 case .token(let text):
                     answer += text

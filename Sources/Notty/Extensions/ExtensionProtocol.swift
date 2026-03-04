@@ -18,5 +18,5 @@ struct ExtensionResult: Sendable {
 
 protocol NottyExtension: Sendable {
     var name: String { get }
-    func handle(query: String) -> AsyncStream<ExtensionResult>
+    func handle(query: String) async -> AsyncStream<ExtensionResult>
 }

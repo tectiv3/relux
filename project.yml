@@ -1,0 +1,51 @@
+name: Notty
+options:
+  bundleIdPrefix: com.notty
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.3"
+  generateEmptyDirectories: true
+
+packages:
+  mlx-swift:
+    url: https://github.com/ml-explore/mlx-swift
+    from: 0.30.6
+  mlx-swift-lm:
+    url: https://github.com/ml-explore/mlx-swift-lm
+    from: 2.30.6
+  KeyboardShortcuts:
+    url: https://github.com/sindresorhus/KeyboardShortcuts
+    from: 2.0.0
+
+targets:
+  Notty:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/Notty
+    dependencies:
+      - package: mlx-swift
+        product: MLX
+      - package: mlx-swift
+        product: MLXNN
+      - package: mlx-swift-lm
+        product: MLXLLM
+      - package: mlx-swift-lm
+        product: MLXLMCommon
+      - package: mlx-swift-lm
+        product: MLXEmbedders
+      - package: KeyboardShortcuts
+    settings:
+      base:
+        INFOPLIST_FILE: Sources/Notty/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.notty.app
+        PRODUCT_NAME: Notty
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: 1
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        SWIFT_VERSION: "6.0"
+    entitlements:
+      path: Sources/Notty/Notty.entitlements
+      properties:
+        com.apple.security.automation.apple-events: true

@@ -9,7 +9,7 @@ final class NotesExtension: NottyExtension {
         self.engine = engine
     }
 
-    func handle(query: String) -> AsyncStream<ExtensionResult> {
+    func handle(query: String) async -> AsyncStream<ExtensionResult> {
         engine.query(query)
     }
 }
