@@ -30,6 +30,8 @@ struct SettingsView: View {
                 }
                 .onChange(of: selectedLLM) { _, newValue in
                     guard let model = newValue else { return }
+                    appState.savedLLMPath = model.path.path
+                    appState.markSetupComplete()
                     Task {
                         try? await appState.mlx.loadLLM(model: model)
                     }
@@ -54,6 +56,7 @@ struct SettingsView: View {
                 }
                 .onChange(of: selectedEmbedder) { _, newValue in
                     guard let model = newValue else { return }
+                    appState.savedEmbedderPath = model.path.path
                     Task {
                         try? await appState.mlx.loadEmbedder(model: model)
                     }

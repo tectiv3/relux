@@ -8,13 +8,33 @@ struct OverlayView: View {
     @State private var isGenerating: Bool = false
 
     private var hasContent: Bool {
-        !answer.isEmpty || isGenerating
+        !answer.isEmpty || isGenerating || statusMessage != nil
+    }
+
+    private var statusMessage: String? {
+        if appState.isIndexing {
+            if let p = appState.indexProgress {
+                return "Indexing notes (\(p.current)/\(p.total))..."
+            }
+            return "Indexing notes..."
+        }
+        if !appState.mlx.isLLMLoaded {
+            return "No model loaded — open Settings to select one."
+        }
+        return nil
     }
 
     var body: some View {
         VStack(spacing: 0) {
             searchBar
-            if hasContent {
+            if let status = statusMessage, !isGenerating && answer.isEmpty {
+                Divider()
+                Text(status)
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+            } else if hasContent {
                 Divider()
                 answerSection
                 if !sources.isEmpty {

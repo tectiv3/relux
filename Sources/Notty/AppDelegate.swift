@@ -31,6 +31,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         KeyboardShortcuts.onKeyUp(for: .toggleNotty) { [weak self] in
             self?.togglePanel()
         }
+
+        if appState.needsFirstRun {
+            // Open settings on first launch so user can select models
+            DispatchQueue.main.async { self.openSettings() }
+        } else {
+            // Restore previously selected models
+            Task { await appState.restoreModels() }
+        }
     }
 
     func setupPanel() {
