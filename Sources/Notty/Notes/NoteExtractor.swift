@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 
-final class NoteExtractor {
+final class NoteExtractor: Sendable {
     enum ExtractionError: Error, LocalizedError {
         case scriptFailed(String)
         case notesAppUnavailable
@@ -19,8 +19,8 @@ final class NoteExtractor {
     private static let noteDelimiter = "<<<NOTE>>>"
     private static let fieldSeparator = "<<<SEP>>>"
 
-    func fetchAllNotes() throws -> [NoteRecord] {
-        ensureNotesRunning()
+    func fetchAllNotes() async throws -> [NoteRecord] {
+        await Self.ensureNotesRunning()
 
         let script = """
             set output to ""
@@ -43,29 +43,40 @@ final class NoteExtractor {
             return output
             """
 
-        guard let appleScript = NSAppleScript(source: script) else {
-            throw ExtractionError.scriptFailed("Failed to create NSAppleScript instance")
+        // AppleScript execution blocks the calling thread; run on a background thread
+        let output: String = try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let appleScript = NSAppleScript(source: script) else {
+                    continuation.resume(throwing: ExtractionError.scriptFailed("Failed to create NSAppleScript instance"))
+                    return
+                }
+
+                var errorDict: NSDictionary?
+                let result = appleScript.executeAndReturnError(&errorDict)
+
+                if let errorDict = errorDict {
+                    let message =
+                        errorDict[NSAppleScript.errorMessage] as? String ?? "Unknown AppleScript error"
+                    continuation.resume(throwing: ExtractionError.scriptFailed(message))
+                    return
+                }
+
+                continuation.resume(returning: result.stringValue ?? "")
+            }
         }
 
-        var errorDict: NSDictionary?
-        let result = appleScript.executeAndReturnError(&errorDict)
+        guard !output.isEmpty else { return [] }
 
-        if let errorDict = errorDict {
-            let message =
-                errorDict[NSAppleScript.errorMessage] as? String ?? "Unknown AppleScript error"
-            throw ExtractionError.scriptFailed(message)
-        }
-
-        guard let output = result.stringValue else {
-            return []
-        }
-
-        return parseNotes(from: output)
+        // Parse on background thread (HTML→plaintext is expensive for 152 notes)
+        return await Task.detached {
+            Self.parseNotes(from: output)
+        }.value
     }
 
     // MARK: - Private
 
-    private func ensureNotesRunning() {
+    @MainActor
+    private static func ensureNotesRunning() {
         let isRunning = NSWorkspace.shared.runningApplications.contains {
             $0.bundleIdentifier == "com.apple.Notes"
         }
@@ -75,18 +86,17 @@ final class NoteExtractor {
                 return
             }
             NSWorkspace.shared.open(notesURL)
-            Thread.sleep(forTimeInterval: 2)
         }
     }
 
-    private func parseNotes(from output: String) -> [NoteRecord] {
-        let rawNotes = output.components(separatedBy: Self.noteDelimiter)
+    private static func parseNotes(from output: String) -> [NoteRecord] {
+        let rawNotes = output.components(separatedBy: noteDelimiter)
 
         return rawNotes.compactMap { chunk -> NoteRecord? in
             let trimmed = chunk.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return nil }
 
-            let fields = trimmed.components(separatedBy: Self.fieldSeparator)
+            let fields = trimmed.components(separatedBy: fieldSeparator)
             guard fields.count >= 5 else { return nil }
 
             let id = fields[0]
@@ -108,7 +118,7 @@ final class NoteExtractor {
         }
     }
 
-    private func htmlToPlainText(_ html: String) -> String {
+    private static func htmlToPlainText(_ html: String) -> String {
         guard let data = html.data(using: .utf8) else { return html }
 
         let options: [NSAttributedString.DocumentReadingOptionKey: Any] = [
@@ -129,7 +139,7 @@ final class NoteExtractor {
         return attributed.string
     }
 
-    private func parseDate(_ string: String) -> Date? {
+    private static func parseDate(_ string: String) -> Date? {
         let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // AppleScript date format varies by locale; try common patterns

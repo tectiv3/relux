@@ -16,10 +16,12 @@ struct SettingsView: View {
         .onAppear {
             discoveredModels = ModelDiscovery.discoverModels()
             if let path = appState.savedLLMPath {
-                selectedLLM = discoveredModels.first { $0.path.path == path }
+                let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+                selectedLLM = discoveredModels.first { $0.path.standardizedFileURL.path == standardized }
             }
             if let path = appState.savedEmbedderPath {
-                selectedEmbedder = discoveredModels.first { $0.path.path == path }
+                let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+                selectedEmbedder = discoveredModels.first { $0.path.standardizedFileURL.path == standardized }
             }
         }
     }
@@ -38,7 +40,7 @@ struct SettingsView: View {
                 }
                 .onChange(of: selectedLLM) { oldValue, newValue in
                     guard let model = newValue, oldValue != newValue else { return }
-                    appState.savedLLMPath = model.path.path
+                    appState.savedLLMPath = model.path.standardizedFileURL.path
                     appState.markSetupComplete()
                     // Skip if already loaded (e.g. restored on launch)
                     guard !appState.mlx.isLLMLoaded else { return }
@@ -66,7 +68,7 @@ struct SettingsView: View {
                 }
                 .onChange(of: selectedEmbedder) { oldValue, newValue in
                     guard let model = newValue, oldValue != newValue else { return }
-                    appState.savedEmbedderPath = model.path.path
+                    appState.savedEmbedderPath = model.path.standardizedFileURL.path
                     guard !appState.mlx.isEmbedderLoaded else { return }
                     Task {
                         try? await appState.mlx.loadEmbedder(model: model)

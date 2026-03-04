@@ -8,7 +8,8 @@
       "Bash(swift package:*)",
       "Bash(swift build:*)",
       "Bash(xcodegen generate:*)",
-      "Bash(xcodebuild build:*)"
+      "Bash(xcodebuild build:*)",
+      "Bash(xcodebuild:*)"
     ]
   }
 }

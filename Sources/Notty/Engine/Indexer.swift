@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let log = Logger(subsystem: "com.notty.app", category: "indexer")
 
 struct IndexProgress: Sendable {
     let current: Int
@@ -21,12 +24,17 @@ final class Indexer {
         AsyncStream { continuation in
             Task { @MainActor in
                 do {
-                    let notes = try extractor.fetchAllNotes()
+                    log.info("Starting note extraction...")
+                    let notes = try await extractor.fetchAllNotes()
+                    log.info("Extracted \(notes.count) notes from Notes.app")
+
                     var indexed = 0
+                    var skipped = 0
 
                     for note in notes {
                         if let stored = store.getModifiedDate(noteId: note.id),
                            abs(stored.timeIntervalSince(note.modifiedDate)) < 1.0 {
+                            skipped += 1
                             indexed += 1
                             continue
                         }
@@ -36,12 +44,23 @@ final class Indexer {
                         ))
 
                         let textChunks = TextChunker.chunk(note.plainText)
-                        guard !textChunks.isEmpty else {
+                        if textChunks.isEmpty {
+                            log.debug("Skipping empty note: \(note.title)")
                             indexed += 1
                             continue
                         }
 
+                        log.info("Embedding \(note.title) (\(textChunks.count) chunks, folder: \(note.folder))")
+
                         let embeddings = try await mlx.embed(textChunks.map(\.text))
+
+                        // Check embeddings are valid
+                        if embeddings.isEmpty || embeddings.first?.isEmpty == true {
+                            log.warning("Empty embeddings for \(note.title) — is an embedder model loaded?")
+                            indexed += 1
+                            continue
+                        }
+
                         let pairs = zip(textChunks, embeddings).map { ($0.text, $1) }
 
                         try store.upsertNote(
@@ -51,15 +70,18 @@ final class Indexer {
                             modifiedDate: note.modifiedDate,
                             chunks: pairs
                         )
+                        log.debug("Stored \(pairs.count) chunks for \(note.title)")
                         indexed += 1
                     }
 
                     try store.loadEmbeddings()
+                    log.info("Indexing complete: \(indexed) notes processed, \(skipped) unchanged")
+
                     continuation.yield(IndexProgress(
                         current: notes.count, total: notes.count, currentTitle: "Done"
                     ))
                 } catch {
-                    print("Indexing error: \(error)")
+                    log.error("Indexing error: \(error.localizedDescription)")
                 }
                 continuation.finish()
             }

@@ -1,4 +1,7 @@
 import SwiftUI
+import os
+
+private let log = Logger(subsystem: "com.notty.app", category: "appstate")
 
 @MainActor
 @Observable
@@ -39,14 +42,37 @@ final class AppState {
     /// Restore previously selected models on launch
     func restoreModels() async {
         let models = ModelDiscovery.discoverModels()
+        log.info("Restore: discovered \(models.count) models, savedLLM=\(self.savedLLMPath ?? "nil"), savedEmbedder=\(self.savedEmbedderPath ?? "nil")")
 
-        if let llmPath = savedLLMPath,
-           let model = models.first(where: { $0.path.path == llmPath }) {
-            try? await mlx.loadLLM(model: model)
+        if let llmPath = savedLLMPath {
+            let standardized = URL(fileURLWithPath: llmPath).standardizedFileURL.path
+            if let model = models.first(where: { $0.path.standardizedFileURL.path == standardized }) {
+                do {
+                    try await mlx.loadLLM(model: model)
+                    log.info("Restored LLM: \(model.name)")
+                } catch {
+                    log.error("Failed to restore LLM: \(error.localizedDescription)")
+                }
+            } else {
+                log.warning("LLM path not found in discovered models: \(llmPath)")
+                for m in models {
+                    log.debug("  discovered: \(m.path.path)")
+                }
+            }
         }
-        if let embedderPath = savedEmbedderPath,
-           let model = models.first(where: { $0.path.path == embedderPath }) {
-            try? await mlx.loadEmbedder(model: model)
+
+        if let embedderPath = savedEmbedderPath {
+            let standardized = URL(fileURLWithPath: embedderPath).standardizedFileURL.path
+            if let model = models.first(where: { $0.path.standardizedFileURL.path == standardized }) {
+                do {
+                    try await mlx.loadEmbedder(model: model)
+                    log.info("Restored embedder: \(model.name)")
+                } catch {
+                    log.error("Failed to restore embedder: \(error.localizedDescription)")
+                }
+            } else {
+                log.warning("Embedder path not found in discovered models: \(embedderPath)")
+            }
         }
     }
 
