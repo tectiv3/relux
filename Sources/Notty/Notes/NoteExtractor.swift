@@ -26,12 +26,17 @@ final class NoteExtractor {
             set output to ""
             tell application "Notes"
                 repeat with eachNote in every note
-                    set noteId to id of eachNote
-                    set noteTitle to name of eachNote
-                    set noteBody to body of eachNote
-                    set noteFolder to name of container of eachNote
-                    set modDate to modification date of eachNote
-                    set output to output & "<<<NOTE>>>" & noteId & "<<<SEP>>>" & noteTitle & "<<<SEP>>>" & noteBody & "<<<SEP>>>" & noteFolder & "<<<SEP>>>" & (modDate as string)
+                    try
+                        set noteId to id of eachNote
+                        set noteTitle to name of eachNote
+                        set noteBody to body of eachNote
+                        set noteFolder to "Unknown"
+                        try
+                            set noteFolder to name of container of eachNote
+                        end try
+                        set modDate to modification date of eachNote
+                        set output to output & "<<<NOTE>>>" & noteId & "<<<SEP>>>" & noteTitle & "<<<SEP>>>" & noteBody & "<<<SEP>>>" & noteFolder & "<<<SEP>>>" & (modDate as string)
+                    end try
                 end repeat
             end tell
             return output
