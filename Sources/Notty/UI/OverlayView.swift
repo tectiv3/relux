@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct OverlayView: View {
+    @Environment(AppState.self) private var appState
     @State private var query: String = ""
     @State private var answer: String = ""
     @State private var sources: [SourceNote] = []
@@ -120,5 +121,26 @@ struct OverlayView: View {
         isGenerating = true
         answer = ""
         sources = []
+
+        Task { @MainActor in
+            guard let ext = appState.notesExtension else {
+                answer = "Not ready — please select a model in Settings."
+                isGenerating = false
+                return
+            }
+            for await result in ext.handle(query: query) {
+                switch result.kind {
+                case .token(let text):
+                    answer += text
+                case .sources(let s):
+                    sources = s
+                case .error(let msg):
+                    answer += "\n[Error: \(msg)]"
+                case .done:
+                    break
+                }
+            }
+            isGenerating = false
+        }
     }
 }

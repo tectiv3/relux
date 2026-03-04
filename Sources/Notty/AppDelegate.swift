@@ -2,7 +2,9 @@ import AppKit
 import KeyboardShortcuts
 import SwiftUI
 
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
+    let appState = AppState()
     var statusItem: NSStatusItem?
     var panel: FloatingPanel?
 
@@ -21,6 +23,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(
             NSMenuItem(title: "Quit Notty", action: #selector(quit), keyEquivalent: "q"))
         statusItem?.menu = menu
+
+        try? appState.setup()
 
         setupPanel()
 
@@ -41,7 +45,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let contentRect = NSRect(x: x, y: y, width: panelWidth, height: panelHeight)
         let floatingPanel = FloatingPanel(contentRect: contentRect)
 
-        let hostingView = NSHostingView(rootView: OverlayView())
+        let hostingView = NSHostingView(rootView: OverlayView().environment(appState))
         hostingView.translatesAutoresizingMaskIntoConstraints = false
 
         if let contentView = floatingPanel.contentView {
@@ -67,7 +71,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc func reindex() {}
+    @objc func reindex() { appState.reindex() }
     @objc func openSettings() {}
     @objc func quit() { NSApp.terminate(nil) }
 }
