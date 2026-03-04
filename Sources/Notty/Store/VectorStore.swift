@@ -166,7 +166,11 @@ final class VectorStore {
         var scored: [(entry: EmbeddingEntry, score: Float)] = []
 
         for entry in cache {
-            let score = cosineSimilarity(queryEmbedding, entry.embedding)
+            var score = cosineSimilarity(queryEmbedding, entry.embedding)
+            // De-prioritize archived notes
+            if entry.folder.lowercased() == "archive" || entry.folder.lowercased() == "recently deleted" {
+                score *= 0.5
+            }
             scored.append((entry, score))
         }
 
