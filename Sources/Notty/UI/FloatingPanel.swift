@@ -10,14 +10,14 @@ final class FloatingPanel: NSPanel {
         )
 
         isFloatingPanel = true
-        level = .floating
+        level = .statusBar
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
         isMovableByWindowBackground = true
         hidesOnDeactivate = false
         isOpaque = false
         backgroundColor = .clear
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenNone]
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
 
         let visualEffect = NSVisualEffectView(frame: contentRect)
         visualEffect.material = .hudWindow

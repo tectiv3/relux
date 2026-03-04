@@ -20,11 +20,11 @@ final class Indexer {
         self.mlx = mlx
     }
 
-    func index() -> AsyncStream<IndexProgress> {
+    func index(full: Bool = false) -> AsyncStream<IndexProgress> {
         AsyncStream { continuation in
             Task { @MainActor in
                 do {
-                    log.info("Starting note extraction...")
+                    log.info("Starting note extraction\(full ? " (full rebuild)" : "")...")
                     let notes = try await extractor.fetchAllNotes()
                     log.info("Extracted \(notes.count) notes from Notes.app")
 
@@ -32,7 +32,8 @@ final class Indexer {
                     var skipped = 0
 
                     for note in notes {
-                        if let stored = store.getModifiedDate(noteId: note.id),
+                        if !full,
+                           let stored = store.getModifiedDate(noteId: note.id),
                            abs(stored.timeIntervalSince(note.modifiedDate)) < 1.0 {
                             skipped += 1
                             indexed += 1

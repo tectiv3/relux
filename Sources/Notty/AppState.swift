@@ -76,11 +76,11 @@ final class AppState {
         }
     }
 
-    func reindex() {
+    func reindex(full: Bool = true) {
         guard let indexer, !isIndexing else { return }
         isIndexing = true
         Task { @MainActor in
-            for await progress in indexer.index() {
+            for await progress in indexer.index(full: full) {
                 indexProgress = progress
             }
             isIndexing = false

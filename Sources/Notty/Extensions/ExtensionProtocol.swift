@@ -4,6 +4,7 @@ struct SourceNote: Identifiable, Sendable {
     let id: String
     let title: String
     let folder: String
+    let snippet: String
 }
 
 struct ExtensionResult: Sendable {

@@ -162,7 +162,7 @@ final class VectorStore {
         cache = entries
     }
 
-    func search(queryEmbedding: [Float], topK: Int = 5) -> [SearchResult] {
+    func search(queryEmbedding: [Float], topK: Int = 5, minScore: Float = 0.5) -> [SearchResult] {
         var scored: [(entry: EmbeddingEntry, score: Float)] = []
 
         for entry in cache {
@@ -171,7 +171,9 @@ final class VectorStore {
             if entry.folder.lowercased() == "archive" || entry.folder.lowercased() == "recently deleted" {
                 score *= 0.5
             }
-            scored.append((entry, score))
+            if score >= minScore {
+                scored.append((entry, score))
+            }
         }
 
         // Deduplicate by noteId, keeping the best-scoring chunk per note

@@ -24,7 +24,12 @@ final class QueryEngine {
                     let results = store.search(queryEmbedding: queryEmbedding, topK: 5)
 
                     let sources = results.map {
-                        SourceNote(id: $0.noteId, title: $0.title, folder: $0.folder)
+                        SourceNote(
+                            id: $0.noteId,
+                            title: $0.title,
+                            folder: $0.folder,
+                            snippet: String($0.chunkText.prefix(150))
+                        )
                     }
                     continuation.yield(ExtensionResult(kind: .sources(sources)))
 

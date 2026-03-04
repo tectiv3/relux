@@ -139,6 +139,21 @@ final class NoteExtractor: Sendable {
         return attributed.string
     }
 
+    /// Open a note in Notes.app by its AppleScript ID
+    static func openNote(id: String) {
+        let escaped = id.replacingOccurrences(of: "\"", with: "\\\"")
+        let script = """
+            tell application "Notes"
+                activate
+                show note id "\(escaped)"
+            end tell
+            """
+        if let appleScript = NSAppleScript(source: script) {
+            var error: NSDictionary?
+            appleScript.executeAndReturnError(&error)
+        }
+    }
+
     private static func parseDate(_ string: String) -> Date? {
         let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
 
