@@ -29,7 +29,8 @@ enum ModelDiscovery {
             if isHuggingFaceCache {
                 models.append(contentsOf: discoverHuggingFaceModels(at: baseURL, fm: fm))
             } else {
-                models.append(contentsOf: discoverDirectoryModels(at: baseURL, fm: fm))
+                // Swama and similar: org/model nested structure
+                models.append(contentsOf: discoverNestedModels(at: baseURL, fm: fm))
             }
         }
 
@@ -38,7 +39,7 @@ enum ModelDiscovery {
 
     // MARK: - HuggingFace Cache
 
-    // HF cache layout: hub/models--org--name/snapshots/<hash>/config.json
+    // HF cache layout: hub/models--org--name/snapshots/<hash>/ (files are symlinks to ../../blobs/)
     private static func discoverHuggingFaceModels(at baseURL: URL, fm: FileManager) -> [LocalModel] {
         var models: [LocalModel] = []
 
@@ -62,12 +63,14 @@ enum ModelDiscovery {
                 options: [.skipsHiddenFiles]
             ) else { continue }
 
-            // Pick the first snapshot that has config.json
             for snapshot in snapshots {
                 let configURL = snapshot.appendingPathComponent("config.json")
                 guard fm.fileExists(atPath: configURL.path) else { continue }
 
-                let size = directorySize(at: snapshot, fm: fm)
+                // HF uses blobs dir for actual file sizes (snapshots contain symlinks)
+                let blobsURL = dir.appendingPathComponent("blobs")
+                let size = directorySize(at: blobsURL, fm: fm)
+
                 models.append(LocalModel(
                     id: modelName,
                     path: snapshot,
@@ -81,34 +84,51 @@ enum ModelDiscovery {
         return models
     }
 
-    // MARK: - Flat Directory Models
+    // MARK: - Nested Directory Models (org/model structure)
 
-    private static func discoverDirectoryModels(at baseURL: URL, fm: FileManager) -> [LocalModel] {
+    private static func discoverNestedModels(at baseURL: URL, fm: FileManager) -> [LocalModel] {
         var models: [LocalModel] = []
 
-        guard let contents = try? fm.contentsOfDirectory(
+        guard let orgDirs = try? fm.contentsOfDirectory(
             at: baseURL,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
         ) else { return [] }
 
-        for dir in contents {
+        for orgDir in orgDirs {
             var isDir: ObjCBool = false
-            guard fm.fileExists(atPath: dir.path, isDirectory: &isDir), isDir.boolValue else { continue }
+            guard fm.fileExists(atPath: orgDir.path, isDirectory: &isDir), isDir.boolValue else { continue }
 
-            let configURL = dir.appendingPathComponent("config.json")
-            guard fm.fileExists(atPath: configURL.path) else { continue }
+            // Check if this directory itself is a model (config.json at top level)
+            let directConfig = orgDir.appendingPathComponent("config.json")
+            if fm.fileExists(atPath: directConfig.path) {
+                let name = orgDir.lastPathComponent
+                let size = directorySize(at: orgDir, fm: fm)
+                models.append(LocalModel(id: name, path: orgDir, name: name, sizeBytes: size))
+                continue
+            }
 
-            let parent = baseURL.lastPathComponent
-            let name = "\(parent)/\(dir.lastPathComponent)"
-            let size = directorySize(at: dir, fm: fm)
+            // Otherwise treat as org directory, scan children
+            guard let modelDirs = try? fm.contentsOfDirectory(
+                at: orgDir,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
 
-            models.append(LocalModel(
-                id: name,
-                path: dir,
-                name: name,
-                sizeBytes: size
-            ))
+            for modelDir in modelDirs {
+                var isModelDir: ObjCBool = false
+                guard fm.fileExists(atPath: modelDir.path, isDirectory: &isModelDir), isModelDir.boolValue else { continue }
+
+                let configURL = modelDir.appendingPathComponent("config.json")
+                guard fm.fileExists(atPath: configURL.path) else { continue }
+
+                let orgName = orgDir.lastPathComponent
+                let modelName = modelDir.lastPathComponent
+                let name = "\(orgName)/\(modelName)"
+                let size = directorySize(at: modelDir, fm: fm)
+
+                models.append(LocalModel(id: name, path: modelDir, name: name, sizeBytes: size))
+            }
         }
 
         return models
@@ -119,13 +139,15 @@ enum ModelDiscovery {
     private static func directorySize(at url: URL, fm: FileManager) -> UInt64 {
         guard let enumerator = fm.enumerator(
             at: url,
-            includingPropertiesForKeys: [.fileSizeKey],
+            includingPropertiesForKeys: [.fileSizeKey, .isSymbolicLinkKey],
             options: [.skipsHiddenFiles]
         ) else { return 0 }
 
         var total: UInt64 = 0
         for case let fileURL as URL in enumerator {
-            if let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey]),
+            // Resolve symlinks to get actual file size
+            let resolved = fileURL.resolvingSymlinksInPath()
+            if let values = try? resolved.resourceValues(forKeys: [.fileSizeKey]),
                let size = values.fileSize
             {
                 total += UInt64(size)
