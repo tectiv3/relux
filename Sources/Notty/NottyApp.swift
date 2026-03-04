@@ -6,7 +6,8 @@ struct NottyApp: App {
 
     var body: some Scene {
         Settings {
-            Text("Notty Settings")
+            SettingsView()
+                .environment(appDelegate.appState)
         }
     }
 }

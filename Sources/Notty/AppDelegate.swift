@@ -72,6 +72,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func reindex() { appState.reindex() }
-    @objc func openSettings() {}
+    @objc func openSettings() {
+        if #available(macOS 14, *) {
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        } else {
+            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+        }
+    }
     @objc func quit() { NSApp.terminate(nil) }
 }
