@@ -1,0 +1,258 @@
+import Accelerate
+import Foundation
+import SQLite3
+
+struct EmbeddingEntry {
+    let noteId: String
+    let chunkIndex: Int
+    let chunkText: String
+    let embedding: [Float]
+    let title: String
+    let folder: String
+}
+
+struct SearchResult {
+    let noteId: String
+    let chunkText: String
+    let title: String
+    let folder: String
+    let score: Float
+}
+
+enum StoreError: Error {
+    case cannotOpen
+    case query
+    case exec(String)
+}
+
+final class VectorStore {
+    private var db: OpaquePointer?
+    private var cache: [EmbeddingEntry] = []
+
+    private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+    init() throws {
+        let fileManager = FileManager.default
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = appSupport.appendingPathComponent("Notty", isDirectory: true)
+        try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dbPath = dir.appendingPathComponent("notty.db").path
+
+        guard sqlite3_open(dbPath, &db) == SQLITE_OK else {
+            throw StoreError.cannotOpen
+        }
+
+        try execute("""
+            CREATE TABLE IF NOT EXISTS chunks (
+                note_id TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                chunk_text TEXT NOT NULL,
+                embedding BLOB NOT NULL,
+                title TEXT NOT NULL,
+                folder TEXT NOT NULL,
+                modified_date REAL NOT NULL,
+                PRIMARY KEY (note_id, chunk_index)
+            );
+            CREATE TABLE IF NOT EXISTS meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+        """)
+    }
+
+    deinit {
+        sqlite3_close(db)
+    }
+
+    // MARK: - Note Operations
+
+    func upsertNote(
+        noteId: String,
+        title: String,
+        folder: String,
+        modifiedDate: Date,
+        chunks: [(text: String, embedding: [Float])]
+    ) throws {
+        try execute("DELETE FROM chunks WHERE note_id = '\(noteId)'")
+
+        let sql = """
+            INSERT INTO chunks (note_id, chunk_index, chunk_text, embedding, title, folder, modified_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw StoreError.query
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        let timestamp = modifiedDate.timeIntervalSinceReferenceDate
+
+        for (index, chunk) in chunks.enumerated() {
+            sqlite3_reset(stmt)
+            sqlite3_bind_text(stmt, 1, noteId, -1, Self.transient)
+            sqlite3_bind_int(stmt, 2, Int32(index))
+            sqlite3_bind_text(stmt, 3, chunk.text, -1, Self.transient)
+
+            let embeddingData = chunk.embedding.withUnsafeBufferPointer { Data(buffer: $0) }
+            _ = embeddingData.withUnsafeBytes { ptr in
+                sqlite3_bind_blob(stmt, 4, ptr.baseAddress, Int32(embeddingData.count), Self.transient)
+            }
+
+            sqlite3_bind_text(stmt, 5, title, -1, Self.transient)
+            sqlite3_bind_text(stmt, 6, folder, -1, Self.transient)
+            sqlite3_bind_double(stmt, 7, timestamp)
+
+            guard sqlite3_step(stmt) == SQLITE_DONE else {
+                throw StoreError.query
+            }
+        }
+    }
+
+    func getModifiedDate(noteId: String) -> Date? {
+        let sql = "SELECT modified_date FROM chunks WHERE note_id = ? LIMIT 1"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, noteId, -1, Self.transient)
+
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        let timestamp = sqlite3_column_double(stmt, 0)
+        return Date(timeIntervalSinceReferenceDate: timestamp)
+    }
+
+    // MARK: - Search
+
+    func loadEmbeddings() throws {
+        let sql = "SELECT note_id, chunk_index, chunk_text, embedding, title, folder FROM chunks"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw StoreError.query
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var entries: [EmbeddingEntry] = []
+
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let noteId = String(cString: sqlite3_column_text(stmt, 0))
+            let chunkIndex = Int(sqlite3_column_int(stmt, 1))
+            let chunkText = String(cString: sqlite3_column_text(stmt, 2))
+
+            let blobPtr = sqlite3_column_blob(stmt, 3)
+            let blobSize = Int(sqlite3_column_bytes(stmt, 3))
+            let floatCount = blobSize / MemoryLayout<Float>.size
+            var embedding = [Float](repeating: 0, count: floatCount)
+            if let blobPtr {
+                memcpy(&embedding, blobPtr, blobSize)
+            }
+
+            let title = String(cString: sqlite3_column_text(stmt, 4))
+            let folder = String(cString: sqlite3_column_text(stmt, 5))
+
+            entries.append(EmbeddingEntry(
+                noteId: noteId,
+                chunkIndex: chunkIndex,
+                chunkText: chunkText,
+                embedding: embedding,
+                title: title,
+                folder: folder
+            ))
+        }
+
+        cache = entries
+    }
+
+    func search(queryEmbedding: [Float], topK: Int = 5) -> [SearchResult] {
+        var scored: [(entry: EmbeddingEntry, score: Float)] = []
+
+        for entry in cache {
+            let score = cosineSimilarity(queryEmbedding, entry.embedding)
+            scored.append((entry, score))
+        }
+
+        // Deduplicate by noteId, keeping the best-scoring chunk per note
+        var bestByNote: [String: (entry: EmbeddingEntry, score: Float)] = [:]
+        for item in scored {
+            let existing = bestByNote[item.entry.noteId]
+            if existing == nil || item.score > existing!.score {
+                bestByNote[item.entry.noteId] = item
+            }
+        }
+
+        let sorted = bestByNote.values.sorted { $0.score > $1.score }
+        return sorted.prefix(topK).map { item in
+            SearchResult(
+                noteId: item.entry.noteId,
+                chunkText: item.entry.chunkText,
+                title: item.entry.title,
+                folder: item.entry.folder,
+                score: item.score
+            )
+        }
+    }
+
+    // MARK: - Maintenance
+
+    func clear() throws {
+        try execute("DELETE FROM chunks")
+        cache = []
+    }
+
+    // MARK: - Metadata
+
+    func setMeta(key: String, value: String) throws {
+        let sql = "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw StoreError.query
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, key, -1, Self.transient)
+        sqlite3_bind_text(stmt, 2, value, -1, Self.transient)
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw StoreError.query
+        }
+    }
+
+    func getMeta(key: String) -> String? {
+        let sql = "SELECT value FROM meta WHERE key = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, key, -1, Self.transient)
+
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return String(cString: sqlite3_column_text(stmt, 0))
+    }
+
+    // MARK: - Private
+
+    private func execute(_ sql: String) throws {
+        var errMsg: UnsafeMutablePointer<CChar>?
+        guard sqlite3_exec(db, sql, nil, nil, &errMsg) == SQLITE_OK else {
+            let msg = errMsg.map { String(cString: $0) } ?? "unknown"
+            sqlite3_free(errMsg)
+            throw StoreError.exec(msg)
+        }
+    }
+
+    private func cosineSimilarity(_ a: [Float], _ b: [Float]) -> Float {
+        guard a.count == b.count, !a.isEmpty else { return 0 }
+
+        var dot: Float = 0
+        var normA: Float = 0
+        var normB: Float = 0
+        let n = vDSP_Length(a.count)
+
+        vDSP_dotpr(a, 1, b, 1, &dot, n)
+        vDSP_svesq(a, 1, &normA, n)
+        vDSP_svesq(b, 1, &normB, n)
+
+        let denom = sqrt(normA) * sqrt(normB)
+        guard denom > 0 else { return 0 }
+        return dot / denom
+    }
+}
