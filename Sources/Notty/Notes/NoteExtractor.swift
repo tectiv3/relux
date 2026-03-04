@@ -32,7 +32,8 @@ final class NoteExtractor {
                         set noteBody to body of eachNote
                         set noteFolder to "Unknown"
                         try
-                            set noteFolder to name of container of eachNote
+                            set c to container of eachNote
+                            set noteFolder to name of c
                         end try
                         set modDate to modification date of eachNote
                         set output to output & "<<<NOTE>>>" & noteId & "<<<SEP>>>" & noteTitle & "<<<SEP>>>" & noteBody & "<<<SEP>>>" & noteFolder & "<<<SEP>>>" & (modDate as string)
