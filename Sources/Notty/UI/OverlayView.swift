@@ -1,11 +1,5 @@
 import SwiftUI
 
-struct SourceNote: Identifiable {
-    let id: String
-    let title: String
-    let folder: String
-}
-
 struct OverlayView: View {
     @State private var query: String = ""
     @State private var answer: String = ""
