@@ -9,7 +9,8 @@
       "Bash(swift build:*)",
       "Bash(xcodegen generate:*)",
       "Bash(xcodebuild build:*)",
-      "Bash(xcodebuild:*)"
+      "Bash(xcodebuild:*)",
+      "Bash(swiftformat:*)"
     ]
   }
 }

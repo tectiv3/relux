@@ -1,5 +1,5 @@
-import SwiftUI
 import os
+import SwiftUI
 
 private let log = Logger(subsystem: "com.notty.app", category: "appstate")
 
@@ -13,16 +13,22 @@ final class AppState {
     let appSearcher = AppSearcher()
     let frecency = FrecencyTracker()
 
-    var isReady: Bool { mlx.isLLMLoaded && store != nil }
+    var isReady: Bool {
+        mlx.hasLLMModel && store != nil
+    }
+
     var indexProgress: IndexProgress?
     var isIndexing = false
-    var needsFirstRun: Bool { !UserDefaults.standard.bool(forKey: "hasCompletedSetup") }
+    var needsFirstRun: Bool {
+        !UserDefaults.standard.bool(forKey: "hasCompletedSetup")
+    }
 
-    // Persisted model selections
+    /// Persisted model selections
     var savedLLMPath: String? {
         get { UserDefaults.standard.string(forKey: "selectedLLMPath") }
         set { UserDefaults.standard.set(newValue, forKey: "selectedLLMPath") }
     }
+
     var savedEmbedderPath: String? {
         get { UserDefaults.standard.string(forKey: "selectedEmbedderPath") }
         set { UserDefaults.standard.set(newValue, forKey: "selectedEmbedderPath") }
@@ -73,32 +79,26 @@ final class AppState {
         frecency.recentItems()
     }
 
-    /// Restore previously selected models on launch
-    func restoreModels() async {
+    /// Restore previously selected models on launch (deferred — actual loading happens on first use)
+    func restoreModels() {
         let models = ModelDiscovery.discoverModels()
-        log.info("Restore: discovered \(models.count) models, savedLLM=\(self.savedLLMPath ?? "nil"), savedEmbedder=\(self.savedEmbedderPath ?? "nil")")
+        let llmPath = savedLLMPath
+        let embedderPath = savedEmbedderPath
+        log.info("Restore: discovered \(models.count) models, savedLLM=\(llmPath ?? "nil"), savedEmbedder=\(embedderPath ?? "nil")")
 
-        if let llmPath = savedLLMPath {
+        if let llmPath {
             if let model = LocalModel.matching(path: llmPath, in: models) {
-                do {
-                    try await mlx.loadLLM(model: model)
-                    log.info("Restored LLM: \(model.name)")
-                } catch {
-                    log.error("Failed to restore LLM: \(error.localizedDescription)")
-                }
+                mlx.setLLMModel(model)
+                log.info("Registered LLM for lazy loading: \(model.name)")
             } else {
                 log.warning("LLM path not found in discovered models: \(llmPath)")
             }
         }
 
-        if let embedderPath = savedEmbedderPath {
+        if let embedderPath {
             if let model = LocalModel.matching(path: embedderPath, in: models) {
-                do {
-                    try await mlx.loadEmbedder(model: model)
-                    log.info("Restored embedder: \(model.name)")
-                } catch {
-                    log.error("Failed to restore embedder: \(error.localizedDescription)")
-                }
+                mlx.setEmbedderModel(model)
+                log.info("Registered embedder for lazy loading: \(model.name)")
             } else {
                 log.warning("Embedder path not found in discovered models: \(embedderPath)")
             }

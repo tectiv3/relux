@@ -11,7 +11,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let appState = AppState()
     var panel: FloatingPanel?
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    func applicationDidFinishLaunching(_: Notification) {
         do {
             try appState.setup()
         } catch {
@@ -30,7 +30,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
             }
         } else {
-            Task { await appState.restoreModels() }
+            appState.restoreModels()
         }
     }
 

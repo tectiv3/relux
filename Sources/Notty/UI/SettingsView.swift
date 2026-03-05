@@ -1,7 +1,7 @@
 import Carbon
+import KeyboardShortcuts
 import ServiceManagement
 import SwiftUI
-import KeyboardShortcuts
 
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
@@ -12,7 +12,7 @@ struct SettingsView: View {
     @State private var clearQueryOnOpen: Bool = UserDefaults.standard.bool(forKey: "clearQueryOnOpen")
     @State private var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
     @State private var selectedAppearance: String = UserDefaults.standard.string(forKey: "appAppearance") ?? "system"
-    @State private var availableInputSources: [(id: String, name: String)] = []
+    @State private var availableInputSources: [(id: String, name: String)] = getKeyboardLayouts()
     @State private var showMaxResults: Int = UserDefaults.standard.object(forKey: "maxSearchResults") as? Int ?? 10
 
     var body: some View {
@@ -72,7 +72,7 @@ struct SettingsView: View {
                         UserDefaults.standard.set(newValue, forKey: "clearQueryOnOpen")
                     }
 
-                Stepper("Max results: \(showMaxResults)", value: $showMaxResults, in: 5...20)
+                Stepper("Max results: \(showMaxResults)", value: $showMaxResults, in: 5 ... 20)
                     .onChange(of: showMaxResults) { _, newValue in
                         UserDefaults.standard.set(newValue, forKey: "maxSearchResults")
                     }
@@ -97,7 +97,6 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .padding()
         .onAppear {
-            availableInputSources = Self.getKeyboardLayouts()
             applyAppearance(selectedAppearance)
         }
     }
@@ -118,7 +117,6 @@ struct SettingsView: View {
                     guard let model = newValue, oldValue != newValue else { return }
                     appState.savedLLMPath = model.standardizedPath
                     appState.markSetupComplete()
-                    guard !appState.mlx.isLLMLoaded else { return }
                     Task {
                         try? await appState.mlx.loadLLM(model: model)
                     }
@@ -144,7 +142,6 @@ struct SettingsView: View {
                 .onChange(of: selectedEmbedder) { oldValue, newValue in
                     guard let model = newValue, oldValue != newValue else { return }
                     appState.savedEmbedderPath = model.standardizedPath
-                    guard !appState.mlx.isEmbedderLoaded else { return }
                     Task {
                         try? await appState.mlx.loadEmbedder(model: model)
                     }

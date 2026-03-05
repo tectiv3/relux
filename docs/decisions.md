@@ -24,6 +24,15 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Keyboard layout can be forced on panel open (setting in General tab, uses `TISSelectInputSource`)
 - App icons via `NSWorkspace.shared.icon(forFile:)`, notes use SF Symbol `doc.text`
 
+## Model Lifecycle
+
+- Models are NOT loaded at startup — only loaded on first use (lazy loading)
+- After 10 minutes of inactivity, models are unloaded from memory (set containers to nil)
+- On next use, auto-reload from stored model path
+- MLXService stores the loaded model's `LocalModel` reference so it knows what to reload
+- `isLLMLoaded`/`isEmbedderLoaded` flags update on both load and unload
+- UI feedback during auto-reload uses existing `loadingStatus` mechanism
+
 ## Layout Rules (DO NOT BREAK)
 
 - Panel width: 750, height: 474
