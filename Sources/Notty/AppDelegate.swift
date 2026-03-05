@@ -26,6 +26,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.togglePanel()
         }
 
+        KeyboardShortcuts.onKeyUp(for: .clipboardHistory) { [weak self] in
+            self?.toggleClipboardHistory()
+        }
+
         if appState.needsFirstRun {
             Task { @MainActor in
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
@@ -69,15 +73,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func togglePanel() {
         guard let panel else { return }
         if panel.isVisible {
-            // Save position before closing
             let frame = panel.frame
             UserDefaults.standard.set(frame.origin.x, forKey: "panelX")
             UserDefaults.standard.set(frame.origin.y, forKey: "panelY")
             appState.currentSelection = nil
             panel.close()
         } else {
+            appState.previousApp = NSWorkspace.shared.frontmostApplication
             appState.currentSelection = SelectionCapture.captureSelectedText()
+            appState.panelMode = .search
             applyForcedInputSource()
+            panel.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    func toggleClipboardHistory() {
+        guard let panel else { return }
+        if panel.isVisible, appState.panelMode == .clipboard {
+            let frame = panel.frame
+            UserDefaults.standard.set(frame.origin.x, forKey: "panelX")
+            UserDefaults.standard.set(frame.origin.y, forKey: "panelY")
+            panel.close()
+            return
+        }
+
+        if !panel.isVisible {
+            appState.previousApp = NSWorkspace.shared.frontmostApplication
+        }
+
+        appState.panelMode = .clipboard
+        if !panel.isVisible {
             panel.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
