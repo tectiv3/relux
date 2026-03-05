@@ -388,6 +388,15 @@ struct OverlayView: View {
                 keyboardHint(key: "esc", label: "Close")
             }
             Spacer()
+            if let selection = appState.currentSelection {
+                HStack(spacing: 4) {
+                    Image(systemName: "text.cursor")
+                    Text(String(selection.prefix(30)))
+                        .lineLimit(1)
+                }
+                .foregroundColor(.secondary)
+                .opacity(0.7)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
