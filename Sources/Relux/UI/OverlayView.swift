@@ -10,7 +10,7 @@ struct PanelRootView: View {
         case .clipboard:
             ClipboardHistoryView()
         case .translate:
-            EmptyView()
+            TranslateView()
         }
     }
 }
