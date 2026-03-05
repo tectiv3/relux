@@ -1,7 +1,13 @@
+import AppKit
 import os
 import SwiftUI
 
 private let log = Logger(subsystem: "com.notty.app", category: "appstate")
+
+enum PanelMode: Sendable {
+    case search
+    case clipboard
+}
 
 @MainActor
 @Observable
@@ -13,6 +19,11 @@ final class AppState {
     let appSearcher = AppSearcher()
     let scriptSearcher = ScriptSearcher()
     let frecency = FrecencyTracker()
+
+    var clipboardStore: ClipboardStore?
+    var clipboardMonitor: ClipboardMonitor?
+    var panelMode: PanelMode = .search
+    var previousApp: NSRunningApplication?
 
     var isReady: Bool {
         mlx.hasLLMModel && store != nil
@@ -43,6 +54,12 @@ final class AppState {
         queryEngine = qe
         indexer = Indexer(store: s, mlx: mlx)
         try s.loadEmbeddings()
+
+        let cs = try ClipboardStore()
+        clipboardStore = cs
+        let monitor = ClipboardMonitor(store: cs)
+        clipboardMonitor = monitor
+        monitor.start()
     }
 
     func markSetupComplete() {
