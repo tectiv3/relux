@@ -328,7 +328,7 @@ struct SettingsView: View {
 
     // MARK: - Clipboard Tab
 
-    struct DisabledApp: Identifiable {
+    private struct DisabledApp: Identifiable {
         let id: String // bundle ID
         let name: String
         let icon: NSImage?
@@ -339,7 +339,11 @@ struct SettingsView: View {
             Section("Monitoring") {
                 Toggle("Enable clipboard history", isOn: $clipboardEnabled)
                     .onChange(of: clipboardEnabled) { _, newValue in
-                        appState.clipboardMonitor?.isEnabled = newValue
+                        if let monitor = appState.clipboardMonitor {
+                            monitor.isEnabled = newValue
+                        } else {
+                            UserDefaults.standard.set(newValue, forKey: "clipboardEnabled")
+                        }
                     }
 
                 KeyboardShortcuts.Recorder("Hotkey:", name: .clipboardHistory)

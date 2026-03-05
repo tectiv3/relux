@@ -218,7 +218,16 @@ final class ClipboardStore {
             try? FileManager.default.removeItem(at: fullPath)
         }
 
-        try execute("DELETE FROM clipboard_history WHERE created_at < \(date.timeIntervalSince1970)")
+        let delSql = "DELETE FROM clipboard_history WHERE created_at < ?"
+        var delStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, delSql, -1, &delStmt, nil) == SQLITE_OK else {
+            throw StoreError.query
+        }
+        defer { sqlite3_finalize(delStmt) }
+        sqlite3_bind_double(delStmt, 1, date.timeIntervalSince1970)
+        guard sqlite3_step(delStmt) == SQLITE_DONE else {
+            throw StoreError.query
+        }
     }
 
     // MARK: - Private

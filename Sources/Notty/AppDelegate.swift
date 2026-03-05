@@ -12,6 +12,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var panel: FloatingPanel?
 
     func applicationDidFinishLaunching(_: Notification) {
+        UserDefaults.standard.register(defaults: [
+            "clipboardEnabled": true,
+            "clipboardRetentionMonths": 3,
+            "clipboardDisabledApps": ClipboardMonitor.defaultDisabledApps,
+        ])
+
         do {
             try appState.setup()
         } catch {

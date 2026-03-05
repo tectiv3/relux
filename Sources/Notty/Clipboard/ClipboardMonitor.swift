@@ -14,15 +14,8 @@ final class ClipboardMonitor {
 
     /// Bundle IDs of apps whose copies should be ignored
     var disabledApps: Set<String> {
-        get {
-            let arr = UserDefaults.standard.stringArray(forKey: "clipboardDisabledApps") ?? [
-                "com.apple.keychainaccess",
-                "com.apple.Passwords",
-            ]
-            return Set(arr)
-        }
-        set {
-            UserDefaults.standard.set(Array(newValue), forKey: "clipboardDisabledApps")
+        didSet {
+            UserDefaults.standard.set(Array(disabledApps), forKey: "clipboardDisabledApps")
         }
     }
 
@@ -34,13 +27,25 @@ final class ClipboardMonitor {
         }
     }
 
+    static let defaultDisabledApps = [
+        "com.apple.keychainaccess",
+        "com.apple.Passwords",
+    ]
+
     init(store: ClipboardStore) {
         self.store = store
         lastChangeCount = NSPasteboard.general.changeCount
+        let arr = UserDefaults.standard.stringArray(forKey: "clipboardDisabledApps")
+            ?? Self.defaultDisabledApps
+        disabledApps = Set(arr)
     }
 
     func start() {
-        guard isEnabled, timer == nil else { return }
+        guard isEnabled else {
+            log.info("Clipboard monitoring disabled, skipping start")
+            return
+        }
+        guard timer == nil else { return }
         lastChangeCount = NSPasteboard.general.changeCount
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
