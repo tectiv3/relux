@@ -67,6 +67,7 @@ struct OverlayView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            Spacer().frame(height: 6)
             searchBar
             Divider()
 
@@ -112,6 +113,7 @@ struct OverlayView: View {
         }
         .frame(width: 750)
         .frame(maxHeight: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
         .task(id: query) {
             performSearch(query)
         }
