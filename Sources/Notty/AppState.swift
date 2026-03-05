@@ -60,6 +60,12 @@ final class AppState {
         let monitor = ClipboardMonitor(store: cs)
         clipboardMonitor = monitor
         monitor.start()
+
+        // Clean up expired clipboard entries
+        let retentionMonths = UserDefaults.standard.object(forKey: "clipboardRetentionMonths") as? Int ?? 3
+        if let cutoffDate = Calendar.current.date(byAdding: .month, value: -retentionMonths, to: Date()) {
+            try? cs.deleteExpired(before: cutoffDate)
+        }
     }
 
     func markSetupComplete() {
