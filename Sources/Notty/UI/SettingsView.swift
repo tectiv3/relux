@@ -1,4 +1,5 @@
 import Carbon
+import ServiceManagement
 import SwiftUI
 import KeyboardShortcuts
 
@@ -9,15 +10,17 @@ struct SettingsView: View {
     @State private var selectedEmbedder: LocalModel?
     @State private var selectedInputSourceId: String = UserDefaults.standard.string(forKey: "forceInputSourceId") ?? ""
     @State private var clearQueryOnOpen: Bool = UserDefaults.standard.bool(forKey: "clearQueryOnOpen")
+    @State private var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
+    @State private var selectedAppearance: String = UserDefaults.standard.string(forKey: "appAppearance") ?? "system"
     @State private var availableInputSources: [(id: String, name: String)] = []
+    @State private var showMaxResults: Int = UserDefaults.standard.object(forKey: "maxSearchResults") as? Int ?? 10
 
     var body: some View {
         TabView {
             generalTab.tabItem { Label("General", systemImage: "gear") }
             modelsTab.tabItem { Label("Models", systemImage: "cpu") }
-            shortcutsTab.tabItem { Label("Shortcuts", systemImage: "keyboard") }
         }
-        .frame(width: 450, height: 400)
+        .frame(width: 450, height: 500)
         .onAppear {
             discoveredModels = ModelDiscovery.discoverModels()
             if let path = appState.savedLLMPath {
@@ -28,6 +31,76 @@ struct SettingsView: View {
                 let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
                 selectedEmbedder = discoveredModels.first { $0.path.standardizedFileURL.path == standardized }
             }
+        }
+    }
+
+    // MARK: - General Tab
+
+    private var generalTab: some View {
+        Form {
+            Section("Startup") {
+                Toggle("Launch at login", isOn: $launchAtLogin)
+                    .onChange(of: launchAtLogin) { _, newValue in
+                        do {
+                            if newValue {
+                                try SMAppService.mainApp.register()
+                            } else {
+                                try SMAppService.mainApp.unregister()
+                            }
+                        } catch {
+                            launchAtLogin = SMAppService.mainApp.status == .enabled
+                        }
+                    }
+
+                KeyboardShortcuts.Recorder("Hotkey:", name: .toggleNotty)
+            }
+
+            Section("Appearance") {
+                Picker("Theme:", selection: $selectedAppearance) {
+                    Text("System").tag("system")
+                    Text("Light").tag("light")
+                    Text("Dark").tag("dark")
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: selectedAppearance) { _, newValue in
+                    UserDefaults.standard.set(newValue, forKey: "appAppearance")
+                    applyAppearance(newValue)
+                }
+            }
+
+            Section("Behavior") {
+                Toggle("Clear search on open", isOn: $clearQueryOnOpen)
+                    .onChange(of: clearQueryOnOpen) { _, newValue in
+                        UserDefaults.standard.set(newValue, forKey: "clearQueryOnOpen")
+                    }
+
+                Stepper("Max results: \(showMaxResults)", value: $showMaxResults, in: 5...20)
+                    .onChange(of: showMaxResults) { _, newValue in
+                        UserDefaults.standard.set(newValue, forKey: "maxSearchResults")
+                    }
+            }
+
+            Section("Keyboard Layout") {
+                Picker("Force layout on open:", selection: $selectedInputSourceId) {
+                    Text("Don't change").tag("")
+                    ForEach(availableInputSources, id: \.id) { source in
+                        Text(source.name).tag(source.id)
+                    }
+                }
+                .onChange(of: selectedInputSourceId) { _, newValue in
+                    if newValue.isEmpty {
+                        UserDefaults.standard.removeObject(forKey: "forceInputSourceId")
+                    } else {
+                        UserDefaults.standard.set(newValue, forKey: "forceInputSourceId")
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+        .onAppear {
+            availableInputSources = Self.getKeyboardLayouts()
+            applyAppearance(selectedAppearance)
         }
     }
 
@@ -47,7 +120,6 @@ struct SettingsView: View {
                     guard let model = newValue, oldValue != newValue else { return }
                     appState.savedLLMPath = model.path.standardizedFileURL.path
                     appState.markSetupComplete()
-                    // Skip if already loaded (e.g. restored on launch)
                     guard !appState.mlx.isLLMLoaded else { return }
                     Task {
                         try? await appState.mlx.loadLLM(model: model)
@@ -104,37 +176,21 @@ struct SettingsView: View {
         .padding()
     }
 
-    // MARK: - General Tab
+    // MARK: - Helpers
 
-    private var generalTab: some View {
-        Form {
-            Section("Behavior") {
-                Toggle("Clear search on open", isOn: $clearQueryOnOpen)
-                    .onChange(of: clearQueryOnOpen) { _, newValue in
-                        UserDefaults.standard.set(newValue, forKey: "clearQueryOnOpen")
-                    }
-            }
+    private func formatSize(_ bytes: UInt64) -> String {
+        let gb = Double(bytes) / 1_073_741_824
+        return String(format: "%.1f GB", gb)
+    }
 
-            Section("Keyboard Layout") {
-                Picker("Force layout on open:", selection: $selectedInputSourceId) {
-                    Text("Don't change").tag("")
-                    ForEach(availableInputSources, id: \.id) { source in
-                        Text(source.name).tag(source.id)
-                    }
-                }
-                .onChange(of: selectedInputSourceId) { _, newValue in
-                    if newValue.isEmpty {
-                        UserDefaults.standard.removeObject(forKey: "forceInputSourceId")
-                    } else {
-                        UserDefaults.standard.set(newValue, forKey: "forceInputSourceId")
-                    }
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .padding()
-        .onAppear {
-            availableInputSources = Self.getKeyboardLayouts()
+    private func applyAppearance(_ mode: String) {
+        switch mode {
+        case "light":
+            NSApp.appearance = NSAppearance(named: .aqua)
+        case "dark":
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+        default:
+            NSApp.appearance = nil
         }
     }
 
@@ -163,22 +219,5 @@ struct SettingsView: View {
             layouts.append((id: id, name: name))
         }
         return layouts
-    }
-
-    // MARK: - Shortcuts Tab
-
-    private var shortcutsTab: some View {
-        Form {
-            KeyboardShortcuts.Recorder("Toggle Notty:", name: .toggleNotty)
-        }
-        .formStyle(.grouped)
-        .padding()
-    }
-
-    // MARK: - Helpers
-
-    private func formatSize(_ bytes: UInt64) -> String {
-        let gb = Double(bytes) / 1_073_741_824
-        return String(format: "%.1f GB", gb)
     }
 }

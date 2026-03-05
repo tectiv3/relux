@@ -10,6 +10,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         try? appState.setup()
+        applyAppearance()
 
         setupPanel()
 
@@ -62,6 +63,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             applyForcedInputSource()
             panel.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    private func applyAppearance() {
+        let mode = UserDefaults.standard.string(forKey: "appAppearance") ?? "system"
+        switch mode {
+        case "light":
+            NSApp.appearance = NSAppearance(named: .aqua)
+        case "dark":
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+        default:
+            NSApp.appearance = nil
         }
     }
 

@@ -91,6 +91,7 @@ struct OverlayView: View {
 
                 if showActions {
                     actionsMenu
+                        .padding(.vertical, 4)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
                                 .fill(.ultraThickMaterial)
@@ -115,6 +116,7 @@ struct OverlayView: View {
             performSearch(query)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            showActions = false
             if UserDefaults.standard.bool(forKey: "clearQueryOnOpen") {
                 query = ""
             }
