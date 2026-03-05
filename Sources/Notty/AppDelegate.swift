@@ -33,17 +33,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let panelHeight: CGFloat = 474
         let screenFrame = screen.visibleFrame
 
-        let x = screenFrame.midX - panelWidth / 2
-        let y = screenFrame.origin.y + screenFrame.height * 0.65 - panelHeight / 2
+        let savedX = UserDefaults.standard.object(forKey: "panelX") as? CGFloat
+        let savedY = UserDefaults.standard.object(forKey: "panelY") as? CGFloat
+
+        let x = savedX ?? (screenFrame.midX - panelWidth / 2)
+        let y = savedY ?? (screenFrame.origin.y + screenFrame.height * 0.65 - panelHeight / 2)
 
         let contentRect = NSRect(x: x, y: y, width: panelWidth, height: panelHeight)
         let floatingPanel = FloatingPanel(contentRect: contentRect)
 
         let hostingView = NSHostingView(rootView: OverlayView().environment(appState))
         hostingView.translatesAutoresizingMaskIntoConstraints = false
-        hostingView.wantsLayer = true
-        hostingView.layer?.cornerRadius = 12
-        hostingView.layer?.masksToBounds = true
 
         if let contentView = floatingPanel.contentView {
             contentView.addSubview(hostingView)
@@ -61,6 +61,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func togglePanel() {
         guard let panel else { return }
         if panel.isVisible {
+            // Save position before closing
+            let frame = panel.frame
+            UserDefaults.standard.set(frame.origin.x, forKey: "panelX")
+            UserDefaults.standard.set(frame.origin.y, forKey: "panelY")
             panel.close()
         } else {
             applyForcedInputSource()

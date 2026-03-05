@@ -22,9 +22,7 @@ final class FloatingPanel: NSPanel {
         visualEffect.material = .hudWindow
         visualEffect.state = .active
         visualEffect.blendingMode = .behindWindow
-        visualEffect.wantsLayer = true
-        visualEffect.layer?.cornerRadius = 12
-        visualEffect.layer?.masksToBounds = true
+        visualEffect.maskImage = Self.roundedMask(size: contentRect.size, radius: 12)
         contentView = visualEffect
     }
 
@@ -38,5 +36,17 @@ final class FloatingPanel: NSPanel {
     override func resignKey() {
         super.resignKey()
         close()
+    }
+
+    private static func roundedMask(size: NSSize, radius: CGFloat) -> NSImage {
+        let image = NSImage(size: size, flipped: false) { rect in
+            let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+            NSColor.black.setFill()
+            path.fill()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
+        image.resizingMode = .stretch
+        return image
     }
 }
