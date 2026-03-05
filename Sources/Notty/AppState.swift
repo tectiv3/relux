@@ -19,6 +19,7 @@ final class AppState {
     let appSearcher = AppSearcher()
     let scriptSearcher = ScriptSearcher()
     let frecency = FrecencyTracker()
+    let extensionRegistry = ExtensionRegistry()
 
     var clipboardStore: ClipboardStore?
     var clipboardMonitor: ClipboardMonitor?
@@ -81,7 +82,10 @@ final class AppState {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
 
         let limit = maxSearchResults
-        var noteResults = queryEngine?.searchOnly(query, topK: limit) ?? []
+        var noteResults: [SearchItem] = []
+        if extensionRegistry.isEnabled("notes") {
+            noteResults = queryEngine?.searchOnly(query, topK: limit) ?? []
+        }
         var appResults = appSearcher.search(query, limit: limit)
         var scriptResults = scriptSearcher.search(query, limit: limit)
 
@@ -103,6 +107,7 @@ final class AppState {
 
     /// Restore previously selected models on launch (deferred — actual loading happens on first use)
     func restoreModels() {
+        guard extensionRegistry.isEnabled("notes") else { return }
         let models = ModelDiscovery.discoverModels()
         let llmPath = savedLLMPath
         let embedderPath = savedEmbedderPath
@@ -124,6 +129,15 @@ final class AppState {
             } else {
                 log.warning("Embedder path not found in discovered models: \(embedderPath)")
             }
+        }
+    }
+
+    func setNotesEnabled(_ enabled: Bool) {
+        extensionRegistry.setEnabled("notes", enabled: enabled)
+        if enabled {
+            restoreModels()
+        } else {
+            mlx.unloadAll()
         }
     }
 
