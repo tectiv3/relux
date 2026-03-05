@@ -8,30 +8,55 @@ final class FrecencyTracker {
         var lastUsed: Date
     }
 
+    /// Stored item data for showing recents
+    private struct StoredItem: Codable {
+        let id: String
+        let title: String
+        let subtitle: String
+        let icon: String
+        let kind: String  // "note" or "app"
+        let meta: [String: String]
+        var lastUsed: Date
+    }
+
     /// key = "query_prefix:item_id"
     private var entries: [String: Entry] = [:]
+    /// key = item_id, stores full item info for recents
+    private var items: [String: StoredItem] = [:]
     private let storePath: URL
+    private let itemsPath: URL
 
     init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let dir = support.appendingPathComponent("Notty", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         storePath = dir.appendingPathComponent("frecency.json")
+        itemsPath = dir.appendingPathComponent("recents.json")
         load()
     }
 
-    /// Record that the user selected `itemId` after typing `query`
-    func recordSelection(query: String, itemId: String) {
-        let key = Self.key(query: query, itemId: itemId)
+    /// Record that the user selected this item after typing `query`
+    func recordSelection(query: String, item: SearchItem) {
+        let key = Self.key(query: query, itemId: item.id)
         var entry = entries[key] ?? Entry(count: 0, lastUsed: .distantPast)
         entry.count += 1
         entry.lastUsed = Date()
         entries[key] = entry
+
+        items[item.id] = StoredItem(
+            id: item.id,
+            title: item.title,
+            subtitle: item.subtitle,
+            icon: item.icon,
+            kind: item.kind == .app ? "app" : "note",
+            meta: item.meta,
+            lastUsed: Date()
+        )
+
         save()
     }
 
     /// Returns a boost score (0...) for this item given the current query.
-    /// Higher = user picks this item more often for similar queries.
     func boost(query: String, itemId: String) -> Double {
         let key = Self.key(query: query, itemId: itemId)
         guard let entry = entries[key] else { return 0 }
@@ -39,20 +64,43 @@ final class FrecencyTracker {
         return Double(entry.count) * 10.0 + recency * 5.0
     }
 
-    // Normalize query to first 4 chars lowercased — groups similar queries together
+    /// Returns recently used items, sorted by most recent first
+    func recentItems(limit: Int = 8) -> [SearchItem] {
+        let sorted = items.values.sorted { $0.lastUsed > $1.lastUsed }
+        return sorted.prefix(limit).map { stored in
+            SearchItem(
+                id: stored.id,
+                title: stored.title,
+                subtitle: stored.subtitle,
+                icon: stored.icon,
+                kind: stored.kind == "app" ? .app : .note,
+                meta: stored.meta
+            )
+        }
+    }
+
     private static func key(query: String, itemId: String) -> String {
         let prefix = String(query.lowercased().prefix(4))
         return "\(prefix):\(itemId)"
     }
 
     private func load() {
-        guard let data = try? Data(contentsOf: storePath),
-              let decoded = try? JSONDecoder().decode([String: Entry].self, from: data) else { return }
-        entries = decoded
+        if let data = try? Data(contentsOf: storePath),
+           let decoded = try? JSONDecoder().decode([String: Entry].self, from: data) {
+            entries = decoded
+        }
+        if let data = try? Data(contentsOf: itemsPath),
+           let decoded = try? JSONDecoder().decode([String: StoredItem].self, from: data) {
+            items = decoded
+        }
     }
 
     private func save() {
-        guard let data = try? JSONEncoder().encode(entries) else { return }
-        try? data.write(to: storePath, options: .atomic)
+        if let data = try? JSONEncoder().encode(entries) {
+            try? data.write(to: storePath, options: .atomic)
+        }
+        if let data = try? JSONEncoder().encode(items) {
+            try? data.write(to: itemsPath, options: .atomic)
+        }
     }
 }

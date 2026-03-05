@@ -62,7 +62,11 @@ final class AppState {
     }
 
     func recordSelection(query: String, item: SearchItem) {
-        frecency.recordSelection(query: query, itemId: item.id)
+        frecency.recordSelection(query: query, item: item)
+    }
+
+    func recentItems() -> [SearchItem] {
+        frecency.recentItems()
     }
 
     /// Restore previously selected models on launch

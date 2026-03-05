@@ -77,16 +77,30 @@ struct OverlayView: View {
                     .padding(16)
             }
 
-            if showActions {
-                actionsMenu
-            } else {
-                if !results.isEmpty {
-                    resultsSection
+            ZStack(alignment: .bottomTrailing) {
+                VStack(spacing: 0) {
+                    if !results.isEmpty {
+                        resultsSection
+                    }
+
+                    if !answer.isEmpty || isGenerating {
+                        Divider()
+                        answerSection
+                    }
                 }
 
-                if !answer.isEmpty || isGenerating {
-                    Divider()
-                    answerSection
+                if showActions {
+                    actionsMenu
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(.ultraThickMaterial)
+                                .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .frame(width: 280)
+                        .padding(.trailing, 8)
+                        .padding(.bottom, 8)
+                        .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .bottomTrailing)))
                 }
             }
 
@@ -219,9 +233,10 @@ struct OverlayView: View {
 
             Spacer()
 
-            Text(item.kind == .app ? "Application" : "Notes")
+            Text(item.kind == .app ? "Application" : item.meta["folder"] ?? "Notes")
                 .font(.system(size: 11))
                 .foregroundColor(isSelected ? .white.opacity(0.5) : .secondary)
+                .lineLimit(1)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -361,13 +376,11 @@ struct OverlayView: View {
 
     private func performSearch(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else {
-            results = []
-            selectedIndex = 0
-            showActions = false
-            return
+        if trimmed.isEmpty {
+            results = appState.recentItems()
+        } else {
+            results = appState.performSearch(query: trimmed)
         }
-        results = appState.performSearch(query: trimmed)
         selectedIndex = 0
         showActions = false
     }

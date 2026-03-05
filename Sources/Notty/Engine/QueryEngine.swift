@@ -17,10 +17,10 @@ final class QueryEngine {
             SearchItem(
                 id: $0.noteId,
                 title: $0.title,
-                subtitle: $0.folder,
+                subtitle: String($0.chunkText.prefix(100)),
                 icon: "doc.text",
                 kind: .note,
-                meta: ["noteId": $0.noteId, "snippet": String($0.chunkText.prefix(150))]
+                meta: ["noteId": $0.noteId, "folder": $0.folder, "snippet": String($0.chunkText.prefix(150))]
             )
         }
     }

@@ -42,6 +42,24 @@
 
 **Decision:** Match Raycast layout — compact single-line rows with icon left, title, category tag right-aligned. Panel resizes to content height. No fixed 600pt.
 
+## 2026-03-05: Actions Menu Positioning (Raycast-style)
+
+**Request:** Cmd+K menu replaces results — should float over them like Raycast.
+
+**Decision:** Actions menu is now a ZStack overlay anchored bottom-trailing over the results list. Uses `.ultraThickMaterial` background with shadow, 280pt wide. Results stay visible underneath.
+
+## 2026-03-05: Notes Subtitle Fix
+
+**Request:** Notes show folder twice (subtitle + kind column both say "Notes").
+
+**Decision:** Notes subtitle now shows snippet preview (first 100 chars of note content). Kind column shows the folder name for context (e.g. "Work", "Personal"). More useful info density.
+
+## 2026-03-05: Recent Items on Empty Query
+
+**Request:** Show recent items when opening Notty with no query.
+
+**Decision:** FrecencyTracker now stores full SearchItem data alongside frecency scores. On empty query, shows up to 8 most recently used items sorted by last used time.
+
 ## Layout Rules (DO NOT BREAK)
 
 - Panel width: 750 (Raycast-like)
