@@ -30,6 +30,14 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Up from first item → last item; Down from last item → first item
 - Applies to both the main results list and the Cmd+K actions overlay
 
+## Extension Registry
+
+- `ExtensionRegistry` tracks which extensions (search sources) are enabled/disabled, backed by UserDefaults (key pattern: `extension.<id>.enabled`)
+- "Models" settings tab renamed to "Notes" — models are an implementation detail of the notes extension
+- When notes disabled: models fully unloaded (`unloadAll` clears containers + model refs + GPU cache), note search skipped in `performSearch`, `restoreModels` no-ops
+- When notes enabled: models restored via `restoreModels()` (same as app startup)
+- Pattern is general-purpose — scripts, clipboard, apps can register in the same registry for their own toggle
+
 ## Model Lifecycle
 
 - Models are NOT loaded at startup — only loaded on first use (lazy loading)
