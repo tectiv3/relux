@@ -414,6 +414,17 @@ struct OverlayView: View {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty {
             results = appState.recentItems()
+            if let selection = appState.currentSelection {
+                let preview = String(selection.prefix(80))
+                results.append(SearchItem(
+                    id: "web-search-selection",
+                    title: "Search DuckDuckGo",
+                    subtitle: preview,
+                    icon: "magnifyingglass",
+                    kind: .webSearch,
+                    meta: ["query": selection]
+                ))
+            }
         } else {
             results = appState.performSearch(query: trimmed)
             results.append(SearchItem(
