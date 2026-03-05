@@ -55,6 +55,8 @@ final class AppState {
     }
 
     func setup() throws {
+        extensionRegistry.register(id: "translate", name: "Translate", icon: "character.book.closed", defaultEnabled: true)
+
         let vectorStore = try VectorStore()
         store = vectorStore
         queryEngine = QueryEngine(store: vectorStore, mlx: mlx)
