@@ -52,6 +52,9 @@ struct OverlayView: View {
                 ItemAction(label: "Copy snippet", icon: "doc.on.clipboard", shortcut: nil) {
                     copySnippet()
                 },
+                ItemAction(label: "Remove from history", icon: "trash", shortcut: nil) {
+                    removeFromHistory()
+                },
             ]
         case .app:
             return [
@@ -60,6 +63,9 @@ struct OverlayView: View {
                 },
                 ItemAction(label: "Show in Finder", icon: "folder", shortcut: nil) {
                     showInFinder()
+                },
+                ItemAction(label: "Remove from history", icon: "trash", shortcut: nil) {
+                    removeFromHistory()
                 },
             ]
         case .webSearch:
@@ -131,7 +137,9 @@ struct OverlayView: View {
         }
         .onKeyPress(.upArrow) {
             if showActions {
-                actionIndex = max(0, actionIndex - 1)
+                let actions = currentActions
+                guard !actions.isEmpty else { return .ignored }
+                actionIndex = actionIndex <= 0 ? actions.count - 1 : actionIndex - 1
                 return .handled
             }
             guard !results.isEmpty else { return .ignored }
@@ -140,7 +148,9 @@ struct OverlayView: View {
         }
         .onKeyPress(.downArrow) {
             if showActions {
-                actionIndex = min(currentActions.count - 1, actionIndex + 1)
+                let actions = currentActions
+                guard !actions.isEmpty else { return .ignored }
+                actionIndex = actionIndex >= actions.count - 1 ? 0 : actionIndex + 1
                 return .handled
             }
             guard !results.isEmpty else { return .ignored }
@@ -491,6 +501,15 @@ struct OverlayView: View {
         if let path = item.meta["path"] {
             NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
         }
+        showActions = false
+    }
+
+    private func removeFromHistory() {
+        guard selectedIndex < results.count else { return }
+        let item = results[selectedIndex]
+        appState.frecency.removeItem(id: item.id)
+        results.remove(at: selectedIndex)
+        selectedIndex = min(selectedIndex, results.count - 1)
         showActions = false
     }
 

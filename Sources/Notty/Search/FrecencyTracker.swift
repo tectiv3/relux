@@ -14,7 +14,7 @@ final class FrecencyTracker {
         let title: String
         let subtitle: String
         let icon: String
-        let kind: String  // "note" or "app"
+        let kind: String // "note" or "app"
         let meta: [String: String]
         var lastUsed: Date
     }
@@ -79,6 +79,13 @@ final class FrecencyTracker {
         }
     }
 
+    /// Remove an item from history (both frecency entries and recents)
+    func removeItem(id: String) {
+        items.removeValue(forKey: id)
+        entries = entries.filter { !$0.key.hasSuffix(":\(id)") }
+        save()
+    }
+
     private static func key(query: String, itemId: String) -> String {
         let prefix = String(query.lowercased().prefix(4))
         return "\(prefix):\(itemId)"
@@ -86,11 +93,13 @@ final class FrecencyTracker {
 
     private func load() {
         if let data = try? Data(contentsOf: storePath),
-           let decoded = try? JSONDecoder().decode([String: Entry].self, from: data) {
+           let decoded = try? JSONDecoder().decode([String: Entry].self, from: data)
+        {
             entries = decoded
         }
         if let data = try? Data(contentsOf: itemsPath),
-           let decoded = try? JSONDecoder().decode([String: StoredItem].self, from: data) {
+           let decoded = try? JSONDecoder().decode([String: StoredItem].self, from: data)
+        {
             items = decoded
         }
     }

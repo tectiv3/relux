@@ -24,6 +24,12 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Keyboard layout can be forced on panel open (setting in General tab, uses `TISSelectInputSource`)
 - App icons via `NSWorkspace.shared.icon(forFile:)`, notes use SF Symbol `doc.text`
 
+## Keyboard Navigation
+
+- Arrow keys MUST wrap around in all navigable lists (results, actions menu)
+- Up from first item → last item; Down from last item → first item
+- Applies to both the main results list and the Cmd+K actions overlay
+
 ## Model Lifecycle
 
 - Models are NOT loaded at startup — only loaded on first use (lazy loading)
