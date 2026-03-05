@@ -14,12 +14,17 @@ struct SettingsView: View {
     @State private var selectedAppearance: String = UserDefaults.standard.string(forKey: "appAppearance") ?? "system"
     @State private var availableInputSources: [(id: String, name: String)] = getKeyboardLayouts()
     @State private var showMaxResults: Int = UserDefaults.standard.object(forKey: "maxSearchResults") as? Int ?? 10
+    @State private var clipboardEnabled: Bool = UserDefaults.standard.object(forKey: "clipboardEnabled") as? Bool ?? true
+    @State private var clipboardRetention: Int = UserDefaults.standard.object(forKey: "clipboardRetentionMonths") as? Int ?? 3
+    @State private var disabledApps: [DisabledApp] = []
+    @State private var showClearConfirmation = false
 
     var body: some View {
         TabView {
             generalTab.tabItem { Label("General", systemImage: "gear") }
             modelsTab.tabItem { Label("Models", systemImage: "cpu") }
             scriptsTab.tabItem { Label("Scripts", systemImage: "terminal") }
+            clipboardTab.tabItem { Label("Clipboard", systemImage: "clipboard") }
         }
         .frame(width: 450, height: 500)
         .onAppear {
@@ -319,6 +324,117 @@ struct SettingsView: View {
             updated.value = value
             onChange(updated)
         }
+    }
+
+    // MARK: - Clipboard Tab
+
+    struct DisabledApp: Identifiable {
+        let id: String // bundle ID
+        let name: String
+        let icon: NSImage?
+    }
+
+    private var clipboardTab: some View {
+        Form {
+            Section("Monitoring") {
+                Toggle("Enable clipboard history", isOn: $clipboardEnabled)
+                    .onChange(of: clipboardEnabled) { _, newValue in
+                        appState.clipboardMonitor?.isEnabled = newValue
+                    }
+
+                KeyboardShortcuts.Recorder("Hotkey:", name: .clipboardHistory)
+            }
+
+            Section("Storage") {
+                Picker("Keep history for:", selection: $clipboardRetention) {
+                    Text("1 Month").tag(1)
+                    Text("3 Months").tag(3)
+                    Text("6 Months").tag(6)
+                }
+                .onChange(of: clipboardRetention) { _, newValue in
+                    UserDefaults.standard.set(newValue, forKey: "clipboardRetentionMonths")
+                }
+
+                Button("Clear All History", role: .destructive) {
+                    showClearConfirmation = true
+                }
+                .alert("Clear Clipboard History?", isPresented: $showClearConfirmation) {
+                    Button("Cancel", role: .cancel) {}
+                    Button("Clear", role: .destructive) {
+                        try? appState.clipboardStore?.clearAll()
+                    }
+                } message: {
+                    Text("This will permanently delete all clipboard history entries and images.")
+                }
+            }
+
+            Section {
+                Button("Select More Apps") {
+                    selectDisabledApp()
+                }
+
+                ForEach(disabledApps) { app in
+                    HStack {
+                        if let icon = app.icon {
+                            Image(nsImage: icon)
+                                .resizable()
+                                .frame(width: 20, height: 20)
+                        }
+                        Text(app.name)
+                        Spacer()
+                        Button {
+                            removeDisabledApp(bundleId: app.id)
+                        } label: {
+                            Image(systemName: "xmark.circle")
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            } header: {
+                Text("Disabled Applications")
+            } footer: {
+                Text("Clipboard history will not record copies from these apps.")
+                    .font(.caption)
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+        .onAppear {
+            loadDisabledApps()
+        }
+    }
+
+    private func loadDisabledApps() {
+        let bundleIds = appState.clipboardMonitor?.disabledApps ?? []
+        disabledApps = bundleIds.compactMap { bundleId in
+            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else {
+                return DisabledApp(id: bundleId, name: bundleId, icon: nil)
+            }
+            let name = FileManager.default.displayName(atPath: url.path)
+            let icon = NSWorkspace.shared.icon(forFile: url.path)
+            return DisabledApp(id: bundleId, name: name, icon: icon)
+        }
+    }
+
+    private func selectDisabledApp() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let bundle = Bundle(url: url),
+              let bundleId = bundle.bundleIdentifier else { return }
+
+        appState.clipboardMonitor?.disabledApps.insert(bundleId)
+        loadDisabledApps()
+    }
+
+    private func removeDisabledApp(bundleId: String) {
+        appState.clipboardMonitor?.disabledApps.remove(bundleId)
+        loadDisabledApps()
     }
 
     // MARK: - Helpers
