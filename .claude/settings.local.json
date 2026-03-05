@@ -11,7 +11,8 @@
       "Bash(xcodebuild build:*)",
       "Bash(xcodebuild:*)",
       "Bash(swiftformat:*)",
-      "Bash(/opt/homebrew/bin/swiftformat:*)"
+      "Bash(/opt/homebrew/bin/swiftformat:*)",
+      "Bash(swiftlint lint:*)"
     ]
   }
 }

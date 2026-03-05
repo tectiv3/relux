@@ -40,10 +40,12 @@ enum ScriptRunner {
     }
 
     /// Runs a command and streams stdout chunks as they arrive.
+    /// Runs a command and streams stdout chunks as they arrive.
     static func stream(_ command: String, env: [String: String], stdin: String? = nil) -> AsyncStream<String> {
         AsyncStream { continuation in
+            let process = Process()
+
             Task.detached {
-                let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/bin/zsh")
                 process.arguments = ["-l", "-c", command]
                 process.environment = env
@@ -71,6 +73,11 @@ enum ScriptRunner {
 
                 process.terminationHandler = { _ in
                     pipe.fileHandleForReading.readabilityHandler = nil
+                    // Drain any remaining buffered data before finishing
+                    let remaining = pipe.fileHandleForReading.readDataToEndOfFile()
+                    if !remaining.isEmpty, let text = String(data: remaining, encoding: .utf8) {
+                        continuation.yield(text)
+                    }
                     continuation.finish()
                 }
 
@@ -78,6 +85,12 @@ enum ScriptRunner {
                     try process.run()
                 } catch {
                     continuation.finish()
+                }
+            }
+
+            continuation.onTermination = { _ in
+                if process.isRunning {
+                    process.terminate()
                 }
             }
         }

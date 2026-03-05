@@ -59,8 +59,8 @@ final class ScriptSearcher {
 
     // MARK: - Script Mutations
 
-    func add(title: String, command: String, acceptsSelection: Bool = false) {
-        scripts.append(ScriptItem(title: title, command: command, acceptsSelection: acceptsSelection))
+    func add(title: String, command: String, acceptsSelection: Bool = false, capturesOutput: Bool = false) {
+        scripts.append(ScriptItem(title: title, command: command, acceptsSelection: acceptsSelection, capturesOutput: capturesOutput))
         save()
     }
 

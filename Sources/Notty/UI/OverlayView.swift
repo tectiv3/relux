@@ -14,6 +14,11 @@ struct OverlayView: View {
     @State private var showActions: Bool = false
     @State private var actionIndex: Int = 0
 
+    /// Bumped on panel open to force re-search even when query hasn't changed
+    @State private var searchTrigger: UUID = .init()
+
+    @State private var streamingTask: Task<Void, Never>?
+
     /// Display-ready answer with thinking blocks stripped
     private var answer: String {
         Self.stripThinkingBlocks(rawAnswer)
@@ -135,7 +140,7 @@ struct OverlayView: View {
         .frame(width: 750)
         .frame(maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .task(id: query) {
+        .task(id: "\(query)\(searchTrigger)") {
             performSearch(query)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
@@ -143,7 +148,7 @@ struct OverlayView: View {
             if UserDefaults.standard.bool(forKey: "clearQueryOnOpen") {
                 query = ""
             }
-            performSearch(query)
+            searchTrigger = UUID()
         }
         .onKeyPress(.upArrow) {
             if showActions {
@@ -488,14 +493,16 @@ struct OverlayView: View {
             }
         case .script:
             if let command = item.meta["command"] {
-                let stdin = item.meta["acceptsSelection"] == "1" ? appState.currentSelection : nil
+                let acceptsStdin = item.meta["acceptsSelection"] == "1"
+                let stdin: String? = acceptsStdin ? (query.isEmpty ? appState.currentSelection : query) : nil
                 let env = appState.scriptSearcher.buildEnvironment()
 
                 if item.meta["capturesOutput"] == "1" {
+                    streamingTask?.cancel()
                     showActions = false
                     isGenerating = true
                     rawAnswer = ""
-                    Task { @MainActor in
+                    streamingTask = Task { @MainActor in
                         for await chunk in ScriptRunner.stream(command, env: env, stdin: stdin) {
                             rawAnswer += chunk
                         }
