@@ -3,6 +3,7 @@ import Foundation
 enum SearchItemKind: Sendable {
     case note
     case app
+    case webSearch
 }
 
 struct SearchItem: Identifiable, Sendable {
@@ -21,6 +22,6 @@ struct ExtensionResult: Sendable {
         case error(String)
         case done
     }
+
     let kind: Kind
 }
-

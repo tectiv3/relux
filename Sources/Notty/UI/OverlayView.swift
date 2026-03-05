@@ -62,6 +62,12 @@ struct OverlayView: View {
                     showInFinder()
                 },
             ]
+        case .webSearch:
+            return [
+                ItemAction(label: "Search", icon: "magnifyingglass", shortcut: "⏎") {
+                    openSelectedItem()
+                },
+            ]
         }
     }
 
@@ -129,7 +135,7 @@ struct OverlayView: View {
                 return .handled
             }
             guard !results.isEmpty else { return .ignored }
-            selectedIndex = max(0, selectedIndex - 1)
+            selectedIndex = selectedIndex <= 0 ? results.count - 1 : selectedIndex - 1
             return .handled
         }
         .onKeyPress(.downArrow) {
@@ -138,7 +144,7 @@ struct OverlayView: View {
                 return .handled
             }
             guard !results.isEmpty else { return .ignored }
-            selectedIndex = min(results.count - 1, selectedIndex + 1)
+            selectedIndex = selectedIndex >= results.count - 1 ? 0 : selectedIndex + 1
             return .handled
         }
         .onKeyPress(.return) {
@@ -243,7 +249,7 @@ struct OverlayView: View {
 
             Spacer()
 
-            Text(item.kind == .app ? "Application" : item.meta["folder"] ?? "Notes")
+            Text(kindLabel(for: item))
                 .font(.system(size: 11))
                 .foregroundColor(isSelected ? .white.opacity(0.5) : .secondary)
                 .lineLimit(1)
@@ -331,7 +337,7 @@ struct OverlayView: View {
                             .font(.system(size: 13))
                             .foregroundColor(.secondary)
                     }
-                } else if isGenerating && answer.isEmpty {
+                } else if isGenerating, answer.isEmpty {
                     ProgressView()
                         .controlSize(.small)
                         .padding(.top, 4)
@@ -391,15 +397,33 @@ struct OverlayView: View {
             results = appState.recentItems()
         } else {
             results = appState.performSearch(query: trimmed)
+            results.append(SearchItem(
+                id: "web-search-ddg",
+                title: "Search DuckDuckGo",
+                subtitle: trimmed,
+                icon: "magnifyingglass",
+                kind: .webSearch,
+                meta: ["query": trimmed]
+            ))
         }
         selectedIndex = 0
         showActions = false
     }
 
+    private func kindLabel(for item: SearchItem) -> String {
+        switch item.kind {
+        case .note: item.meta["folder"] ?? "Notes"
+        case .app: "Application"
+        case .webSearch: "Web Search"
+        }
+    }
+
     private func openSelectedItem() {
         guard selectedIndex < results.count else { return }
         let item = results[selectedIndex]
-        appState.recordSelection(query: query, item: item)
+        if item.kind != .webSearch {
+            appState.recordSelection(query: query, item: item)
+        }
         switch item.kind {
         case .note:
             if let noteId = item.meta["noteId"] {
@@ -407,7 +431,19 @@ struct OverlayView: View {
             }
         case .app:
             if let path = item.meta["path"] {
-                NSWorkspace.shared.open(URL(fileURLWithPath: path))
+                NSWorkspace.shared.openApplication(
+                    at: URL(fileURLWithPath: path),
+                    configuration: NSWorkspace.OpenConfiguration()
+                )
+            }
+        case .webSearch:
+            if let q = item.meta["query"],
+               var components = URLComponents(string: "https://duckduckgo.com/")
+            {
+                components.queryItems = [URLQueryItem(name: "q", value: q)]
+                if let url = components.url {
+                    NSWorkspace.shared.open(url)
+                }
             }
         }
     }
@@ -426,11 +462,11 @@ struct OverlayView: View {
             }
             for await result in engine.query(query) {
                 switch result.kind {
-                case .token(let text):
+                case let .token(text):
                     rawAnswer += text
                 case .sources:
                     break
-                case .error(let msg):
+                case let .error(msg):
                     rawAnswer += "\n[Error: \(msg)]"
                 case .done:
                     break
@@ -461,8 +497,9 @@ struct OverlayView: View {
     private static func stripThinkingBlocks(_ text: String) -> String {
         var result = text
         while let start = result.range(of: "<think>"),
-              let end = result.range(of: "</think>") {
-            result.removeSubrange(start.lowerBound..<end.upperBound)
+              let end = result.range(of: "</think>")
+        {
+            result.removeSubrange(start.lowerBound ..< end.upperBound)
         }
         if let start = result.range(of: "<think>") {
             result = String(result[..<start.lowerBound])

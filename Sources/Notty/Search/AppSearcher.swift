@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 struct AppItem {
@@ -8,44 +9,57 @@ struct AppItem {
 @MainActor
 final class AppSearcher {
     private var apps: [AppItem] = []
+    private var query: NSMetadataQuery?
 
-    init() { refresh() }
+    init() {
+        startSpotlightQuery()
+    }
 
-    func refresh() {
-        var found: [String: AppItem] = [:]
-        let dirs = [
-            URL(fileURLWithPath: "/Applications"),
-            URL(fileURLWithPath: "/System/Applications"),
-            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications"),
+    private func startSpotlightQuery() {
+        let mdQuery = NSMetadataQuery()
+        mdQuery.predicate = NSPredicate(format: "kMDItemContentType == 'com.apple.application-bundle'")
+        mdQuery.searchScopes = [
+            "/Applications",
+            "/System/Applications",
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path,
         ]
-        let fm = FileManager.default
-        for dir in dirs {
-            guard let contents = try? fm.contentsOfDirectory(
-                at: dir,
-                includingPropertiesForKeys: nil,
-                options: [.skipsHiddenFiles]
-            ) else { continue }
-            for url in contents where url.pathExtension == "app" {
-                let name = url.deletingPathExtension().lastPathComponent
-                if found[name] == nil {
-                    found[name] = AppItem(name: name, path: url)
-                }
-            }
-            for url in contents where url.hasDirectoryPath && url.pathExtension != "app" {
-                guard let sub = try? fm.contentsOfDirectory(
-                    at: url,
-                    includingPropertiesForKeys: nil,
-                    options: [.skipsHiddenFiles]
-                ) else { continue }
-                for subUrl in sub where subUrl.pathExtension == "app" {
-                    let name = subUrl.deletingPathExtension().lastPathComponent
-                    if found[name] == nil {
-                        found[name] = AppItem(name: name, path: subUrl)
-                    }
-                }
+
+        NotificationCenter.default.addObserver(
+            forName: .NSMetadataQueryDidFinishGathering,
+            object: mdQuery,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleQueryResults()
             }
         }
-        apps = Array(found.values).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+
+        query = mdQuery
+        mdQuery.start()
+    }
+
+    private func handleQueryResults() {
+        guard let mdQuery = query else { return }
+        mdQuery.disableUpdates()
+
+        var found: [String: AppItem] = [:]
+        for i in 0 ..< mdQuery.resultCount {
+            guard let item = mdQuery.result(at: i) as? NSMetadataItem,
+                  let path = item.value(forAttribute: kMDItemPath as String) as? String
+            else { continue }
+
+            let url = URL(fileURLWithPath: path)
+            let name = item.value(forAttribute: kMDItemDisplayName as String) as? String
+                ?? url.deletingPathExtension().lastPathComponent
+            if found[name] == nil {
+                found[name] = AppItem(name: name, path: url)
+            }
+        }
+
+        mdQuery.enableUpdates()
+        apps = Array(found.values).sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
     }
 
     func search(_ query: String, limit: Int = 5) -> [SearchItem] {
