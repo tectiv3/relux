@@ -486,7 +486,11 @@ struct OverlayView: View {
                 isGenerating = false
                 return
             }
-            for await result in engine.query(query) {
+            var aiQuery = query
+            if let selection = appState.currentSelection {
+                aiQuery = "Context:\n\(selection)\n\nQuestion: \(query)"
+            }
+            for await result in engine.query(aiQuery) {
                 switch result.kind {
                 case let .token(text):
                     rawAnswer += text
