@@ -7,6 +7,7 @@ private let log = Logger(subsystem: "com.relux.app", category: "appstate")
 enum PanelMode: Sendable {
     case search
     case clipboard
+    case translate
 }
 
 @MainActor
@@ -23,6 +24,8 @@ final class AppState {
 
     var clipboardStore: ClipboardStore?
     var clipboardMonitor: ClipboardMonitor?
+    var translateStore: TranslateStore?
+    let anthropicService = AnthropicService()
     var panelMode: PanelMode = .search
     var previousApp: NSRunningApplication?
 
@@ -63,6 +66,9 @@ final class AppState {
         let monitor = ClipboardMonitor(store: clipStore)
         clipboardMonitor = monitor
         monitor.start()
+
+        let transStore = try TranslateStore()
+        translateStore = transStore
 
         // Clean up expired clipboard entries
         let retentionMonths = UserDefaults.standard.object(forKey: "clipboardRetentionMonths") as? Int ?? 3

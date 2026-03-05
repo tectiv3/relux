@@ -9,6 +9,8 @@ struct PanelRootView: View {
             OverlayView()
         case .clipboard:
             ClipboardHistoryView()
+        case .translate:
+            EmptyView()
         }
     }
 }
@@ -90,6 +92,12 @@ struct OverlayView: View {
         case .webSearch:
             return [
                 ItemAction(label: "Search", icon: "magnifyingglass", shortcut: "⏎") {
+                    openSelectedItem()
+                },
+            ]
+        case .translate:
+            return [
+                ItemAction(label: "Translate", icon: "character.book.closed", shortcut: "⏎") {
                     openSelectedItem()
                 },
             ]
@@ -286,6 +294,7 @@ struct OverlayView: View {
         case .script: "Scripts"
         case .note: "Notes"
         case .webSearch: "Web Search"
+        case .translate: "Translate"
         }
     }
 
@@ -519,6 +528,14 @@ struct OverlayView: View {
                     kind: .webSearch,
                     meta: ["query": selection]
                 ))
+                results.append(SearchItem(
+                    id: "translate-selection",
+                    title: "Translate",
+                    subtitle: preview,
+                    icon: "character.book.closed",
+                    kind: .translate,
+                    meta: ["text": selection]
+                ))
             }
         } else {
             results = appState.performSearch(query: trimmed)
@@ -530,6 +547,17 @@ struct OverlayView: View {
                 kind: .webSearch,
                 meta: ["query": trimmed]
             ))
+            if let selection = appState.currentSelection {
+                let preview = String(selection.prefix(80))
+                results.append(SearchItem(
+                    id: "translate-selection",
+                    title: "Translate",
+                    subtitle: preview,
+                    icon: "character.book.closed",
+                    kind: .translate,
+                    meta: ["text": selection]
+                ))
+            }
         }
         selectedIndex = 0
         showActions = false
@@ -541,6 +569,7 @@ struct OverlayView: View {
         case .app: "Application"
         case .webSearch: "Web Search"
         case .script: "Script"
+        case .translate: "Translate"
         }
     }
 
@@ -571,6 +600,8 @@ struct OverlayView: View {
                     NSWorkspace.shared.open(url)
                 }
             }
+        case .translate:
+            appState.panelMode = .translate
         case .script:
             if let command = item.meta["command"] {
                 let acceptsStdin = item.meta["acceptsSelection"] == "1"
