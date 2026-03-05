@@ -56,3 +56,11 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Ask AI prepends selection as context to the LLM prompt
 - Bottom bar shows truncated selection preview when captured
 - Requires Accessibility permission (prompted on first launch)
+
+## Capture Output Scripts
+
+- Scripts can opt into `capturesOutput: Bool` to stream stdout into the panel's answer section
+- When enabled, the panel stays open and output streams incrementally (same UX as Ask AI)
+- When disabled, existing fire-and-forget behavior with toast is preserved
+- Uses `AsyncStream<String>` via `ScriptRunner.stream()` reading `availableData` in a loop
+- Backward-compatible: existing scripts.json without the field default to `false`

@@ -39,6 +39,50 @@ enum ScriptRunner {
         }
     }
 
+    /// Runs a command and streams stdout chunks as they arrive.
+    static func stream(_ command: String, env: [String: String], stdin: String? = nil) -> AsyncStream<String> {
+        AsyncStream { continuation in
+            Task.detached {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+                process.arguments = ["-l", "-c", command]
+                process.environment = env
+
+                let pipe = Pipe()
+                process.standardOutput = pipe
+                process.standardError = pipe
+
+                if let stdin {
+                    let inputPipe = Pipe()
+                    process.standardInput = inputPipe
+                    inputPipe.fileHandleForWriting.write(Data(stdin.utf8))
+                    inputPipe.fileHandleForWriting.closeFile()
+                }
+
+                pipe.fileHandleForReading.readabilityHandler = { handle in
+                    let data = handle.availableData
+                    if data.isEmpty {
+                        return
+                    }
+                    if let text = String(data: data, encoding: .utf8) {
+                        continuation.yield(text)
+                    }
+                }
+
+                process.terminationHandler = { _ in
+                    pipe.fileHandleForReading.readabilityHandler = nil
+                    continuation.finish()
+                }
+
+                do {
+                    try process.run()
+                } catch {
+                    continuation.finish()
+                }
+            }
+        }
+    }
+
     private static func showToast(_ message: String) {
         dismissTask?.cancel()
         toastWindow?.close()

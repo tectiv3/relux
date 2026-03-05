@@ -5,21 +5,24 @@ struct ScriptItem: Codable, Identifiable, Sendable {
     var title: String
     var command: String
     var acceptsSelection: Bool
+    var capturesOutput: Bool
 
-    init(title: String, command: String, acceptsSelection: Bool = false) {
+    init(title: String, command: String, acceptsSelection: Bool = false, capturesOutput: Bool = false) {
         id = UUID().uuidString
         self.title = title
         self.command = command
         self.acceptsSelection = acceptsSelection
+        self.capturesOutput = capturesOutput
     }
 
-    /// Backward-compatible decoding for existing scripts.json lacking acceptsSelection
+    /// Backward-compatible decoding for existing scripts.json lacking new fields
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
         command = try container.decode(String.self, forKey: .command)
         acceptsSelection = try container.decodeIfPresent(Bool.self, forKey: .acceptsSelection) ?? false
+        capturesOutput = try container.decodeIfPresent(Bool.self, forKey: .capturesOutput) ?? false
     }
 }
 
@@ -130,6 +133,7 @@ final class ScriptSearcher {
                 meta: [
                     "command": item.script.command,
                     "acceptsSelection": item.script.acceptsSelection ? "1" : "0",
+                    "capturesOutput": item.script.capturesOutput ? "1" : "0",
                 ]
             )
         }

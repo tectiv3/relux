@@ -488,9 +488,23 @@ struct OverlayView: View {
             }
         case .script:
             if let command = item.meta["command"] {
-                NSApp.keyWindow?.close()
                 let stdin = item.meta["acceptsSelection"] == "1" ? appState.currentSelection : nil
-                ScriptRunner.run(command, env: appState.scriptSearcher.buildEnvironment(), stdin: stdin)
+                let env = appState.scriptSearcher.buildEnvironment()
+
+                if item.meta["capturesOutput"] == "1" {
+                    showActions = false
+                    isGenerating = true
+                    rawAnswer = ""
+                    Task { @MainActor in
+                        for await chunk in ScriptRunner.stream(command, env: env, stdin: stdin) {
+                            rawAnswer += chunk
+                        }
+                        isGenerating = false
+                    }
+                } else {
+                    NSApp.keyWindow?.close()
+                    ScriptRunner.run(command, env: env, stdin: stdin)
+                }
             }
         }
     }

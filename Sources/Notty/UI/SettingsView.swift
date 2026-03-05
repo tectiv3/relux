@@ -216,6 +216,16 @@ struct SettingsView: View {
                             ))
                             .toggleStyle(.checkbox)
                             .help("Pass selected text as stdin")
+                            Toggle("output", isOn: Binding(
+                                get: { script.capturesOutput },
+                                set: { newValue in
+                                    var updated = script
+                                    updated.capturesOutput = newValue
+                                    appState.scriptSearcher.update(updated)
+                                }
+                            ))
+                            .toggleStyle(.checkbox)
+                            .help("Stream stdout into the panel")
                             Button(role: .destructive) {
                                 appState.scriptSearcher.remove(id: script.id)
                             } label: {
