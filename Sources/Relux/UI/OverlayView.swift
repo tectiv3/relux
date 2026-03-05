@@ -181,6 +181,9 @@ struct OverlayView: View {
             searchTrigger = UUID()
             isSearchFocused = true
         }
+        .onAppear {
+            isSearchFocused = true
+        }
         .onKeyPress(.upArrow) {
             if showActions {
                 let actions = currentActions

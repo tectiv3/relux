@@ -168,6 +168,7 @@ struct ClipboardHistoryView: View {
                     )
             }
             .buttonStyle(.plain)
+            .focusable(false)
 
             TextField("Type to filter entries...", text: $filter)
                 .textFieldStyle(.plain)
