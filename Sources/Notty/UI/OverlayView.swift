@@ -143,6 +143,7 @@ struct OverlayView: View {
             if UserDefaults.standard.bool(forKey: "clearQueryOnOpen") {
                 query = ""
             }
+            performSearch(query)
         }
         .onKeyPress(.upArrow) {
             if showActions {
