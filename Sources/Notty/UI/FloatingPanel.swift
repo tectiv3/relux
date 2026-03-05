@@ -15,6 +15,7 @@ final class FloatingPanel: NSPanel {
         hidesOnDeactivate = false
         isOpaque = false
         backgroundColor = .clear
+        hasShadow = true
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
 
         let visualEffect = NSVisualEffectView(frame: contentRect)

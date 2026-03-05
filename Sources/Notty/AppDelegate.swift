@@ -41,6 +41,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hostingView = NSHostingView(rootView: OverlayView().environment(appState))
         hostingView.translatesAutoresizingMaskIntoConstraints = false
+        hostingView.wantsLayer = true
+        hostingView.layer?.cornerRadius = 12
+        hostingView.layer?.masksToBounds = true
 
         if let contentView = floatingPanel.contentView {
             contentView.addSubview(hostingView)
