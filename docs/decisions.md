@@ -46,3 +46,13 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - VStack fills available space with Spacer + maxHeight .infinity
 - NSHostingView pinned to all 4 edges of panel contentView
 - **Every time the overlay layout is modified, verify results are visible with at least 8 rows**
+
+## Selection Capture
+
+- On hotkey press, selected text is read from the focused app via Accessibility API (`AXUIElement`) BEFORE Notty takes focus
+- Stored in `AppState.currentSelection`, cleared on panel close
+- Scripts opt in via `acceptsSelection: Bool` — selection is piped as stdin
+- Web search uses selection as query when search bar is empty
+- Ask AI prepends selection as context to the LLM prompt
+- Bottom bar shows truncated selection preview when captured
+- Requires Accessibility permission (prompted on first launch)
