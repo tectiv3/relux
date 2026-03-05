@@ -154,10 +154,7 @@ final class NoteExtractor: Sendable {
         }
     }
 
-    private static func parseDate(_ string: String) -> Date? {
-        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // AppleScript date format varies by locale; try common patterns
+    private static let dateFormatters: [DateFormatter] = {
         let formats = [
             "EEEE, MMMM d, yyyy 'at' h:mm:ss a",
             "yyyy-MM-dd HH:mm:ss Z",
@@ -165,20 +162,29 @@ final class NoteExtractor: Sendable {
             "dd/MM/yyyy HH:mm:ss",
             "EEEE d MMMM yyyy HH:mm:ss",
         ]
-
-        for format in formats {
+        return formats.map { format in
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
             formatter.dateFormat = format
+            return formatter
+        }
+    }()
+
+    private static let dateDetector = try? NSDataDetector(
+        types: NSTextCheckingResult.CheckingType.date.rawValue
+    )
+
+    private static func parseDate(_ string: String) -> Date? {
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        for formatter in dateFormatters {
             if let date = formatter.date(from: trimmed) {
                 return date
             }
         }
 
-        // Fallback: let the system try natural language parsing
-        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
         let range = NSRange(trimmed.startIndex..., in: trimmed)
-        if let match = detector?.firstMatch(in: trimmed, range: range) {
+        if let match = dateDetector?.firstMatch(in: trimmed, range: range) {
             return match.date
         }
 

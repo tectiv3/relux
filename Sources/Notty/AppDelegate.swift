@@ -1,7 +1,10 @@
 import AppKit
 import Carbon
 import KeyboardShortcuts
+import os
 import SwiftUI
+
+private let log = Logger(subsystem: "com.notty.app", category: "appdelegate")
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -9,7 +12,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var panel: FloatingPanel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        try? appState.setup()
+        do {
+            try appState.setup()
+        } catch {
+            log.error("Failed to initialize app state: \(error.localizedDescription)")
+        }
         applyAppearance()
 
         setupPanel()
@@ -19,7 +26,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if appState.needsFirstRun {
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
             }
         } else {
@@ -75,14 +82,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func applyAppearance() {
         let mode = UserDefaults.standard.string(forKey: "appAppearance") ?? "system"
-        switch mode {
-        case "light":
-            NSApp.appearance = NSAppearance(named: .aqua)
-        case "dark":
-            NSApp.appearance = NSAppearance(named: .darkAqua)
-        default:
-            NSApp.appearance = nil
-        }
+        Appearance.apply(mode)
     }
 
     private func applyForcedInputSource() {

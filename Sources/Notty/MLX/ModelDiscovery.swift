@@ -5,6 +5,15 @@ struct LocalModel: Identifiable, Hashable, Sendable {
     let path: URL
     let name: String
     let sizeBytes: UInt64
+
+    var standardizedPath: String {
+        path.standardizedFileURL.path
+    }
+
+    static func matching(path: String, in models: [LocalModel]) -> LocalModel? {
+        let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+        return models.first { $0.standardizedPath == standardized }
+    }
 }
 
 enum ModelDiscovery {

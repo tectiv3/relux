@@ -10,15 +10,25 @@ let package = Package(
         .package(url: "https://github.com/sindresorhus/KeyboardShortcuts", from: "2.0.0"),
     ],
     targets: [
+        .target(
+            name: "NottyCore"
+        ),
         .executableTarget(
             name: "Notty",
             dependencies: [
+                "NottyCore",
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
                 .product(name: "MLXEmbedders", package: "mlx-swift-lm"),
                 "KeyboardShortcuts",
+            ]
+        ),
+        .executableTarget(
+            name: "NottyTool",
+            dependencies: [
+                "NottyCore",
             ]
         ),
     ]

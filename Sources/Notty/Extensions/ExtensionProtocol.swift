@@ -24,7 +24,3 @@ struct ExtensionResult: Sendable {
     let kind: Kind
 }
 
-protocol NottyExtension: Sendable {
-    var name: String { get }
-    func handle(query: String) async -> AsyncStream<ExtensionResult>
-}

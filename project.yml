@@ -18,12 +18,22 @@ packages:
     from: 2.0.0
 
 targets:
+  NottyCore:
+    type: library
+    platform: macOS
+    sources:
+      - Sources/NottyCore
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+
   Notty:
     type: application
     platform: macOS
     sources:
       - Sources/Notty
     dependencies:
+      - target: NottyCore
       - package: mlx-swift
         product: MLX
       - package: mlx-swift
@@ -55,6 +65,8 @@ targets:
     platform: macOS
     sources:
       - Sources/NottyTool
+    dependencies:
+      - target: NottyCore
     settings:
       base:
         SWIFT_VERSION: "6.0"

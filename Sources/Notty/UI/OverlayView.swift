@@ -419,12 +419,12 @@ struct OverlayView: View {
         rawAnswer = ""
 
         Task { @MainActor in
-            guard let ext = appState.notesExtension else {
+            guard let engine = appState.queryEngine else {
                 rawAnswer = "Not ready — please select a model in Settings."
                 isGenerating = false
                 return
             }
-            for await result in await ext.handle(query: query) {
+            for await result in engine.query(query) {
                 switch result.kind {
                 case .token(let text):
                     rawAnswer += text

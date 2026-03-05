@@ -36,7 +36,7 @@ struct MenuBarContentView: View {
         Button("Re-index Notes") {
             // Dismiss menu first, then start async work
             NSApp.mainMenu?.cancelTracking()
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 appState.reindex()
             }
         }

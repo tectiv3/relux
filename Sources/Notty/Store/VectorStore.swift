@@ -1,5 +1,5 @@
-import Accelerate
 import Foundation
+import NottyCore
 import SQLite3
 import os
 
@@ -28,6 +28,7 @@ enum StoreError: Error {
     case exec(String)
 }
 
+@MainActor
 final class VectorStore {
     private var db: OpaquePointer?
     private var cache: [EmbeddingEntry] = []
@@ -76,7 +77,7 @@ final class VectorStore {
         modifiedDate: Date,
         chunks: [(text: String, embedding: [Float])]
     ) throws {
-        try execute("DELETE FROM chunks WHERE note_id = '\(noteId)'")
+        try deleteChunks(noteId: noteId)
 
         let sql = """
             INSERT INTO chunks (note_id, chunk_index, chunk_text, embedding, title, folder, modified_date)
@@ -177,45 +178,22 @@ final class VectorStore {
 
             var score: Float
             if keyword > 0 {
-                // Hybrid: keyword match dominates when present
                 score = 0.4 * semantic + 0.6 * keyword
             } else {
                 score = semantic
             }
 
-            if entry.folder.lowercased() == "archive" || entry.folder.lowercased() == "recently deleted" {
-                score *= 0.5
-            }
+            score = applyFolderPenalty(score, folder: entry.folder)
             scored.append((entry, score))
         }
 
-        // Log top results before filtering
         let topAll = scored.sorted { $0.score > $1.score }.prefix(10)
         for item in topAll {
             log.info("  score=\(item.score) dim=\(item.entry.embedding.count) title=\(item.entry.title) chunk=\(item.entry.chunkIndex)")
         }
 
         scored = scored.filter { $0.score >= minScore }
-
-        // Deduplicate by noteId, keeping the best-scoring chunk per note
-        var bestByNote: [String: (entry: EmbeddingEntry, score: Float)] = [:]
-        for item in scored {
-            let existing = bestByNote[item.entry.noteId]
-            if existing == nil || item.score > existing!.score {
-                bestByNote[item.entry.noteId] = item
-            }
-        }
-
-        let sorted = bestByNote.values.sorted { $0.score > $1.score }
-        return sorted.prefix(topK).map { item in
-            SearchResult(
-                noteId: item.entry.noteId,
-                chunkText: item.entry.chunkText,
-                title: item.entry.title,
-                folder: item.entry.folder,
-                score: item.score
-            )
-        }
+        return deduplicateAndRank(scored, topK: topK)
     }
 
     /// Keyword-only search — no embedding needed, instant results
@@ -227,31 +205,11 @@ final class VectorStore {
         for entry in cache {
             let score = keywordScore(terms: queryTerms, title: entry.title, text: entry.chunkText)
             guard score > 0 else { continue }
-            var adjusted = score
-            if entry.folder.lowercased() == "archive" || entry.folder.lowercased() == "recently deleted" {
-                adjusted *= 0.5
-            }
+            let adjusted = applyFolderPenalty(score, folder: entry.folder)
             scored.append((entry, adjusted))
         }
 
-        var bestByNote: [String: (entry: EmbeddingEntry, score: Float)] = [:]
-        for item in scored {
-            let existing = bestByNote[item.entry.noteId]
-            if existing == nil || item.score > existing!.score {
-                bestByNote[item.entry.noteId] = item
-            }
-        }
-
-        let sorted = bestByNote.values.sorted { $0.score > $1.score }
-        return sorted.prefix(topK).map { item in
-            SearchResult(
-                noteId: item.entry.noteId,
-                chunkText: item.entry.chunkText,
-                title: item.entry.title,
-                folder: item.entry.folder,
-                score: item.score
-            )
-        }
+        return deduplicateAndRank(scored, topK: topK)
     }
 
     // MARK: - Maintenance
@@ -261,37 +219,51 @@ final class VectorStore {
         cache = []
     }
 
-    // MARK: - Metadata
+    // MARK: - Private
 
-    func setMeta(key: String, value: String) throws {
-        let sql = "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)"
+    private func applyFolderPenalty(_ score: Float, folder: String) -> Float {
+        let lower = folder.lowercased()
+        if lower == "archive" || lower == "recently deleted" {
+            return score * 0.5
+        }
+        return score
+    }
+
+    private func deduplicateAndRank(_ scored: [(entry: EmbeddingEntry, score: Float)], topK: Int) -> [SearchResult] {
+        var bestByNote: [String: (entry: EmbeddingEntry, score: Float)] = [:]
+        for item in scored {
+            if let existing = bestByNote[item.entry.noteId] {
+                guard item.score > existing.score else { continue }
+            }
+            bestByNote[item.entry.noteId] = item
+        }
+
+        return bestByNote.values
+            .sorted { $0.score > $1.score }
+            .prefix(topK)
+            .map { item in
+                SearchResult(
+                    noteId: item.entry.noteId,
+                    chunkText: item.entry.chunkText,
+                    title: item.entry.title,
+                    folder: item.entry.folder,
+                    score: item.score
+                )
+            }
+    }
+
+    private func deleteChunks(noteId: String) throws {
+        let sql = "DELETE FROM chunks WHERE note_id = ?"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             throw StoreError.query
         }
         defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_text(stmt, 1, key, -1, Self.transient)
-        sqlite3_bind_text(stmt, 2, value, -1, Self.transient)
-
+        sqlite3_bind_text(stmt, 1, noteId, -1, Self.transient)
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw StoreError.query
         }
     }
-
-    func getMeta(key: String) -> String? {
-        let sql = "SELECT value FROM meta WHERE key = ?"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_text(stmt, 1, key, -1, Self.transient)
-
-        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
-        return String(cString: sqlite3_column_text(stmt, 0))
-    }
-
-    // MARK: - Private
 
     private func execute(_ sql: String) throws {
         var errMsg: UnsafeMutablePointer<CChar>?
@@ -303,36 +275,10 @@ final class VectorStore {
     }
 
     private func keywordScore(terms: [String], title: String, text: String) -> Float {
-        guard !terms.isEmpty else { return 0 }
-        let lowerTitle = title.lowercased()
-        let lowerText = text.lowercased()
-        var matched: Float = 0
-        for term in terms {
-            let inTitle = lowerTitle.contains(term)
-            let inText = lowerText.contains(term)
-            if inTitle {
-                matched += 1.5 // title match worth more
-            } else if inText {
-                matched += 1.0
-            }
-        }
-        return min(matched / Float(terms.count), 1.0)
+        SearchMath.keywordScore(terms: terms, title: title, text: text)
     }
 
     private func cosineSimilarity(_ a: [Float], _ b: [Float]) -> Float {
-        guard a.count == b.count, !a.isEmpty else { return 0 }
-
-        var dot: Float = 0
-        var normA: Float = 0
-        var normB: Float = 0
-        let n = vDSP_Length(a.count)
-
-        vDSP_dotpr(a, 1, b, 1, &dot, n)
-        vDSP_svesq(a, 1, &normA, n)
-        vDSP_svesq(b, 1, &normB, n)
-
-        let denom = sqrt(normA) * sqrt(normB)
-        guard denom > 0 else { return 0 }
-        return dot / denom
+        SearchMath.cosineSimilarity(a, b)
     }
 }

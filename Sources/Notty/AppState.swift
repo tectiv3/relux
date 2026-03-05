@@ -10,7 +10,6 @@ final class AppState {
     var store: VectorStore?
     var indexer: Indexer?
     var queryEngine: QueryEngine?
-    var notesExtension: NotesExtension?
     let appSearcher = AppSearcher()
     let frecency = FrecencyTracker()
 
@@ -30,35 +29,40 @@ final class AppState {
     }
 
     func setup() throws {
-        store = try VectorStore()
-        indexer = Indexer(store: store!, mlx: mlx)
-        queryEngine = QueryEngine(store: store!, mlx: mlx)
-        notesExtension = NotesExtension(engine: queryEngine!)
-        try store!.loadEmbeddings()
+        let s = try VectorStore()
+        store = s
+        let qe = QueryEngine(store: s, mlx: mlx)
+        queryEngine = qe
+        indexer = Indexer(store: s, mlx: mlx)
+        try s.loadEmbeddings()
     }
 
     func markSetupComplete() {
         UserDefaults.standard.set(true, forKey: "hasCompletedSetup")
     }
 
+    var maxSearchResults: Int {
+        UserDefaults.standard.object(forKey: "maxSearchResults") as? Int ?? 10
+    }
+
     /// Combined search: notes (keyword) + apps, ranked by frecency
     func performSearch(query: String) -> [SearchItem] {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
 
-        let noteResults = queryEngine?.searchOnly(query) ?? []
-        let appResults = appSearcher.search(query)
+        let limit = maxSearchResults
+        let noteResults = queryEngine?.searchOnly(query, topK: limit) ?? []
+        let appResults = appSearcher.search(query, limit: limit)
 
         var merged: [SearchItem] = []
         merged.append(contentsOf: appResults)
         merged.append(contentsOf: noteResults)
 
-        // Re-sort by frecency boost
         let q = query
         merged.sort { a, b in
             frecency.boost(query: q, itemId: a.id) > frecency.boost(query: q, itemId: b.id)
         }
 
-        return merged
+        return Array(merged.prefix(limit))
     }
 
     func recordSelection(query: String, item: SearchItem) {
@@ -75,8 +79,7 @@ final class AppState {
         log.info("Restore: discovered \(models.count) models, savedLLM=\(self.savedLLMPath ?? "nil"), savedEmbedder=\(self.savedEmbedderPath ?? "nil")")
 
         if let llmPath = savedLLMPath {
-            let standardized = URL(fileURLWithPath: llmPath).standardizedFileURL.path
-            if let model = models.first(where: { $0.path.standardizedFileURL.path == standardized }) {
+            if let model = LocalModel.matching(path: llmPath, in: models) {
                 do {
                     try await mlx.loadLLM(model: model)
                     log.info("Restored LLM: \(model.name)")
@@ -85,15 +88,11 @@ final class AppState {
                 }
             } else {
                 log.warning("LLM path not found in discovered models: \(llmPath)")
-                for m in models {
-                    log.debug("  discovered: \(m.path.path)")
-                }
             }
         }
 
         if let embedderPath = savedEmbedderPath {
-            let standardized = URL(fileURLWithPath: embedderPath).standardizedFileURL.path
-            if let model = models.first(where: { $0.path.standardizedFileURL.path == standardized }) {
+            if let model = LocalModel.matching(path: embedderPath, in: models) {
                 do {
                     try await mlx.loadEmbedder(model: model)
                     log.info("Restored embedder: \(model.name)")

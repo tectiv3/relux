@@ -24,12 +24,10 @@ struct SettingsView: View {
         .onAppear {
             discoveredModels = ModelDiscovery.discoverModels()
             if let path = appState.savedLLMPath {
-                let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
-                selectedLLM = discoveredModels.first { $0.path.standardizedFileURL.path == standardized }
+                selectedLLM = LocalModel.matching(path: path, in: discoveredModels)
             }
             if let path = appState.savedEmbedderPath {
-                let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
-                selectedEmbedder = discoveredModels.first { $0.path.standardizedFileURL.path == standardized }
+                selectedEmbedder = LocalModel.matching(path: path, in: discoveredModels)
             }
         }
     }
@@ -118,7 +116,7 @@ struct SettingsView: View {
                 }
                 .onChange(of: selectedLLM) { oldValue, newValue in
                     guard let model = newValue, oldValue != newValue else { return }
-                    appState.savedLLMPath = model.path.standardizedFileURL.path
+                    appState.savedLLMPath = model.standardizedPath
                     appState.markSetupComplete()
                     guard !appState.mlx.isLLMLoaded else { return }
                     Task {
@@ -145,7 +143,7 @@ struct SettingsView: View {
                 }
                 .onChange(of: selectedEmbedder) { oldValue, newValue in
                     guard let model = newValue, oldValue != newValue else { return }
-                    appState.savedEmbedderPath = model.path.standardizedFileURL.path
+                    appState.savedEmbedderPath = model.standardizedPath
                     guard !appState.mlx.isEmbedderLoaded else { return }
                     Task {
                         try? await appState.mlx.loadEmbedder(model: model)
@@ -184,14 +182,7 @@ struct SettingsView: View {
     }
 
     private func applyAppearance(_ mode: String) {
-        switch mode {
-        case "light":
-            NSApp.appearance = NSAppearance(named: .aqua)
-        case "dark":
-            NSApp.appearance = NSAppearance(named: .darkAqua)
-        default:
-            NSApp.appearance = nil
-        }
+        Appearance.apply(mode)
     }
 
     private static func getKeyboardLayouts() -> [(id: String, name: String)] {
