@@ -30,9 +30,8 @@ final class AppState {
         !UserDefaults.standard.bool(forKey: "hasCompletedSetup")
     }
 
-    var showMenuBarIcon: Bool {
-        get { UserDefaults.standard.object(forKey: "showMenuBarIcon") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "showMenuBarIcon") }
+    var showMenuBarIcon: Bool = UserDefaults.standard.object(forKey: "showMenuBarIcon") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showMenuBarIcon, forKey: "showMenuBarIcon") }
     }
 
     func setup() throws {
