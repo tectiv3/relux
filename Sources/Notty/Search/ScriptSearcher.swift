@@ -4,11 +4,22 @@ struct ScriptItem: Codable, Identifiable, Sendable {
     let id: String
     var title: String
     var command: String
+    var acceptsSelection: Bool
 
-    init(title: String, command: String) {
+    init(title: String, command: String, acceptsSelection: Bool = false) {
         id = UUID().uuidString
         self.title = title
         self.command = command
+        self.acceptsSelection = acceptsSelection
+    }
+
+    /// Backward-compatible decoding for existing scripts.json lacking acceptsSelection
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        command = try container.decode(String.self, forKey: .command)
+        acceptsSelection = try container.decodeIfPresent(Bool.self, forKey: .acceptsSelection) ?? false
     }
 }
 
@@ -45,8 +56,8 @@ final class ScriptSearcher {
 
     // MARK: - Script Mutations
 
-    func add(title: String, command: String) {
-        scripts.append(ScriptItem(title: title, command: command))
+    func add(title: String, command: String, acceptsSelection: Bool = false) {
+        scripts.append(ScriptItem(title: title, command: command, acceptsSelection: acceptsSelection))
         save()
     }
 
@@ -116,7 +127,10 @@ final class ScriptSearcher {
                 subtitle: item.script.command,
                 icon: "terminal",
                 kind: .script,
-                meta: ["command": item.script.command]
+                meta: [
+                    "command": item.script.command,
+                    "acceptsSelection": item.script.acceptsSelection ? "1" : "0",
+                ]
             )
         }
     }
