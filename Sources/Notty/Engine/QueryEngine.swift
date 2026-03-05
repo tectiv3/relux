@@ -10,6 +10,22 @@ final class QueryEngine {
         self.mlx = mlx
     }
 
+    /// Instant keyword search — no embedding or LLM needed
+    func searchOnly(_ text: String, topK: Int = 5) -> [SearchItem] {
+        let results = store.keywordSearch(queryText: text, topK: topK)
+        return results.map {
+            SearchItem(
+                id: $0.noteId,
+                title: $0.title,
+                subtitle: $0.folder,
+                icon: "doc.text",
+                kind: .note,
+                meta: ["noteId": $0.noteId, "snippet": String($0.chunkText.prefix(150))]
+            )
+        }
+    }
+
+    /// Full LLM generation with context from search results
     func query(_ text: String) -> AsyncStream<ExtensionResult> {
         AsyncStream { continuation in
             Task { @MainActor in
@@ -21,14 +37,16 @@ final class QueryEngine {
                         return
                     }
 
-                    let results = store.search(queryEmbedding: queryEmbedding, topK: 5)
+                    let results = store.search(queryEmbedding: queryEmbedding, queryText: text, topK: 5)
 
                     let sources = results.map {
-                        SourceNote(
+                        SearchItem(
                             id: $0.noteId,
                             title: $0.title,
-                            folder: $0.folder,
-                            snippet: String($0.chunkText.prefix(150))
+                            subtitle: $0.folder,
+                            icon: "doc.text",
+                            kind: .note,
+                            meta: ["noteId": $0.noteId, "snippet": String($0.chunkText.prefix(150))]
                         )
                     }
                     continuation.yield(ExtensionResult(kind: .sources(sources)))

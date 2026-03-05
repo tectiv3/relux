@@ -1,16 +1,23 @@
 import Foundation
 
-struct SourceNote: Identifiable, Sendable {
+enum SearchItemKind: Sendable {
+    case note
+    case app
+}
+
+struct SearchItem: Identifiable, Sendable {
     let id: String
     let title: String
-    let folder: String
-    let snippet: String
+    let subtitle: String
+    let icon: String
+    let kind: SearchItemKind
+    let meta: [String: String]
 }
 
 struct ExtensionResult: Sendable {
     enum Kind: Sendable {
         case token(String)
-        case sources([SourceNote])
+        case sources([SearchItem])
         case error(String)
         case done
     }

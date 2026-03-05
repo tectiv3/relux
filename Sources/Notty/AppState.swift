@@ -11,6 +11,8 @@ final class AppState {
     var indexer: Indexer?
     var queryEngine: QueryEngine?
     var notesExtension: NotesExtension?
+    let appSearcher = AppSearcher()
+    let frecency = FrecencyTracker()
 
     var isReady: Bool { mlx.isLLMLoaded && store != nil }
     var indexProgress: IndexProgress?
@@ -37,6 +39,30 @@ final class AppState {
 
     func markSetupComplete() {
         UserDefaults.standard.set(true, forKey: "hasCompletedSetup")
+    }
+
+    /// Combined search: notes (keyword) + apps, ranked by frecency
+    func performSearch(query: String) -> [SearchItem] {
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
+
+        let noteResults = queryEngine?.searchOnly(query) ?? []
+        let appResults = appSearcher.search(query)
+
+        var merged: [SearchItem] = []
+        merged.append(contentsOf: appResults)
+        merged.append(contentsOf: noteResults)
+
+        // Re-sort by frecency boost
+        let q = query
+        merged.sort { a, b in
+            frecency.boost(query: q, itemId: a.id) > frecency.boost(query: q, itemId: b.id)
+        }
+
+        return merged
+    }
+
+    func recordSelection(query: String, item: SearchItem) {
+        frecency.recordSelection(query: query, itemId: item.id)
     }
 
     /// Restore previously selected models on launch

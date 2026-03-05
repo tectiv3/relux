@@ -1,6 +1,9 @@
 import Accelerate
 import Foundation
 import SQLite3
+import os
+
+private let log = Logger(subsystem: "com.notty.app", category: "vectorstore")
 
 struct EmbeddingEntry {
     let noteId: String
@@ -162,21 +165,75 @@ final class VectorStore {
         cache = entries
     }
 
-    func search(queryEmbedding: [Float], topK: Int = 5, minScore: Float = 0.5) -> [SearchResult] {
+    func search(queryEmbedding: [Float], queryText: String = "", topK: Int = 5, minScore: Float = 0.1) -> [SearchResult] {
+        log.info("Search: cache has \(self.cache.count) entries, query embedding dim=\(queryEmbedding.count)")
+
+        let queryTerms = queryText.lowercased().split(separator: " ").map(String.init)
         var scored: [(entry: EmbeddingEntry, score: Float)] = []
 
         for entry in cache {
-            var score = cosineSimilarity(queryEmbedding, entry.embedding)
-            // De-prioritize archived notes
+            let semantic = cosineSimilarity(queryEmbedding, entry.embedding)
+            let keyword = keywordScore(terms: queryTerms, title: entry.title, text: entry.chunkText)
+
+            var score: Float
+            if keyword > 0 {
+                // Hybrid: keyword match dominates when present
+                score = 0.4 * semantic + 0.6 * keyword
+            } else {
+                score = semantic
+            }
+
             if entry.folder.lowercased() == "archive" || entry.folder.lowercased() == "recently deleted" {
                 score *= 0.5
             }
-            if score >= minScore {
-                scored.append((entry, score))
+            scored.append((entry, score))
+        }
+
+        // Log top results before filtering
+        let topAll = scored.sorted { $0.score > $1.score }.prefix(10)
+        for item in topAll {
+            log.info("  score=\(item.score) dim=\(item.entry.embedding.count) title=\(item.entry.title) chunk=\(item.entry.chunkIndex)")
+        }
+
+        scored = scored.filter { $0.score >= minScore }
+
+        // Deduplicate by noteId, keeping the best-scoring chunk per note
+        var bestByNote: [String: (entry: EmbeddingEntry, score: Float)] = [:]
+        for item in scored {
+            let existing = bestByNote[item.entry.noteId]
+            if existing == nil || item.score > existing!.score {
+                bestByNote[item.entry.noteId] = item
             }
         }
 
-        // Deduplicate by noteId, keeping the best-scoring chunk per note
+        let sorted = bestByNote.values.sorted { $0.score > $1.score }
+        return sorted.prefix(topK).map { item in
+            SearchResult(
+                noteId: item.entry.noteId,
+                chunkText: item.entry.chunkText,
+                title: item.entry.title,
+                folder: item.entry.folder,
+                score: item.score
+            )
+        }
+    }
+
+    /// Keyword-only search — no embedding needed, instant results
+    func keywordSearch(queryText: String, topK: Int = 5) -> [SearchResult] {
+        let queryTerms = queryText.lowercased().split(separator: " ").map(String.init)
+        guard !queryTerms.isEmpty else { return [] }
+
+        var scored: [(entry: EmbeddingEntry, score: Float)] = []
+        for entry in cache {
+            let score = keywordScore(terms: queryTerms, title: entry.title, text: entry.chunkText)
+            guard score > 0 else { continue }
+            var adjusted = score
+            if entry.folder.lowercased() == "archive" || entry.folder.lowercased() == "recently deleted" {
+                adjusted *= 0.5
+            }
+            scored.append((entry, adjusted))
+        }
+
         var bestByNote: [String: (entry: EmbeddingEntry, score: Float)] = [:]
         for item in scored {
             let existing = bestByNote[item.entry.noteId]
@@ -243,6 +300,23 @@ final class VectorStore {
             sqlite3_free(errMsg)
             throw StoreError.exec(msg)
         }
+    }
+
+    private func keywordScore(terms: [String], title: String, text: String) -> Float {
+        guard !terms.isEmpty else { return 0 }
+        let lowerTitle = title.lowercased()
+        let lowerText = text.lowercased()
+        var matched: Float = 0
+        for term in terms {
+            let inTitle = lowerTitle.contains(term)
+            let inText = lowerText.contains(term)
+            if inTitle {
+                matched += 1.5 // title match worth more
+            } else if inText {
+                matched += 1.0
+            }
+        }
+        return min(matched / Float(terms.count), 1.0)
     }
 
     private func cosineSimilarity(_ a: [Float], _ b: [Float]) -> Float {

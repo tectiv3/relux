@@ -1,3 +1,4 @@
+import Carbon
 import SwiftUI
 import KeyboardShortcuts
 
@@ -6,13 +7,16 @@ struct SettingsView: View {
     @State private var discoveredModels: [LocalModel] = []
     @State private var selectedLLM: LocalModel?
     @State private var selectedEmbedder: LocalModel?
+    @State private var selectedInputSourceId: String = UserDefaults.standard.string(forKey: "forceInputSourceId") ?? ""
+    @State private var availableInputSources: [(id: String, name: String)] = []
 
     var body: some View {
         TabView {
+            generalTab.tabItem { Label("General", systemImage: "gear") }
             modelsTab.tabItem { Label("Models", systemImage: "cpu") }
             shortcutsTab.tabItem { Label("Shortcuts", systemImage: "keyboard") }
         }
-        .frame(width: 450, height: 350)
+        .frame(width: 450, height: 400)
         .onAppear {
             discoveredModels = ModelDiscovery.discoverModels()
             if let path = appState.savedLLMPath {
@@ -97,6 +101,60 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
+    }
+
+    // MARK: - General Tab
+
+    private var generalTab: some View {
+        Form {
+            Section("Keyboard Layout") {
+                Picker("Force layout on open:", selection: $selectedInputSourceId) {
+                    Text("Don't change").tag("")
+                    ForEach(availableInputSources, id: \.id) { source in
+                        Text(source.name).tag(source.id)
+                    }
+                }
+                .onChange(of: selectedInputSourceId) { _, newValue in
+                    if newValue.isEmpty {
+                        UserDefaults.standard.removeObject(forKey: "forceInputSourceId")
+                    } else {
+                        UserDefaults.standard.set(newValue, forKey: "forceInputSourceId")
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+        .onAppear {
+            availableInputSources = Self.getKeyboardLayouts()
+        }
+    }
+
+    private static func getKeyboardLayouts() -> [(id: String, name: String)] {
+        guard let sources = TISCreateInputSourceList(nil, false)?.takeRetainedValue() as? [TISInputSource] else {
+            return []
+        }
+        var layouts: [(id: String, name: String)] = []
+        for source in sources {
+            guard let categoryRef = TISGetInputSourceProperty(source, kTISPropertyInputSourceCategory) else { continue }
+            let category = Unmanaged<CFString>.fromOpaque(categoryRef).takeUnretainedValue() as String
+            guard category == kTISCategoryKeyboardInputSource as String else { continue }
+
+            guard let typeRef = TISGetInputSourceProperty(source, kTISPropertyInputSourceType) else { continue }
+            let type = Unmanaged<CFString>.fromOpaque(typeRef).takeUnretainedValue() as String
+            guard type == kTISTypeKeyboardLayout as String || type == kTISTypeKeyboardInputMode as String else { continue }
+
+            guard let selectableRef = TISGetInputSourceProperty(source, kTISPropertyInputSourceIsSelectCapable) else { continue }
+            let selectable = Unmanaged<CFNumber>.fromOpaque(selectableRef).takeUnretainedValue() as! Bool
+            guard selectable else { continue }
+
+            guard let idRef = TISGetInputSourceProperty(source, kTISPropertyInputSourceID),
+                  let nameRef = TISGetInputSourceProperty(source, kTISPropertyLocalizedName) else { continue }
+            let id = Unmanaged<CFString>.fromOpaque(idRef).takeUnretainedValue() as String
+            let name = Unmanaged<CFString>.fromOpaque(nameRef).takeUnretainedValue() as String
+            layouts.append((id: id, name: name))
+        }
+        return layouts
     }
 
     // MARK: - Shortcuts Tab

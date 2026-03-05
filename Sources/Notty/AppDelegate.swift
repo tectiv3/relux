@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import KeyboardShortcuts
 import SwiftUI
 
@@ -27,8 +28,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func setupPanel() {
         guard let screen = NSScreen.main else { return }
-        let panelWidth: CGFloat = 680
-        let panelHeight: CGFloat = 420
+        let panelWidth: CGFloat = 750
+        let panelHeight: CGFloat = 474
         let screenFrame = screen.visibleFrame
 
         let x = screenFrame.midX - panelWidth / 2
@@ -58,8 +59,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if panel.isVisible {
             panel.close()
         } else {
+            applyForcedInputSource()
             panel.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    private func applyForcedInputSource() {
+        guard let sourceId = UserDefaults.standard.string(forKey: "forceInputSourceId"),
+              !sourceId.isEmpty else { return }
+        let filter = [kTISPropertyInputSourceID: sourceId] as CFDictionary
+        guard let sources = TISCreateInputSourceList(filter, false)?.takeRetainedValue() as? [TISInputSource],
+              let source = sources.first else { return }
+        TISSelectInputSource(source)
     }
 }

@@ -49,3 +49,12 @@ targets:
       path: Sources/Notty/Notty.entitlements
       properties:
         com.apple.security.automation.apple-events: true
+
+  NottyTool:
+    type: tool
+    platform: macOS
+    sources:
+      - Sources/NottyTool
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"

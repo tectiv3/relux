@@ -3,17 +3,22 @@ import SwiftUI
 struct OverlayView: View {
     @Environment(AppState.self) private var appState
     @State private var query: String = ""
-    @State private var rawAnswer: String = ""
-    @State private var sources: [SourceNote] = []
-    @State private var isGenerating: Bool = false
+    @State private var results: [SearchItem] = []
     @State private var selectedIndex: Int = 0
+
+    // LLM generation state
+    @State private var rawAnswer: String = ""
+    @State private var isGenerating: Bool = false
+
+    // Actions menu state
+    @State private var showActions: Bool = false
+    @State private var actionIndex: Int = 0
 
     /// Display-ready answer with thinking blocks stripped
     private var answer: String {
         Self.stripThinkingBlocks(rawAnswer)
     }
 
-    /// True when model is inside <think>...</think> (hasn't closed yet)
     private var isThinking: Bool {
         rawAnswer.contains("<think>") && !rawAnswer.contains("</think>")
     }
@@ -25,14 +30,39 @@ struct OverlayView: View {
             }
             return "Indexing notes..."
         }
-        if !appState.mlx.isLLMLoaded {
-            return "No model loaded — open Settings to select one."
-        }
         return nil
     }
 
     private var hasResults: Bool {
-        !answer.isEmpty || isGenerating || !sources.isEmpty
+        !results.isEmpty || !answer.isEmpty || isGenerating
+    }
+
+    private var currentActions: [ItemAction] {
+        guard selectedIndex < results.count else { return [] }
+        let item = results[selectedIndex]
+        switch item.kind {
+        case .note:
+            return [
+                ItemAction(label: "Open in Notes", icon: "arrow.up.forward.app", shortcut: "⏎") {
+                    openSelectedItem()
+                },
+                ItemAction(label: "Ask AI about this", icon: "sparkles", shortcut: nil) {
+                    askAIAboutSelected()
+                },
+                ItemAction(label: "Copy snippet", icon: "doc.on.clipboard", shortcut: nil) {
+                    copySnippet()
+                },
+            ]
+        case .app:
+            return [
+                ItemAction(label: "Launch", icon: "arrow.up.forward.app", shortcut: "⏎") {
+                    openSelectedItem()
+                },
+                ItemAction(label: "Show in Finder", icon: "folder", shortcut: nil) {
+                    showInFinder()
+                },
+            ]
+        }
     }
 
     var body: some View {
@@ -47,33 +77,74 @@ struct OverlayView: View {
                     .padding(16)
             }
 
-            if !sources.isEmpty {
-                sourcesSection
+            if showActions {
+                actionsMenu
+            } else {
+                if !results.isEmpty {
+                    resultsSection
+                }
+
+                if !answer.isEmpty || isGenerating {
+                    Divider()
+                    answerSection
+                }
             }
 
-            if !answer.isEmpty || isGenerating {
-                Divider()
-                answerSection
-            }
+            Spacer(minLength: 0)
 
             Divider()
             bottomBar
         }
-        .frame(width: 680)
+        .frame(width: 750)
+        .frame(maxHeight: .infinity)
+        .task(id: query) {
+            performSearch(query)
+        }
         .onKeyPress(.upArrow) {
-            guard !sources.isEmpty else { return .ignored }
+            if showActions {
+                actionIndex = max(0, actionIndex - 1)
+                return .handled
+            }
+            guard !results.isEmpty else { return .ignored }
             selectedIndex = max(0, selectedIndex - 1)
             return .handled
         }
         .onKeyPress(.downArrow) {
-            guard !sources.isEmpty else { return .ignored }
-            selectedIndex = min(sources.count - 1, selectedIndex + 1)
+            if showActions {
+                actionIndex = min(currentActions.count - 1, actionIndex + 1)
+                return .handled
+            }
+            guard !results.isEmpty else { return .ignored }
+            selectedIndex = min(results.count - 1, selectedIndex + 1)
             return .handled
         }
+        .onKeyPress(.return) {
+            if showActions {
+                let actions = currentActions
+                guard actionIndex < actions.count else { return .ignored }
+                actions[actionIndex].action()
+                showActions = false
+                return .handled
+            }
+            openSelectedItem()
+            return .handled
+        }
+        .onKeyPress(.escape) {
+            if showActions {
+                showActions = false
+                return .handled
+            }
+            return .ignored
+        }
         .background {
-            Button("") { openSelectedNote() }
-                .keyboardShortcut(.return, modifiers: .command)
-                .hidden()
+            // Cmd+K to toggle actions menu
+            Button("") {
+                guard !results.isEmpty, selectedIndex < results.count else { return }
+                actionIndex = 0
+                showActions.toggle()
+            }
+            .keyboardShortcut("k", modifiers: .command)
+            .hidden()
         }
     }
 
@@ -84,58 +155,135 @@ struct OverlayView: View {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(.secondary)
                 .font(.system(size: 16))
-            TextField("Ask your notes...", text: $query)
+            TextField("Search notes and apps...", text: $query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 16))
-                .onSubmit { submitQuery() }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
     }
 
-    // MARK: - Sources Section
+    // MARK: - Results Section
 
-    private var sourcesSection: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(sources.enumerated()), id: \.element.id) { index, source in
-                sourceRow(source: source, isSelected: index == selectedIndex)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        selectedIndex = index
-                        openSelectedNote()
+    private var resultsSection: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(Array(results.enumerated()), id: \.element.id) { index, item in
+                        resultRow(item: item, isSelected: index == selectedIndex)
+                            .id(index)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selectedIndex = index
+                                openSelectedItem()
+                            }
                     }
+                }
+            }
+            .frame(maxHeight: 400)
+            .onChange(of: selectedIndex) { _, newIndex in
+                withAnimation {
+                    proxy.scrollTo(newIndex, anchor: .center)
+                }
             }
         }
     }
 
-    private func sourceRow(source: SourceNote, isSelected: Bool) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "doc.text")
-                .foregroundColor(isSelected ? .white.opacity(0.8) : .secondary)
-                .font(.system(size: 12))
-                .padding(.top, 3)
+    @ViewBuilder
+    private func itemIcon(for item: SearchItem) -> some View {
+        if item.kind == .app, let path = item.meta["path"] {
+            let nsImage = NSWorkspace.shared.icon(forFile: path)
+            Image(nsImage: nsImage)
+                .resizable()
+                .frame(width: 24, height: 24)
+        } else {
+            Image(systemName: item.icon)
+                .foregroundColor(.secondary)
+                .font(.system(size: 14))
+                .frame(width: 24, height: 24)
+        }
+    }
 
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 8) {
-                    Text(source.title)
-                        .font(.system(size: 13, weight: .medium))
-                        .lineLimit(1)
-                    Text(source.folder)
-                        .font(.system(size: 12))
-                        .foregroundColor(isSelected ? .white.opacity(0.6) : .secondary)
-                }
-                if !source.snippet.isEmpty {
-                    Text(source.snippet)
-                        .font(.system(size: 12))
-                        .foregroundColor(isSelected ? .white.opacity(0.7) : .secondary)
-                        .lineLimit(1)
-                }
-            }
+    private func resultRow(item: SearchItem, isSelected: Bool) -> some View {
+        HStack(spacing: 10) {
+            itemIcon(for: item)
+
+            Text(item.title)
+                .font(.system(size: 13, weight: .medium))
+                .lineLimit(1)
+
+            Text(item.subtitle)
+                .font(.system(size: 12))
+                .foregroundColor(isSelected ? .white.opacity(0.5) : .secondary)
+                .lineLimit(1)
 
             Spacer()
+
+            Text(item.kind == .app ? "Application" : "Notes")
+                .font(.system(size: 11))
+                .foregroundColor(isSelected ? .white.opacity(0.5) : .secondary)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isSelected ? Color.accentColor : Color.clear)
+                .padding(.horizontal, 4)
+        )
+        .foregroundColor(isSelected ? .white : .primary)
+    }
+
+    // MARK: - Actions Menu
+
+    private var actionsMenu: some View {
+        VStack(spacing: 0) {
+            if selectedIndex < results.count {
+                HStack(spacing: 6) {
+                    Image(systemName: results[selectedIndex].icon)
+                        .font(.system(size: 12))
+                    Text(results[selectedIndex].title)
+                        .font(.system(size: 12, weight: .medium))
+                    Spacer()
+                }
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+
+                Divider()
+            }
+
+            ForEach(Array(currentActions.enumerated()), id: \.offset) { index, action in
+                actionRow(action: action, isSelected: index == actionIndex)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        action.action()
+                        showActions = false
+                    }
+            }
+        }
+        .frame(maxHeight: 300)
+    }
+
+    private func actionRow(action: ItemAction, isSelected: Bool) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: action.icon)
+                .foregroundColor(isSelected ? .white.opacity(0.8) : .secondary)
+                .font(.system(size: 13))
+                .frame(width: 20)
+
+            Text(action.label)
+                .font(.system(size: 13))
+
+            Spacer()
+
+            if let shortcut = action.shortcut {
+                Text(shortcut)
+                    .font(.system(size: 11))
+                    .foregroundColor(isSelected ? .white.opacity(0.6) : .secondary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(isSelected ? Color.accentColor : Color.clear)
@@ -171,17 +319,23 @@ struct OverlayView: View {
             }
             .padding(16)
         }
-        .frame(maxHeight: 200)
+        .frame(minHeight: 60, maxHeight: 350)
     }
 
     // MARK: - Bottom Bar
 
     private var bottomBar: some View {
         HStack(spacing: 16) {
-            keyboardHint(key: "\u{23CE}", label: "Ask")
-            keyboardHint(key: "\u{2318}\u{23CE}", label: "Open")
-            keyboardHint(key: "\u{2191}\u{2193}", label: "Navigate")
-            keyboardHint(key: "esc", label: "Close")
+            if showActions {
+                keyboardHint(key: "\u{23CE}", label: "Select")
+                keyboardHint(key: "\u{2191}\u{2193}", label: "Navigate")
+                keyboardHint(key: "esc", label: "Back")
+            } else {
+                keyboardHint(key: "\u{23CE}", label: "Open")
+                keyboardHint(key: "\u{2318}K", label: "Actions")
+                keyboardHint(key: "\u{2191}\u{2193}", label: "Navigate")
+                keyboardHint(key: "esc", label: "Close")
+            }
             Spacer()
         }
         .padding(.horizontal, 16)
@@ -205,12 +359,40 @@ struct OverlayView: View {
 
     // MARK: - Actions
 
-    private func submitQuery() {
-        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+    private func performSearch(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            results = []
+            selectedIndex = 0
+            showActions = false
+            return
+        }
+        results = appState.performSearch(query: trimmed)
+        selectedIndex = 0
+        showActions = false
+    }
+
+    private func openSelectedItem() {
+        guard selectedIndex < results.count else { return }
+        let item = results[selectedIndex]
+        appState.recordSelection(query: query, item: item)
+        switch item.kind {
+        case .note:
+            if let noteId = item.meta["noteId"] {
+                NoteExtractor.openNote(id: noteId)
+            }
+        case .app:
+            if let path = item.meta["path"] {
+                NSWorkspace.shared.open(URL(fileURLWithPath: path))
+            }
+        }
+    }
+
+    private func askAIAboutSelected() {
+        guard selectedIndex < results.count else { return }
+        showActions = false
         isGenerating = true
         rawAnswer = ""
-        sources = []
-        selectedIndex = 0
 
         Task { @MainActor in
             guard let ext = appState.notesExtension else {
@@ -222,8 +404,8 @@ struct OverlayView: View {
                 switch result.kind {
                 case .token(let text):
                     rawAnswer += text
-                case .sources(let s):
-                    sources = s
+                case .sources:
+                    break
                 case .error(let msg):
                     rawAnswer += "\n[Error: \(msg)]"
                 case .done:
@@ -234,24 +416,42 @@ struct OverlayView: View {
         }
     }
 
-    /// Strip <think>...</think> blocks. Operates on full accumulated raw text.
+    private func copySnippet() {
+        guard selectedIndex < results.count else { return }
+        let item = results[selectedIndex]
+        let text = item.meta["snippet"] ?? item.title
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        showActions = false
+    }
+
+    private func showInFinder() {
+        guard selectedIndex < results.count else { return }
+        let item = results[selectedIndex]
+        if let path = item.meta["path"] {
+            NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
+        }
+        showActions = false
+    }
+
     private static func stripThinkingBlocks(_ text: String) -> String {
         var result = text
-        // Remove complete <think>...</think> blocks
         while let start = result.range(of: "<think>"),
               let end = result.range(of: "</think>") {
             result.removeSubrange(start.lowerBound..<end.upperBound)
         }
-        // Hide incomplete <think> block (still streaming)
         if let start = result.range(of: "<think>") {
             result = String(result[..<start.lowerBound])
         }
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+}
 
-    private func openSelectedNote() {
-        guard selectedIndex < sources.count else { return }
-        let note = sources[selectedIndex]
-        NoteExtractor.openNote(id: note.id)
-    }
+// MARK: - Supporting Types
+
+private struct ItemAction {
+    let label: String
+    let icon: String
+    let shortcut: String?
+    let action: () -> Void
 }
