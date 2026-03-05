@@ -7,7 +7,7 @@ enum ScriptRunner {
     private static var toastWindow: NSWindow?
     private static var dismissTask: Task<Void, Never>?
 
-    static func run(_ command: String, env: [String: String]) {
+    static func run(_ command: String, env: [String: String], stdin: String? = nil) {
         Task.detached {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/zsh")
@@ -16,6 +16,14 @@ enum ScriptRunner {
             let pipe = Pipe()
             process.standardOutput = pipe
             process.standardError = pipe
+
+            if let stdin {
+                let inputPipe = Pipe()
+                process.standardInput = inputPipe
+                inputPipe.fileHandleForWriting.write(Data(stdin.utf8))
+                inputPipe.fileHandleForWriting.closeFile()
+            }
+
             try? process.run()
             process.waitUntilExit()
 
