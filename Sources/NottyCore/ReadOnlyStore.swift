@@ -94,6 +94,6 @@ public final class ReadOnlyStore {
                 title: $0.entry.title, folder: $0.entry.folder,
                 chunkText: String($0.entry.chunkText.prefix(120)),
                 score: $0.score, semanticScore: $0.semantic, keywordScore: $0.keyword
-            )}
+            ) }
     }
 }

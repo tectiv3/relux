@@ -19,6 +19,7 @@ struct SettingsView: View {
         TabView {
             generalTab.tabItem { Label("General", systemImage: "gear") }
             modelsTab.tabItem { Label("Models", systemImage: "cpu") }
+            scriptsTab.tabItem { Label("Scripts", systemImage: "terminal") }
         }
         .frame(width: 450, height: 500)
         .onAppear {
@@ -169,6 +170,135 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
+    }
+
+    // MARK: - Scripts Tab
+
+    @State private var newScriptTitle = ""
+    @State private var newScriptCommand = ""
+
+    private var scriptsTab: some View {
+        Form {
+            Section("Add Script") {
+                TextField("Title", text: $newScriptTitle)
+                TextField("Command", text: $newScriptCommand)
+                Button("Add") {
+                    guard !newScriptTitle.isEmpty, !newScriptCommand.isEmpty else { return }
+                    appState.scriptSearcher.add(title: newScriptTitle, command: newScriptCommand)
+                    newScriptTitle = ""
+                    newScriptCommand = ""
+                }
+                .disabled(newScriptTitle.isEmpty || newScriptCommand.isEmpty)
+            }
+
+            Section("Scripts") {
+                if appState.scriptSearcher.scripts.isEmpty {
+                    Text("No scripts added yet")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(appState.scriptSearcher.scripts) { script in
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(script.title).font(.system(size: 13, weight: .medium))
+                                Text(script.command)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            Button(role: .destructive) {
+                                appState.scriptSearcher.remove(id: script.id)
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }
+            }
+
+            Section {
+                ForEach(appState.scriptSearcher.envVars) { envVar in
+                    EnvVarRow(envVar: envVar) { updated in
+                        appState.scriptSearcher.updateEnvVar(updated)
+                    } onDelete: {
+                        appState.scriptSearcher.removeEnvVar(id: envVar.id)
+                    }
+                }
+                Button {
+                    appState.scriptSearcher.addEnvVar()
+                } label: {
+                    Label("Add Variable", systemImage: "plus")
+                }
+                .buttonStyle(.borderless)
+            } header: {
+                Text("Environment Variables")
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+    }
+
+    // MARK: - Env Var Row
+
+    private struct EnvVarRow: View {
+        let envVar: EnvVar
+        let onChange: (EnvVar) -> Void
+        let onDelete: () -> Void
+
+        @State private var name: String
+        @State private var value: String
+        @State private var enabled: Bool
+
+        init(envVar: EnvVar, onChange: @escaping (EnvVar) -> Void, onDelete: @escaping () -> Void) {
+            self.envVar = envVar
+            self.onChange = onChange
+            self.onDelete = onDelete
+            _name = State(initialValue: envVar.name)
+            _value = State(initialValue: envVar.value)
+            _enabled = State(initialValue: envVar.enabled)
+        }
+
+        var body: some View {
+            HStack(spacing: 8) {
+                Toggle("", isOn: $enabled)
+                    .labelsHidden()
+                    .toggleStyle(.checkbox)
+                    .onChange(of: enabled) { _, new in
+                        var updated = envVar
+                        updated.enabled = new
+                        onChange(updated)
+                    }
+
+                TextField("NAME", text: $name)
+                    .font(.system(size: 12, design: .monospaced))
+                    .frame(width: 140)
+                    .onSubmit { commitName() }
+                    .onChange(of: name) { _, _ in commitName() }
+
+                TextField("value", text: $value)
+                    .font(.system(size: 12, design: .monospaced))
+                    .onSubmit { commitValue() }
+                    .onChange(of: value) { _, _ in commitValue() }
+
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "minus.circle")
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+
+        private func commitName() {
+            var updated = envVar
+            updated.name = name
+            onChange(updated)
+        }
+
+        private func commitValue() {
+            var updated = envVar
+            updated.value = value
+            onChange(updated)
+        }
     }
 
     // MARK: - Helpers

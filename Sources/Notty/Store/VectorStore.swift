@@ -1,7 +1,7 @@
 import Foundation
 import NottyCore
-import SQLite3
 import os
+import SQLite3
 
 private let log = Logger(subsystem: "com.notty.app", category: "vectorstore")
 
@@ -31,7 +31,7 @@ enum StoreError: Error {
 @MainActor
 final class VectorStore {
     // nonisolated(unsafe) needed so deinit can call sqlite3_close
-    nonisolated(unsafe) private var db: OpaquePointer?
+    private nonisolated(unsafe) var db: OpaquePointer?
     private var cache: [EmbeddingEntry] = []
 
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -168,7 +168,8 @@ final class VectorStore {
     }
 
     func search(queryEmbedding: [Float], queryText: String = "", topK: Int = 5, minScore: Float = 0.1) -> [SearchResult] {
-        log.info("Search: cache has \(self.cache.count) entries, query embedding dim=\(queryEmbedding.count)")
+        let cacheSize = cache.count
+        log.info("Search: cache has \(cacheSize) entries, query embedding dim=\(queryEmbedding.count)")
 
         let queryTerms = queryText.lowercased().split(separator: " ").map(String.init)
         var scored: [(entry: EmbeddingEntry, score: Float)] = []
@@ -177,11 +178,10 @@ final class VectorStore {
             let semantic = cosineSimilarity(queryEmbedding, entry.embedding)
             let keyword = keywordScore(terms: queryTerms, title: entry.title, text: entry.chunkText)
 
-            var score: Float
-            if keyword > 0 {
-                score = 0.4 * semantic + 0.6 * keyword
+            var score: Float = if keyword > 0 {
+                0.4 * semantic + 0.6 * keyword
             } else {
-                score = semantic
+                semantic
             }
 
             score = applyFolderPenalty(score, folder: entry.folder)

@@ -48,7 +48,7 @@ enum ModelDiscovery {
 
     // MARK: - HuggingFace Cache
 
-    // HF cache layout: hub/models--org--name/snapshots/<hash>/ (files are symlinks to ../../blobs/)
+    /// HF cache layout: hub/models--org--name/snapshots/<hash>/ (files are symlinks to ../../blobs/)
     private static func discoverHuggingFaceModels(at baseURL: URL, fm: FileManager) -> [LocalModel] {
         var models: [LocalModel] = []
 

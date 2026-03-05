@@ -74,6 +74,15 @@ struct OverlayView: View {
                     openSelectedItem()
                 },
             ]
+        case .script:
+            return [
+                ItemAction(label: "Run", icon: "play.fill", shortcut: "⏎") {
+                    openSelectedItem()
+                },
+                ItemAction(label: "Remove from history", icon: "trash", shortcut: nil) {
+                    removeFromHistory()
+                },
+            ]
         }
     }
 
@@ -425,6 +434,7 @@ struct OverlayView: View {
         case .note: item.meta["folder"] ?? "Notes"
         case .app: "Application"
         case .webSearch: "Web Search"
+        case .script: "Script"
         }
     }
 
@@ -454,6 +464,11 @@ struct OverlayView: View {
                 if let url = components.url {
                     NSWorkspace.shared.open(url)
                 }
+            }
+        case .script:
+            if let command = item.meta["command"] {
+                NSApp.keyWindow?.close()
+                ScriptRunner.run(command, env: appState.scriptSearcher.buildEnvironment())
             }
         }
     }

@@ -34,7 +34,8 @@ final class Indexer {
                     for note in notes {
                         if !full,
                            let stored = store.getModifiedDate(noteId: note.id),
-                           abs(stored.timeIntervalSince(note.modifiedDate)) < 1.0 {
+                           abs(stored.timeIntervalSince(note.modifiedDate)) < 1.0
+                        {
                             skipped += 1
                             indexed += 1
                             continue

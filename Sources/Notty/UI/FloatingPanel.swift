@@ -26,10 +26,15 @@ final class FloatingPanel: NSPanel {
         contentView = visualEffect
     }
 
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
+    override var canBecomeKey: Bool {
+        true
+    }
 
-    override func cancelOperation(_ sender: Any?) {
+    override var canBecomeMain: Bool {
+        false
+    }
+
+    override func cancelOperation(_: Any?) {
         close()
     }
 

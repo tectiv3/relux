@@ -8,10 +8,10 @@ final class NoteExtractor: Sendable {
 
         var errorDescription: String? {
             switch self {
-            case .scriptFailed(let message):
-                return "AppleScript execution failed: \(message)"
+            case let .scriptFailed(message):
+                "AppleScript execution failed: \(message)"
             case .notesAppUnavailable:
-                return "Notes.app is not available"
+                "Notes.app is not available"
             }
         }
     }
@@ -23,25 +23,25 @@ final class NoteExtractor: Sendable {
         await Self.ensureNotesRunning()
 
         let script = """
-            set output to ""
-            tell application "Notes"
-                repeat with eachNote in every note
+        set output to ""
+        tell application "Notes"
+            repeat with eachNote in every note
+                try
+                    set noteId to id of eachNote
+                    set noteTitle to name of eachNote
+                    set noteBody to body of eachNote
+                    set noteFolder to "Unknown"
                     try
-                        set noteId to id of eachNote
-                        set noteTitle to name of eachNote
-                        set noteBody to body of eachNote
-                        set noteFolder to "Unknown"
-                        try
-                            set c to container of eachNote
-                            set noteFolder to name of c
-                        end try
-                        set modDate to modification date of eachNote
-                        set output to output & "<<<NOTE>>>" & noteId & "<<<SEP>>>" & noteTitle & "<<<SEP>>>" & noteBody & "<<<SEP>>>" & noteFolder & "<<<SEP>>>" & (modDate as string)
+                        set c to container of eachNote
+                        set noteFolder to name of c
                     end try
-                end repeat
-            end tell
-            return output
-            """
+                    set modDate to modification date of eachNote
+                    set output to output & "<<<NOTE>>>" & noteId & "<<<SEP>>>" & noteTitle & "<<<SEP>>>" & noteBody & "<<<SEP>>>" & noteFolder & "<<<SEP>>>" & (modDate as string)
+                end try
+            end repeat
+        end tell
+        return output
+        """
 
         // AppleScript execution blocks the calling thread; run on a background thread
         let output: String = try await withCheckedThrowingContinuation { continuation in
@@ -54,7 +54,7 @@ final class NoteExtractor: Sendable {
                 var errorDict: NSDictionary?
                 let result = appleScript.executeAndReturnError(&errorDict)
 
-                if let errorDict = errorDict {
+                if let errorDict {
                     let message =
                         errorDict[NSAppleScript.errorMessage] as? String ?? "Unknown AppleScript error"
                     continuation.resume(throwing: ExtractionError.scriptFailed(message))
@@ -143,11 +143,11 @@ final class NoteExtractor: Sendable {
     static func openNote(id: String) {
         let escaped = id.replacingOccurrences(of: "\"", with: "\\\"")
         let script = """
-            tell application "Notes"
-                activate
-                show note id "\(escaped)"
-            end tell
-            """
+        tell application "Notes"
+            activate
+            show note id "\(escaped)"
+        end tell
+        """
         if let appleScript = NSAppleScript(source: script) {
             var error: NSDictionary?
             appleScript.executeAndReturnError(&error)

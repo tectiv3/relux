@@ -48,7 +48,7 @@ final class FrecencyTracker {
             title: item.title,
             subtitle: item.subtitle,
             icon: item.icon,
-            kind: item.kind == .app ? "app" : "note",
+            kind: { switch item.kind { case .app: "app"; case .script: "script"; default: "note" } }(),
             meta: item.meta,
             lastUsed: Date()
         )
@@ -73,7 +73,7 @@ final class FrecencyTracker {
                 title: stored.title,
                 subtitle: stored.subtitle,
                 icon: stored.icon,
-                kind: stored.kind == "app" ? .app : .note,
+                kind: { switch stored.kind { case "app": .app; case "script": .script; default: .note } }(),
                 meta: stored.meta
             )
         }

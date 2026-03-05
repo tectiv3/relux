@@ -11,6 +11,7 @@ final class AppState {
     var indexer: Indexer?
     var queryEngine: QueryEngine?
     let appSearcher = AppSearcher()
+    let scriptSearcher = ScriptSearcher()
     let frecency = FrecencyTracker()
 
     var isReady: Bool {
@@ -58,9 +59,11 @@ final class AppState {
         let limit = maxSearchResults
         let noteResults = queryEngine?.searchOnly(query, topK: limit) ?? []
         let appResults = appSearcher.search(query, limit: limit)
+        let scriptResults = scriptSearcher.search(query, limit: limit)
 
         var merged: [SearchItem] = []
         merged.append(contentsOf: appResults)
+        merged.append(contentsOf: scriptResults)
         merged.append(contentsOf: noteResults)
 
         let q = query
