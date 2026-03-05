@@ -36,8 +36,6 @@ targets:
       - target: ReluxCore
       - package: mlx-swift
         product: MLX
-      - package: mlx-swift
-        product: MLXNN
       - package: mlx-swift-lm
         product: MLXLLM
       - package: mlx-swift-lm
