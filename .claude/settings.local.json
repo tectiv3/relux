@@ -10,7 +10,8 @@
       "Bash(xcodegen generate:*)",
       "Bash(xcodebuild build:*)",
       "Bash(xcodebuild:*)",
-      "Bash(swiftformat:*)"
+      "Bash(swiftformat:*)",
+      "Bash(/opt/homebrew/bin/swiftformat:*)"
     ]
   }
 }
