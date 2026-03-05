@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var selectedLLM: LocalModel?
     @State private var selectedEmbedder: LocalModel?
     @State private var selectedInputSourceId: String = UserDefaults.standard.string(forKey: "forceInputSourceId") ?? ""
+    @State private var clearQueryOnOpen: Bool = UserDefaults.standard.bool(forKey: "clearQueryOnOpen")
     @State private var availableInputSources: [(id: String, name: String)] = []
 
     var body: some View {
@@ -107,6 +108,13 @@ struct SettingsView: View {
 
     private var generalTab: some View {
         Form {
+            Section("Behavior") {
+                Toggle("Clear search on open", isOn: $clearQueryOnOpen)
+                    .onChange(of: clearQueryOnOpen) { _, newValue in
+                        UserDefaults.standard.set(newValue, forKey: "clearQueryOnOpen")
+                    }
+            }
+
             Section("Keyboard Layout") {
                 Picker("Force layout on open:", selection: $selectedInputSourceId) {
                     Text("Don't change").tag("")

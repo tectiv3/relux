@@ -114,6 +114,11 @@ struct OverlayView: View {
         .task(id: query) {
             performSearch(query)
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            if UserDefaults.standard.bool(forKey: "clearQueryOnOpen") {
+                query = ""
+            }
+        }
         .onKeyPress(.upArrow) {
             if showActions {
                 actionIndex = max(0, actionIndex - 1)
@@ -174,7 +179,7 @@ struct OverlayView: View {
                 .font(.system(size: 16))
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Results Section
@@ -183,6 +188,7 @@ struct OverlayView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 0) {
+                    Spacer().frame(height: 4)
                     ForEach(Array(results.enumerated()), id: \.element.id) { index, item in
                         resultRow(item: item, isSelected: index == selectedIndex)
                             .id(index)
@@ -253,16 +259,17 @@ struct OverlayView: View {
     private var actionsMenu: some View {
         VStack(spacing: 0) {
             if selectedIndex < results.count {
+                let item = results[selectedIndex]
                 HStack(spacing: 6) {
-                    Image(systemName: results[selectedIndex].icon)
-                        .font(.system(size: 12))
-                    Text(results[selectedIndex].title)
+                    itemIcon(for: item)
+                        .scaleEffect(0.7)
+                    Text(item.title)
                         .font(.system(size: 12, weight: .medium))
                     Spacer()
                 }
                 .foregroundColor(.secondary)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
 
                 Divider()
             }
@@ -276,7 +283,7 @@ struct OverlayView: View {
                     }
             }
         }
-        .frame(maxHeight: 300)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func actionRow(action: ItemAction, isSelected: Bool) -> some View {
@@ -297,8 +304,8 @@ struct OverlayView: View {
                     .foregroundColor(isSelected ? .white.opacity(0.6) : .secondary)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(isSelected ? Color.accentColor : Color.clear)
