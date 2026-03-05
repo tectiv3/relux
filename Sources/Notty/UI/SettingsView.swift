@@ -206,6 +206,16 @@ struct SettingsView: View {
                                     .lineLimit(1)
                             }
                             Spacer()
+                            Toggle("stdin", isOn: Binding(
+                                get: { script.acceptsSelection },
+                                set: { newValue in
+                                    var updated = script
+                                    updated.acceptsSelection = newValue
+                                    appState.scriptSearcher.update(updated)
+                                }
+                            ))
+                            .toggleStyle(.checkbox)
+                            .help("Pass selected text as stdin")
                             Button(role: .destructive) {
                                 appState.scriptSearcher.remove(id: script.id)
                             } label: {
