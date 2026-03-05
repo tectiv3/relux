@@ -376,7 +376,7 @@ struct ClipboardHistoryView: View {
         .padding(.vertical, 8)
     }
 
-    private func infoRow<Content: View>(label: String, @ViewBuilder content: () -> Content) -> some View {
+    private func infoRow(label: String, @ViewBuilder content: () -> some View) -> some View {
         HStack {
             Text(label)
                 .foregroundColor(.secondary)
