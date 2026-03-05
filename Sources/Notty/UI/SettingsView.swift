@@ -1,8 +1,10 @@
+// swiftlint:disable file_length
 import Carbon
 import KeyboardShortcuts
 import ServiceManagement
 import SwiftUI
 
+// swiftlint:disable:next type_body_length
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var discoveredModels: [LocalModel] = []
@@ -14,8 +16,10 @@ struct SettingsView: View {
     @State private var selectedAppearance: String = UserDefaults.standard.string(forKey: "appAppearance") ?? "system"
     @State private var availableInputSources: [(id: String, name: String)] = getKeyboardLayouts()
     @State private var showMaxResults: Int = UserDefaults.standard.object(forKey: "maxSearchResults") as? Int ?? 10
-    @State private var clipboardEnabled: Bool = UserDefaults.standard.object(forKey: "clipboardEnabled") as? Bool ?? true
-    @State private var clipboardRetention: Int = UserDefaults.standard.object(forKey: "clipboardRetentionMonths") as? Int ?? 3
+    @State private var clipboardEnabled: Bool =
+        UserDefaults.standard.object(forKey: "clipboardEnabled") as? Bool ?? true
+    @State private var clipboardRetention: Int =
+        UserDefaults.standard.object(forKey: "clipboardRetentionMonths") as? Int ?? 3
     @State private var disabledApps: [DisabledApp] = []
     @State private var showClearConfirmation = false
 
@@ -455,8 +459,8 @@ struct SettingsView: View {
     // MARK: - Helpers
 
     private func formatSize(_ bytes: UInt64) -> String {
-        let gb = Double(bytes) / 1_073_741_824
-        return String(format: "%.1f GB", gb)
+        let sizeGB = Double(bytes) / 1_073_741_824
+        return String(format: "%.1f GB", sizeGB)
     }
 
     private func applyAppearance(_ mode: String) {
@@ -475,10 +479,14 @@ struct SettingsView: View {
 
             guard let typeRef = TISGetInputSourceProperty(source, kTISPropertyInputSourceType) else { continue }
             let type = Unmanaged<CFString>.fromOpaque(typeRef).takeUnretainedValue() as String
-            guard type == kTISTypeKeyboardLayout as String || type == kTISTypeKeyboardInputMode as String else { continue }
+            guard type == kTISTypeKeyboardLayout as String
+                || type == kTISTypeKeyboardInputMode as String else { continue }
 
-            guard let selectableRef = TISGetInputSourceProperty(source, kTISPropertyInputSourceIsSelectCapable) else { continue }
-            let selectable = Unmanaged<CFNumber>.fromOpaque(selectableRef).takeUnretainedValue() as! Bool
+            guard let selectableRef = TISGetInputSourceProperty(
+                source, kTISPropertyInputSourceIsSelectCapable
+            ) else { continue }
+            let selectable = (Unmanaged<CFNumber>.fromOpaque(selectableRef)
+                .takeUnretainedValue() as? Bool) ?? false
             guard selectable else { continue }
 
             guard let idRef = TISGetInputSourceProperty(source, kTISPropertyInputSourceID),

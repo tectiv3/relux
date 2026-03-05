@@ -52,23 +52,22 @@ final class AppState {
     }
 
     func setup() throws {
-        let s = try VectorStore()
-        store = s
-        let qe = QueryEngine(store: s, mlx: mlx)
-        queryEngine = qe
-        indexer = Indexer(store: s, mlx: mlx)
-        try s.loadEmbeddings()
+        let vectorStore = try VectorStore()
+        store = vectorStore
+        queryEngine = QueryEngine(store: vectorStore, mlx: mlx)
+        indexer = Indexer(store: vectorStore, mlx: mlx)
+        try vectorStore.loadEmbeddings()
 
-        let cs = try ClipboardStore()
-        clipboardStore = cs
-        let monitor = ClipboardMonitor(store: cs)
+        let clipStore = try ClipboardStore()
+        clipboardStore = clipStore
+        let monitor = ClipboardMonitor(store: clipStore)
         clipboardMonitor = monitor
         monitor.start()
 
         // Clean up expired clipboard entries
         let retentionMonths = UserDefaults.standard.object(forKey: "clipboardRetentionMonths") as? Int ?? 3
         if let cutoffDate = Calendar.current.date(byAdding: .month, value: -retentionMonths, to: Date()) {
-            try? cs.deleteExpired(before: cutoffDate)
+            try? clipStore.deleteExpired(before: cutoffDate)
         }
     }
 
@@ -92,10 +91,10 @@ final class AppState {
         var appResults = appSearcher.search(query, limit: limit)
         var scriptResults = scriptSearcher.search(query, limit: limit)
 
-        let q = query
-        appResults.sort { frecency.boost(query: q, itemId: $0.id) > frecency.boost(query: q, itemId: $1.id) }
-        scriptResults.sort { frecency.boost(query: q, itemId: $0.id) > frecency.boost(query: q, itemId: $1.id) }
-        noteResults.sort { frecency.boost(query: q, itemId: $0.id) > frecency.boost(query: q, itemId: $1.id) }
+        let term = query
+        appResults.sort { frecency.boost(query: term, itemId: $0.id) > frecency.boost(query: term, itemId: $1.id) }
+        scriptResults.sort { frecency.boost(query: term, itemId: $0.id) > frecency.boost(query: term, itemId: $1.id) }
+        noteResults.sort { frecency.boost(query: term, itemId: $0.id) > frecency.boost(query: term, itemId: $1.id) }
 
         return Array((appResults + scriptResults + noteResults).prefix(limit))
     }
@@ -114,7 +113,9 @@ final class AppState {
         let models = ModelDiscovery.discoverModels()
         let llmPath = savedLLMPath
         let embedderPath = savedEmbedderPath
-        log.info("Restore: discovered \(models.count) models, savedLLM=\(llmPath ?? "nil"), savedEmbedder=\(embedderPath ?? "nil")")
+        let llmDesc = llmPath ?? "nil"
+        let embedDesc = embedderPath ?? "nil"
+        log.info("Restore: \(models.count) models, LLM=\(llmDesc), embedder=\(embedDesc)")
 
         if let llmPath {
             if let model = LocalModel.matching(path: llmPath, in: models) {
