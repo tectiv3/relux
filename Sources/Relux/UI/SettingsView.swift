@@ -22,6 +22,12 @@ struct SettingsView: View {
         UserDefaults.standard.object(forKey: "clipboardRetentionMonths") as? Int ?? 3
     @State private var disabledApps: [DisabledApp] = []
     @State private var showClearConfirmation = false
+    @State private var anthropicApiKey: String = ""
+    @State private var translateModel: String = AnthropicService.defaultModel
+    @State private var translateSystemPrompt: String = AnthropicService.defaultSystemPrompt
+    @State private var translateLanguages: [String] = ["English"]
+    @State private var newLanguage: String = ""
+    @State private var showClearTranslateConfirmation: Bool = false
 
     var body: some View {
         TabView {
@@ -29,6 +35,8 @@ struct SettingsView: View {
             notesTab.tabItem { Label("Notes", systemImage: "note.text") }
             scriptsTab.tabItem { Label("Scripts", systemImage: "terminal") }
             clipboardTab.tabItem { Label("Clipboard", systemImage: "clipboard") }
+            translateTab
+                .tabItem { Label("Translate", systemImage: "character.book.closed") }
         }
         .frame(width: 450, height: 500)
         .onAppear {
@@ -454,6 +462,105 @@ struct SettingsView: View {
     private func removeDisabledApp(bundleId: String) {
         appState.clipboardMonitor?.disabledApps.remove(bundleId)
         loadDisabledApps()
+    }
+
+    // MARK: - Translate Tab
+
+    private var translateTab: some View {
+        Form {
+            Section("Anthropic API") {
+                SecureField("API Key", text: $anthropicApiKey)
+                    .onChange(of: anthropicApiKey) { _, newValue in
+                        if newValue.isEmpty {
+                            KeychainHelper.delete(key: "anthropicApiKey")
+                        } else {
+                            KeychainHelper.save(key: "anthropicApiKey", value: newValue)
+                        }
+                    }
+
+                TextField("Model", text: $translateModel)
+                    .onChange(of: translateModel) { _, newValue in
+                        UserDefaults.standard.set(newValue, forKey: "translateModel")
+                    }
+            }
+
+            Section("System Prompt") {
+                TextEditor(text: $translateSystemPrompt)
+                    .font(.system(size: 12, design: .monospaced))
+                    .frame(minHeight: 80)
+                    .onChange(of: translateSystemPrompt) { _, newValue in
+                        UserDefaults.standard.set(newValue, forKey: "translateSystemPrompt")
+                    }
+
+                Button("Reset to Default") {
+                    translateSystemPrompt = AnthropicService.defaultSystemPrompt
+                    UserDefaults.standard.removeObject(forKey: "translateSystemPrompt")
+                }
+                .font(.system(size: 12))
+            }
+
+            Section("Languages") {
+                List {
+                    ForEach(translateLanguages, id: \.self) { lang in
+                        HStack {
+                            Text(lang)
+                            Spacer()
+                            if lang == translateLanguages.first {
+                                Text("Default")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                    .onMove { from, to in
+                        translateLanguages.move(fromOffsets: from, toOffset: to)
+                        UserDefaults.standard.set(translateLanguages, forKey: "translateLanguages")
+                    }
+                    .onDelete { offsets in
+                        guard translateLanguages.count > 1 else { return }
+                        translateLanguages.remove(atOffsets: offsets)
+                        UserDefaults.standard.set(translateLanguages, forKey: "translateLanguages")
+                    }
+                }
+                .frame(minHeight: 80)
+
+                HStack {
+                    TextField("Add language...", text: $newLanguage)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Add") {
+                        let trimmed = newLanguage.trimmingCharacters(in: .whitespaces)
+                        guard !trimmed.isEmpty, !translateLanguages.contains(trimmed) else { return }
+                        translateLanguages.append(trimmed)
+                        UserDefaults.standard.set(translateLanguages, forKey: "translateLanguages")
+                        newLanguage = ""
+                    }
+                    .disabled(newLanguage.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+
+                Text("Top language is the default for quick translation. Drag to reorder.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+
+            Section("History") {
+                Button("Clear Translation History", role: .destructive) {
+                    showClearTranslateConfirmation = true
+                }
+                .confirmationDialog("Clear all translation history?", isPresented: $showClearTranslateConfirmation) {
+                    Button("Clear All", role: .destructive) {
+                        try? appState.translateStore?.clearAll()
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear {
+            anthropicApiKey = KeychainHelper.load(key: "anthropicApiKey") ?? ""
+            translateModel = UserDefaults.standard.string(forKey: "translateModel") ?? AnthropicService.defaultModel
+            translateSystemPrompt = UserDefaults.standard.string(forKey: "translateSystemPrompt")
+                ?? AnthropicService.defaultSystemPrompt
+            translateLanguages = UserDefaults.standard.stringArray(forKey: "translateLanguages") ?? ["English"]
+        }
     }
 
     // MARK: - Helpers

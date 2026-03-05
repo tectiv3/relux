@@ -64,6 +64,7 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Ask AI prepends selection as context to the LLM prompt
 - Bottom bar shows truncated selection preview when captured
 - Requires Accessibility permission (prompted on first launch)
+- Pattern for selection-aware features: any search result item that needs selected text appears only when `currentSelection != nil` (scripts with `acceptsSelection`, translate extension, etc.). The selected text is NOT placed in the search bar — only an indicator is shown. The text is passed to the feature when the user explicitly selects the item.
 
 ## Capture Output Scripts
 

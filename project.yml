@@ -2,7 +2,7 @@ name: Relux
 options:
   bundleIdPrefix: com.relux
   deploymentTarget:
-    macOS: "14.0"
+    macOS: "15.0"
   xcodeVersion: "16.3"
   generateEmptyDirectories: true
 
