@@ -62,16 +62,20 @@ final class MLXService {
 
         var results: [[Float]] = []
         for text in texts {
-            let embedding: [Float] = try await container.perform { model, tokenizer, pooler in
-                let encoded = tokenizer.encode(text: text)
+            let embedding: [Float] = try await container.perform { model, tokenizer, _ in
+                let encoded = tokenizer.encode(text: text, addSpecialTokens: true)
                 let inputArray = MLXArray(encoded).expandedDimensions(axis: 0)
                 let output = model(inputArray, positionIds: nil, tokenTypeIds: nil, attentionMask: nil)
-                let pooled = pooler(output, normalize: true)
+
+                // Mean pooling over hidden states with L2 normalization
+                let meanPooler = MLXEmbedders.Pooling(strategy: .mean)
+                let pooled = meanPooler(output, normalize: true)
                 let flat = pooled.reshaped(-1)
                 eval(flat)
                 return flat.asArray(Float.self)
             }
             results.append(embedding)
+            MLX.GPU.clearCache()
         }
         return results
     }
