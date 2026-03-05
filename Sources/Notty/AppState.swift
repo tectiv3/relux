@@ -53,26 +53,21 @@ final class AppState {
         UserDefaults.standard.object(forKey: "maxSearchResults") as? Int ?? 10
     }
 
-    /// Combined search: notes (keyword) + apps, ranked by frecency
+    /// Combined search: notes (keyword) + apps, grouped by kind, ranked by frecency within each group
     func performSearch(query: String) -> [SearchItem] {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
 
         let limit = maxSearchResults
-        let noteResults = queryEngine?.searchOnly(query, topK: limit) ?? []
-        let appResults = appSearcher.search(query, limit: limit)
-        let scriptResults = scriptSearcher.search(query, limit: limit)
-
-        var merged: [SearchItem] = []
-        merged.append(contentsOf: appResults)
-        merged.append(contentsOf: scriptResults)
-        merged.append(contentsOf: noteResults)
+        var noteResults = queryEngine?.searchOnly(query, topK: limit) ?? []
+        var appResults = appSearcher.search(query, limit: limit)
+        var scriptResults = scriptSearcher.search(query, limit: limit)
 
         let q = query
-        merged.sort { a, b in
-            frecency.boost(query: q, itemId: a.id) > frecency.boost(query: q, itemId: b.id)
-        }
+        appResults.sort { frecency.boost(query: q, itemId: $0.id) > frecency.boost(query: q, itemId: $1.id) }
+        scriptResults.sort { frecency.boost(query: q, itemId: $0.id) > frecency.boost(query: q, itemId: $1.id) }
+        noteResults.sort { frecency.boost(query: q, itemId: $0.id) > frecency.boost(query: q, itemId: $1.id) }
 
-        return Array(merged.prefix(limit))
+        return Array((appResults + scriptResults + noteResults).prefix(limit))
     }
 
     func recordSelection(query: String, item: SearchItem) {

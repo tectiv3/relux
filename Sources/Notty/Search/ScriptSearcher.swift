@@ -119,6 +119,9 @@ final class ScriptSearcher {
                 scored.append((script, 60))
             } else if fuzzyMatch(query: q, target: name) {
                 scored.append((script, 40))
+            } else if script.acceptsSelection {
+                // Always show stdin scripts so the query can be piped to them
+                scored.append((script, 10))
             }
         }
 

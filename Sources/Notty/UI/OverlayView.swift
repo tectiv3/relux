@@ -80,6 +80,22 @@ struct OverlayView: View {
                 },
             ]
         case .script:
+            if !answer.isEmpty, item.meta["capturesOutput"] == "1" {
+                return [
+                    ItemAction(label: "Copy output", icon: "doc.on.clipboard", shortcut: nil) {
+                        copyOutput()
+                    },
+                    ItemAction(label: "Ask AI about this", icon: "sparkles", shortcut: nil) {
+                        askAIAboutOutput()
+                    },
+                    ItemAction(label: "Re-run", icon: "arrow.clockwise", shortcut: nil) {
+                        openSelectedItem()
+                    },
+                    ItemAction(label: "Clear", icon: "xmark", shortcut: nil) {
+                        clearOutput()
+                    },
+                ]
+            }
             return [
                 ItemAction(label: "Run", icon: "play.fill", shortcut: "⏎") {
                     openSelectedItem()
@@ -219,19 +235,64 @@ struct OverlayView: View {
 
     // MARK: - Results Section
 
+    private var groupedResults: [(label: String, items: [(index: Int, item: SearchItem)])] {
+        let isQueryEmpty = query.trimmingCharacters(in: .whitespaces).isEmpty
+        if isQueryEmpty {
+            return [("Recent", Array(results.enumerated().map { ($0.offset, $0.element) }))]
+        }
+
+        var sections: [(label: String, items: [(index: Int, item: SearchItem)])] = []
+        var currentKind: SearchItemKind?
+        var currentItems: [(index: Int, item: SearchItem)] = []
+
+        for (index, item) in results.enumerated() {
+            if item.kind != currentKind {
+                if !currentItems.isEmpty, let kind = currentKind {
+                    sections.append((sectionLabel(for: kind), currentItems))
+                }
+                currentKind = item.kind
+                currentItems = []
+            }
+            currentItems.append((index, item))
+        }
+        if !currentItems.isEmpty, let kind = currentKind {
+            sections.append((sectionLabel(for: kind), currentItems))
+        }
+        return sections
+    }
+
+    private func sectionLabel(for kind: SearchItemKind) -> String {
+        switch kind {
+        case .app: "Applications"
+        case .script: "Scripts"
+        case .note: "Notes"
+        case .webSearch: "Web Search"
+        }
+    }
+
     private var resultsSection: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 0) {
                     Spacer().frame(height: 4)
-                    ForEach(Array(results.enumerated()), id: \.element.id) { index, item in
-                        resultRow(item: item, isSelected: index == selectedIndex)
-                            .id(index)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                selectedIndex = index
-                                openSelectedItem()
-                            }
+                    ForEach(Array(groupedResults.enumerated()), id: \.element.label) { _, section in
+                        Text(section.label)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 8)
+                            .padding(.bottom, 2)
+
+                        ForEach(section.items, id: \.item.id) { index, item in
+                            resultRow(item: item, isSelected: index == selectedIndex)
+                                .id(index)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    selectedIndex = index
+                                    openSelectedItem()
+                                }
+                        }
                     }
                 }
             }
@@ -554,6 +615,48 @@ struct OverlayView: View {
         let text = item.meta["snippet"] ?? item.title
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+        showActions = false
+    }
+
+    private func copyOutput() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(answer, forType: .string)
+        showActions = false
+    }
+
+    private func askAIAboutOutput() {
+        showActions = false
+        let outputText = answer
+        isGenerating = true
+        rawAnswer = ""
+
+        Task { @MainActor in
+            guard let engine = appState.queryEngine else {
+                rawAnswer = "Not ready — please select a model in Settings."
+                isGenerating = false
+                return
+            }
+            let aiQuery = "Context:\n\(outputText)\n\nQuestion: \(query.isEmpty ? "Summarize this" : query)"
+            for await result in engine.query(aiQuery) {
+                switch result.kind {
+                case let .token(text):
+                    rawAnswer += text
+                case .sources:
+                    break
+                case let .error(msg):
+                    rawAnswer += "\n[Error: \(msg)]"
+                case .done:
+                    break
+                }
+            }
+            isGenerating = false
+        }
+    }
+
+    private func clearOutput() {
+        streamingTask?.cancel()
+        rawAnswer = ""
+        isGenerating = false
         showActions = false
     }
 
