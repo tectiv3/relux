@@ -157,4 +157,18 @@ final class MLXService {
         }
         MLX.GPU.clearCache()
     }
+
+    /// Full teardown — prevents lazy reload, unlike unloadModels which keeps model refs
+    func unloadAll() {
+        idleTask?.cancel()
+        idleTask = nil
+        llmContainer = nil
+        embedContainer = nil
+        llmModel = nil
+        embedderModel = nil
+        isLLMLoaded = false
+        isEmbedderLoaded = false
+        loadingStatus = ""
+        MLX.GPU.clearCache()
+    }
 }
