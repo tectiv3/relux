@@ -4,7 +4,7 @@
 
 **Goal:** Capture selected text from any app via Accessibility API and pass it to scripts (stdin), web search (query), and Ask AI (context).
 
-**Architecture:** A `SelectionCapture` utility reads `kAXSelectedTextAttribute` from the focused app before Notty takes focus. The result is stored in `AppState.currentSelection` and consumed by existing action handlers. Scripts opt in via a per-script `acceptsSelection` toggle.
+**Architecture:** A `SelectionCapture` utility reads `kAXSelectedTextAttribute` from the focused app before Relux takes focus. The result is stored in `AppState.currentSelection` and consumed by existing action handlers. Scripts opt in via a per-script `acceptsSelection` toggle.
 
 **Tech Stack:** Swift, AppKit (AXUIElement), SwiftUI
 
@@ -13,7 +13,7 @@
 ### Task 1: Create SelectionCapture utility
 
 **Files:**
-- Create: `Sources/Notty/SelectionCapture.swift`
+- Create: `Sources/Relux/SelectionCapture.swift`
 
 **Step 1: Create the file**
 
@@ -22,7 +22,7 @@ import AppKit
 
 enum SelectionCapture {
     /// Reads the selected text from the currently focused app.
-    /// Must be called BEFORE Notty's panel takes focus.
+    /// Must be called BEFORE Relux's panel takes focus.
     static func captureSelectedText() -> String? {
         let systemWide = AXUIElementCreateSystemWide()
 
@@ -59,7 +59,7 @@ enum SelectionCapture {
 **Step 2: Commit**
 
 ```
-git add Sources/Notty/SelectionCapture.swift
+git add Sources/Relux/SelectionCapture.swift
 git commit -m "feat: add SelectionCapture utility for reading selected text via Accessibility API"
 ```
 
@@ -68,8 +68,8 @@ git commit -m "feat: add SelectionCapture utility for reading selected text via 
 ### Task 2: Add currentSelection to AppState and wire up capture in AppDelegate
 
 **Files:**
-- Modify: `Sources/Notty/AppState.swift` (add property around line 22)
-- Modify: `Sources/Notty/AppDelegate.swift` (modify `togglePanel()` and `applicationDidFinishLaunching`)
+- Modify: `Sources/Relux/AppState.swift` (add property around line 22)
+- Modify: `Sources/Relux/AppDelegate.swift` (modify `togglePanel()` and `applicationDidFinishLaunching`)
 
 **Step 1: Add property to AppState**
 
@@ -110,13 +110,13 @@ In `applicationDidFinishLaunching`, add before the `setupPanel()` call (around l
 
 ```
 swiftformat Sources/
-xcodebuild -project Notty.xcodeproj -scheme Notty -configuration Debug build
+xcodebuild -project Relux.xcodeproj -scheme Relux -configuration Debug build
 ```
 
 **Step 5: Commit**
 
 ```
-git add Sources/Notty/AppState.swift Sources/Notty/AppDelegate.swift
+git add Sources/Relux/AppState.swift Sources/Relux/AppDelegate.swift
 git commit -m "feat: capture selected text on panel open, store in AppState"
 ```
 
@@ -125,7 +125,7 @@ git commit -m "feat: capture selected text on panel open, store in AppState"
 ### Task 3: Add acceptsSelection to ScriptItem and update ScriptSearcher
 
 **Files:**
-- Modify: `Sources/Notty/Search/ScriptSearcher.swift`
+- Modify: `Sources/Relux/Search/ScriptSearcher.swift`
 
 **Step 1: Add field to ScriptItem**
 
@@ -179,13 +179,13 @@ In the `search` method, add `acceptsSelection` to the meta dict (around line 119
 
 ```
 swiftformat Sources/
-xcodebuild -project Notty.xcodeproj -scheme Notty -configuration Debug build
+xcodebuild -project Relux.xcodeproj -scheme Relux -configuration Debug build
 ```
 
 **Step 5: Commit**
 
 ```
-git add Sources/Notty/Search/ScriptSearcher.swift
+git add Sources/Relux/Search/ScriptSearcher.swift
 git commit -m "feat: add acceptsSelection field to ScriptItem"
 ```
 
@@ -194,7 +194,7 @@ git commit -m "feat: add acceptsSelection field to ScriptItem"
 ### Task 4: Add stdin support to ScriptRunner
 
 **Files:**
-- Modify: `Sources/Notty/Search/ScriptRunner.swift`
+- Modify: `Sources/Relux/Search/ScriptRunner.swift`
 
 **Step 1: Add stdin parameter to run()**
 
@@ -238,13 +238,13 @@ Change the method signature (line 10) and add stdin piping:
 
 ```
 swiftformat Sources/
-xcodebuild -project Notty.xcodeproj -scheme Notty -configuration Debug build
+xcodebuild -project Relux.xcodeproj -scheme Relux -configuration Debug build
 ```
 
 **Step 3: Commit**
 
 ```
-git add Sources/Notty/Search/ScriptRunner.swift
+git add Sources/Relux/Search/ScriptRunner.swift
 git commit -m "feat: add stdin parameter to ScriptRunner.run()"
 ```
 
@@ -253,7 +253,7 @@ git commit -m "feat: add stdin parameter to ScriptRunner.run()"
 ### Task 5: Wire up selection to script execution in OverlayView
 
 **Files:**
-- Modify: `Sources/Notty/UI/OverlayView.swift`
+- Modify: `Sources/Relux/UI/OverlayView.swift`
 
 **Step 1: Update the .script case in openSelectedItem()**
 
@@ -272,13 +272,13 @@ Replace the `.script` case (lines 468-472):
 
 ```
 swiftformat Sources/
-xcodebuild -project Notty.xcodeproj -scheme Notty -configuration Debug build
+xcodebuild -project Relux.xcodeproj -scheme Relux -configuration Debug build
 ```
 
 **Step 3: Commit**
 
 ```
-git add Sources/Notty/UI/OverlayView.swift
+git add Sources/Relux/UI/OverlayView.swift
 git commit -m "feat: pass selection as stdin when running scripts that accept it"
 ```
 
@@ -287,7 +287,7 @@ git commit -m "feat: pass selection as stdin when running scripts that accept it
 ### Task 6: Wire up selection to Ask AI
 
 **Files:**
-- Modify: `Sources/Notty/UI/OverlayView.swift`
+- Modify: `Sources/Relux/UI/OverlayView.swift`
 
 **Step 1: Update askAIAboutSelected()**
 
@@ -333,13 +333,13 @@ Modify the `engine.query()` call (around line 488) to include selection context:
 
 ```
 swiftformat Sources/
-xcodebuild -project Notty.xcodeproj -scheme Notty -configuration Debug build
+xcodebuild -project Relux.xcodeproj -scheme Relux -configuration Debug build
 ```
 
 **Step 3: Commit**
 
 ```
-git add Sources/Notty/UI/OverlayView.swift
+git add Sources/Relux/UI/OverlayView.swift
 git commit -m "feat: prepend selection as context when asking AI"
 ```
 
@@ -348,7 +348,7 @@ git commit -m "feat: prepend selection as context when asking AI"
 ### Task 7: Wire up selection to web search
 
 **Files:**
-- Modify: `Sources/Notty/UI/OverlayView.swift`
+- Modify: `Sources/Relux/UI/OverlayView.swift`
 
 **Step 1: Update performSearch() to use selection as web search query**
 
@@ -390,13 +390,13 @@ In `performSearch()` (line 413), when query is empty but selection exists, add a
 
 ```
 swiftformat Sources/
-xcodebuild -project Notty.xcodeproj -scheme Notty -configuration Debug build
+xcodebuild -project Relux.xcodeproj -scheme Relux -configuration Debug build
 ```
 
 **Step 3: Commit**
 
 ```
-git add Sources/Notty/UI/OverlayView.swift
+git add Sources/Relux/UI/OverlayView.swift
 git commit -m "feat: show web search for selection when query is empty"
 ```
 
@@ -405,7 +405,7 @@ git commit -m "feat: show web search for selection when query is empty"
 ### Task 8: Add selection indicator to bottom bar
 
 **Files:**
-- Modify: `Sources/Notty/UI/OverlayView.swift`
+- Modify: `Sources/Relux/UI/OverlayView.swift`
 
 **Step 1: Update bottomBar**
 
@@ -446,13 +446,13 @@ Add a selection indicator to the bottom bar, showing before the Spacer:
 
 ```
 swiftformat Sources/
-xcodebuild -project Notty.xcodeproj -scheme Notty -configuration Debug build
+xcodebuild -project Relux.xcodeproj -scheme Relux -configuration Debug build
 ```
 
 **Step 3: Commit**
 
 ```
-git add Sources/Notty/UI/OverlayView.swift
+git add Sources/Relux/UI/OverlayView.swift
 git commit -m "feat: show selection indicator in bottom bar"
 ```
 
@@ -461,7 +461,7 @@ git commit -m "feat: show selection indicator in bottom bar"
 ### Task 9: Add acceptsSelection toggle to Settings scripts tab
 
 **Files:**
-- Modify: `Sources/Notty/UI/SettingsView.swift`
+- Modify: `Sources/Relux/UI/SettingsView.swift`
 
 **Step 1: Add toggle to script rows**
 
@@ -502,13 +502,13 @@ Update the script row in `scriptsTab` (around line 199-216). Replace the ForEach
 
 ```
 swiftformat Sources/
-xcodebuild -project Notty.xcodeproj -scheme Notty -configuration Debug build
+xcodebuild -project Relux.xcodeproj -scheme Relux -configuration Debug build
 ```
 
 **Step 3: Commit**
 
 ```
-git add Sources/Notty/UI/SettingsView.swift
+git add Sources/Relux/UI/SettingsView.swift
 git commit -m "feat: add 'stdin' toggle per script in Settings"
 ```
 
@@ -527,7 +527,7 @@ Append to the end of `docs/decisions.md`:
 
 ## Selection Capture
 
-- On hotkey press, selected text is read from the focused app via Accessibility API (`AXUIElement`) BEFORE Notty takes focus
+- On hotkey press, selected text is read from the focused app via Accessibility API (`AXUIElement`) BEFORE Relux takes focus
 - Stored in `AppState.currentSelection`, cleared on panel close
 - Scripts opt in via `acceptsSelection: Bool` — selection is piped as stdin
 - Web search uses selection as query when search bar is empty

@@ -1,6 +1,6 @@
-name: Notty
+name: Relux
 options:
-  bundleIdPrefix: com.notty
+  bundleIdPrefix: com.relux
   deploymentTarget:
     macOS: "14.0"
   xcodeVersion: "16.3"
@@ -18,22 +18,22 @@ packages:
     from: 2.0.0
 
 targets:
-  NottyCore:
+  ReluxCore:
     type: library.static
     platform: macOS
     sources:
-      - Sources/NottyCore
+      - Sources/ReluxCore
     settings:
       base:
         SWIFT_VERSION: "6.0"
 
-  Notty:
+  Relux:
     type: application
     platform: macOS
     sources:
-      - Sources/Notty
+      - Sources/Relux
     dependencies:
-      - target: NottyCore
+      - target: ReluxCore
       - package: mlx-swift
         product: MLX
       - package: mlx-swift
@@ -47,9 +47,9 @@ targets:
       - package: KeyboardShortcuts
     settings:
       base:
-        INFOPLIST_FILE: Sources/Notty/Info.plist
-        PRODUCT_BUNDLE_IDENTIFIER: com.notty.app
-        PRODUCT_NAME: Notty
+        INFOPLIST_FILE: Sources/Relux/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.relux.app
+        PRODUCT_NAME: Relux
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: 1
         CODE_SIGN_IDENTITY: "-"
@@ -57,17 +57,17 @@ targets:
         SWIFT_VERSION: "6.0"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     entitlements:
-      path: Sources/Notty/Notty.entitlements
+      path: Sources/Relux/Relux.entitlements
       properties:
         com.apple.security.automation.apple-events: true
 
-  NottyTool:
+  ReluxTool:
     type: tool
     platform: macOS
     sources:
-      - Sources/NottyTool
+      - Sources/ReluxTool
     dependencies:
-      - target: NottyCore
+      - target: ReluxCore
     settings:
       base:
         SWIFT_VERSION: "6.0"

@@ -1,12 +1,12 @@
 # Selection Capture — Design
 
-Capture selected text from any app via Accessibility API and pass it to Notty actions.
+Capture selected text from any app via Accessibility API and pass it to Relux actions.
 
 ## Capture Mechanism
 
 - New `SelectionCapture` enum with `captureSelectedText() -> String?`
 - Uses `AXUIElement` system-wide element → focused app → focused UI element → `kAXSelectedTextAttribute`
-- Called in `togglePanel()` **before** Notty takes focus (timing-critical)
+- Called in `togglePanel()` **before** Relux takes focus (timing-critical)
 - Result stored in `AppState.currentSelection: String?`, cleared on panel close
 - Prompts for Accessibility permission via `AXIsProcessTrustedWithOptions` on first use
 

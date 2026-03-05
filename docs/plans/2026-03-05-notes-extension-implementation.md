@@ -13,7 +13,7 @@
 ### Task 1: Create ExtensionRegistry
 
 **Files:**
-- Create: `Sources/Notty/Extensions/ExtensionRegistry.swift`
+- Create: `Sources/Relux/Extensions/ExtensionRegistry.swift`
 
 **Step 1: Write ExtensionRegistry class**
 
@@ -58,7 +58,7 @@ final class ExtensionRegistry {
 **Step 2: Commit**
 
 ```bash
-git add Sources/Notty/Extensions/ExtensionRegistry.swift
+git add Sources/Relux/Extensions/ExtensionRegistry.swift
 git commit -m "feat: add ExtensionRegistry for extension enable/disable tracking"
 ```
 
@@ -67,7 +67,7 @@ git commit -m "feat: add ExtensionRegistry for extension enable/disable tracking
 ### Task 2: Wire ExtensionRegistry into AppState
 
 **Files:**
-- Modify: `Sources/Notty/AppState.swift`
+- Modify: `Sources/Relux/AppState.swift`
 
 **Step 1: Add registry property to AppState**
 
@@ -120,7 +120,7 @@ func setNotesEnabled(_ enabled: Bool) {
 **Step 5: Commit**
 
 ```bash
-git add Sources/Notty/AppState.swift
+git add Sources/Relux/AppState.swift
 git commit -m "feat: wire ExtensionRegistry into AppState search and model lifecycle"
 ```
 
@@ -129,7 +129,7 @@ git commit -m "feat: wire ExtensionRegistry into AppState search and model lifec
 ### Task 3: Make MLXService.unloadModels public and add unloadAll
 
 **Files:**
-- Modify: `Sources/Notty/MLX/MLXService.swift`
+- Modify: `Sources/Relux/MLX/MLXService.swift`
 
 **Step 1: Add public unloadAll method**
 
@@ -154,7 +154,7 @@ This differs from the private `unloadModels()` because it also clears `llmModel`
 **Step 2: Commit**
 
 ```bash
-git add Sources/Notty/MLX/MLXService.swift
+git add Sources/Relux/MLX/MLXService.swift
 git commit -m "feat: add MLXService.unloadAll for complete model teardown"
 ```
 
@@ -163,7 +163,7 @@ git commit -m "feat: add MLXService.unloadAll for complete model teardown"
 ### Task 4: Rename Models tab to Notes and add enable toggle
 
 **Files:**
-- Modify: `Sources/Notty/UI/SettingsView.swift`
+- Modify: `Sources/Relux/UI/SettingsView.swift`
 
 **Step 1: Rename tab in body**
 
@@ -226,7 +226,7 @@ if appState.extensionRegistry.isEnabled("notes") {
 **Step 4: Commit**
 
 ```bash
-git add Sources/Notty/UI/SettingsView.swift
+git add Sources/Relux/UI/SettingsView.swift
 git commit -m "feat: rename Models tab to Notes with enable/disable toggle"
 ```
 
@@ -235,7 +235,7 @@ git commit -m "feat: rename Models tab to Notes with enable/disable toggle"
 ### Task 5: Update isReady to respect notes disabled state
 
 **Files:**
-- Modify: `Sources/Notty/AppState.swift`
+- Modify: `Sources/Relux/AppState.swift`
 
 **Step 1: Fix isReady**
 
@@ -255,7 +255,7 @@ Or if `isReady` only gates notes functionality, consider whether it's still need
 **Step 2: Commit**
 
 ```bash
-git add Sources/Notty/AppState.swift
+git add Sources/Relux/AppState.swift
 git commit -m "fix: isReady accounts for notes being disabled"
 ```
 
@@ -272,7 +272,7 @@ swiftformat Sources/
 **Step 2: Build**
 
 ```bash
-xcodebuild -project Notty.xcodeproj -scheme Notty -configuration Debug build
+xcodebuild -project Relux.xcodeproj -scheme Relux -configuration Debug build
 ```
 
 **Step 3: Fix any compilation errors**

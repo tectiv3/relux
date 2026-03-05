@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add a clipboard history extension to Notty that monitors copies, stores them in SQLite, and lets users browse/paste from history via a dedicated hotkey.
+**Goal:** Add a clipboard history extension to Relux that monitors copies, stores them in SQLite, and lets users browse/paste from history via a dedicated hotkey.
 
 **Architecture:** Integrated extension within the existing FloatingPanel. A `panelMode` enum on AppState controls whether OverlayView or ClipboardHistoryView is displayed. Clipboard monitoring uses timer-based polling of `NSPasteboard.general.changeCount`. Paste-back simulates Cmd+V via CGEvent into the previously active app.
 
@@ -13,9 +13,9 @@
 ### Task 1: ClipboardStore — Data Layer
 
 **Files:**
-- Create: `Sources/Notty/Store/ClipboardStore.swift`
+- Create: `Sources/Relux/Store/ClipboardStore.swift`
 
-**Context:** Follow `VectorStore.swift` patterns exactly — raw SQLite3 C API, `@MainActor`, `nonisolated(unsafe)` for db pointer, `StoreError` reuse, same App Support directory and `notty.db` file.
+**Context:** Follow `VectorStore.swift` patterns exactly — raw SQLite3 C API, `@MainActor`, `nonisolated(unsafe)` for db pointer, `StoreError` reuse, same App Support directory and `relux.db` file.
 
 **Step 1: Create ClipboardStore with schema**
 
@@ -25,7 +25,7 @@ import Foundation
 import os
 import SQLite3
 
-private let log = Logger(subsystem: "com.notty.app", category: "clipboardstore")
+private let log = Logger(subsystem: "com.relux.app", category: "clipboardstore")
 
 struct ClipboardEntry: Identifiable, Sendable {
     let id: Int64
@@ -54,11 +54,11 @@ final class ClipboardStore {
     init() throws {
         let fileManager = FileManager.default
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = appSupport.appendingPathComponent("Notty", isDirectory: true)
+        let dir = appSupport.appendingPathComponent("Relux", isDirectory: true)
         imageDir = dir.appendingPathComponent("clipboard", isDirectory: true)
         try fileManager.createDirectory(at: imageDir, withIntermediateDirectories: true)
 
-        let dbPath = dir.appendingPathComponent("notty.db").path
+        let dbPath = dir.appendingPathComponent("relux.db").path
         guard sqlite3_open(dbPath, &db) == SQLITE_OK else {
             throw StoreError.cannotOpen
         }
@@ -306,7 +306,7 @@ final class ClipboardStore {
 
 **Step 2: Build to verify**
 
-Run: `xcodegen generate && xcodebuild -project Notty.xcodeproj -scheme Notty -configuration Debug build`
+Run: `xcodegen generate && xcodebuild -project Relux.xcodeproj -scheme Relux -configuration Debug build`
 
 **Step 3: Commit**
 
@@ -319,7 +319,7 @@ feat: add ClipboardStore data layer for clipboard history
 ### Task 2: ClipboardMonitor — Polling and Capture
 
 **Files:**
-- Create: `Sources/Notty/Clipboard/ClipboardMonitor.swift`
+- Create: `Sources/Relux/Clipboard/ClipboardMonitor.swift`
 
 **Context:** Timer polls `NSPasteboard.general.changeCount` every 0.5s. Captures text, RTF, HTML, and images. Skips disabled apps. Suppresses self-paste recording.
 
@@ -330,7 +330,7 @@ import AppKit
 import Foundation
 import os
 
-private let log = Logger(subsystem: "com.notty.app", category: "clipboardmonitor")
+private let log = Logger(subsystem: "com.relux.app", category: "clipboardmonitor")
 
 @MainActor
 @Observable
@@ -502,7 +502,7 @@ final class ClipboardMonitor {
 
 **Step 2: Build to verify**
 
-Run: `xcodegen generate && xcodebuild -project Notty.xcodeproj -scheme Notty -configuration Debug build`
+Run: `xcodegen generate && xcodebuild -project Relux.xcodeproj -scheme Relux -configuration Debug build`
 
 **Step 3: Commit**
 
@@ -515,20 +515,20 @@ feat: add ClipboardMonitor for polling and capturing clipboard changes
 ### Task 3: Panel Mode Switching — AppState + HotkeyManager
 
 **Files:**
-- Modify: `Sources/Notty/AppState.swift`
-- Modify: `Sources/Notty/HotkeyManager.swift`
+- Modify: `Sources/Relux/AppState.swift`
+- Modify: `Sources/Relux/HotkeyManager.swift`
 
 **Context:** Add `panelMode` enum to AppState, wire up ClipboardStore and ClipboardMonitor lifecycle. Add new keyboard shortcut for clipboard history.
 
 **Step 1: Add panel mode and clipboard properties to AppState**
 
-In `Sources/Notty/HotkeyManager.swift`, add below `toggleNotty`:
+In `Sources/Relux/HotkeyManager.swift`, add below `toggleRelux`:
 
 ```swift
 static let clipboardHistory = Self("clipboardHistory", default: .init(.v, modifiers: [.option, .command]))
 ```
 
-In `Sources/Notty/AppState.swift`:
+In `Sources/Relux/AppState.swift`:
 
 Add enum before the class:
 
@@ -562,7 +562,7 @@ Add import for AppKit at the top of AppState.swift (needed for NSRunningApplicat
 
 **Step 2: Build to verify**
 
-Run: `xcodegen generate && xcodebuild -project Notty.xcodeproj -scheme Notty -configuration Debug build`
+Run: `xcodegen generate && xcodebuild -project Relux.xcodeproj -scheme Relux -configuration Debug build`
 
 **Step 3: Commit**
 
@@ -575,7 +575,7 @@ feat: add panel mode switching and clipboard lifecycle to AppState
 ### Task 4: AppDelegate — Hotkey Registration + Panel Mode
 
 **Files:**
-- Modify: `Sources/Notty/AppDelegate.swift`
+- Modify: `Sources/Relux/AppDelegate.swift`
 
 **Context:** Register second hotkey. Track previous app. Switch panel content based on which hotkey was pressed.
 
@@ -639,7 +639,7 @@ func togglePanel() {
 
 **Step 2: Build to verify**
 
-Run: `xcodebuild -project Notty.xcodeproj -scheme Notty -configuration Debug build`
+Run: `xcodebuild -project Relux.xcodeproj -scheme Relux -configuration Debug build`
 
 **Step 3: Commit**
 
@@ -652,9 +652,9 @@ feat: register clipboard history hotkey and panel mode switching
 ### Task 5: PasteService — Paste-back to Previous App
 
 **Files:**
-- Create: `Sources/Notty/Clipboard/PasteService.swift`
+- Create: `Sources/Relux/Clipboard/PasteService.swift`
 
-**Context:** Puts content on system clipboard, hides Notty, activates previous app, simulates Cmd+V via CGEvent. Uses the existing Accessibility permission.
+**Context:** Puts content on system clipboard, hides Relux, activates previous app, simulates Cmd+V via CGEvent. Uses the existing Accessibility permission.
 
 **Step 1: Create PasteService**
 
@@ -663,7 +663,7 @@ import AppKit
 import Carbon
 import os
 
-private let log = Logger(subsystem: "com.notty.app", category: "pasteservice")
+private let log = Logger(subsystem: "com.relux.app", category: "pasteservice")
 
 enum PasteService {
     /// Put text on clipboard and paste into the previously active app
@@ -734,7 +734,7 @@ enum PasteService {
 
 **Step 2: Build to verify**
 
-Run: `xcodegen generate && xcodebuild -project Notty.xcodeproj -scheme Notty -configuration Debug build`
+Run: `xcodegen generate && xcodebuild -project Relux.xcodeproj -scheme Relux -configuration Debug build`
 
 **Step 3: Commit**
 
@@ -747,7 +747,7 @@ feat: add PasteService for paste-back into previous app
 ### Task 6: ClipboardHistoryView — Main UI
 
 **Files:**
-- Create: `Sources/Notty/UI/ClipboardHistoryView.swift`
+- Create: `Sources/Relux/UI/ClipboardHistoryView.swift`
 
 **Context:** Two-pane layout: left list (grouped by day) + right preview. Back arrow returns to search mode. Filter text field stays focused and filters items. Bottom bar shows "Paste to [App]" + Actions hint. Matches existing OverlayView visual style exactly (same fonts, spacing, colors, selection highlighting).
 
@@ -1316,7 +1316,7 @@ private struct ClipAction {
 
 **Step 2: Build to verify**
 
-Run: `xcodegen generate && xcodebuild -project Notty.xcodeproj -scheme Notty -configuration Debug build`
+Run: `xcodegen generate && xcodebuild -project Relux.xcodeproj -scheme Relux -configuration Debug build`
 
 **Step 3: Commit**
 
@@ -1329,14 +1329,14 @@ feat: add ClipboardHistoryView with list, preview, and actions
 ### Task 7: Wire Panel Mode into OverlayView / AppDelegate
 
 **Files:**
-- Modify: `Sources/Notty/AppDelegate.swift`
-- Modify: `Sources/Notty/UI/OverlayView.swift` (minimal change)
+- Modify: `Sources/Relux/AppDelegate.swift`
+- Modify: `Sources/Relux/UI/OverlayView.swift` (minimal change)
 
 **Context:** The panel's hosted view needs to switch between OverlayView and ClipboardHistoryView based on `appState.panelMode`. The cleanest way is a wrapper view.
 
 **Step 1: Create a PanelRootView that switches content**
 
-Add to the **top** of `Sources/Notty/UI/OverlayView.swift` (before OverlayView struct):
+Add to the **top** of `Sources/Relux/UI/OverlayView.swift` (before OverlayView struct):
 
 ```swift
 struct PanelRootView: View {
@@ -1369,7 +1369,7 @@ let hostingView = NSHostingView(rootView: PanelRootView().environment(appState))
 
 **Step 3: Build to verify**
 
-Run: `xcodebuild -project Notty.xcodeproj -scheme Notty -configuration Debug build`
+Run: `xcodebuild -project Relux.xcodeproj -scheme Relux -configuration Debug build`
 
 **Step 4: Commit**
 
@@ -1382,7 +1382,7 @@ feat: wire panel mode switching between search and clipboard views
 ### Task 8: Settings — Clipboard Tab
 
 **Files:**
-- Modify: `Sources/Notty/UI/SettingsView.swift`
+- Modify: `Sources/Relux/UI/SettingsView.swift`
 
 **Context:** Add a "Clipboard" tab with enable toggle, hotkey recorder, retention picker, disabled apps list, and clear button. Follow existing tab patterns.
 
@@ -1526,7 +1526,7 @@ private func removeDisabledApp(bundleId: String) {
 
 **Step 2: Build to verify**
 
-Run: `xcodebuild -project Notty.xcodeproj -scheme Notty -configuration Debug build`
+Run: `xcodebuild -project Relux.xcodeproj -scheme Relux -configuration Debug build`
 
 **Step 3: Commit**
 
@@ -1539,7 +1539,7 @@ feat: add Clipboard settings tab with monitoring, retention, and disabled apps
 ### Task 9: Expiry Cleanup on Launch
 
 **Files:**
-- Modify: `Sources/Notty/AppState.swift`
+- Modify: `Sources/Relux/AppState.swift`
 
 **Context:** On app launch, delete entries older than the configured retention period. Simple and runs once.
 
@@ -1557,7 +1557,7 @@ if let cutoffDate = Calendar.current.date(byAdding: .month, value: -retentionMon
 
 **Step 2: Build to verify**
 
-Run: `xcodebuild -project Notty.xcodeproj -scheme Notty -configuration Debug build`
+Run: `xcodebuild -project Relux.xcodeproj -scheme Relux -configuration Debug build`
 
 **Step 3: Commit**
 
@@ -1575,7 +1575,7 @@ Run: `swiftformat Sources/`
 
 **Step 2: Build**
 
-Run: `xcodebuild -project Notty.xcodeproj -scheme Notty -configuration Debug build`
+Run: `xcodebuild -project Relux.xcodeproj -scheme Relux -configuration Debug build`
 
 **Step 3: Fix any issues, re-format, re-build**
 
@@ -1591,15 +1591,15 @@ chore: format all sources
 
 | New Files | Purpose |
 |-----------|---------|
-| `Sources/Notty/Store/ClipboardStore.swift` | SQLite CRUD for clipboard entries + image file management |
-| `Sources/Notty/Clipboard/ClipboardMonitor.swift` | Timer-based polling, content capture, dedup, disabled app filtering |
-| `Sources/Notty/Clipboard/PasteService.swift` | Paste-back via CGEvent, clipboard manipulation |
-| `Sources/Notty/UI/ClipboardHistoryView.swift` | Two-pane UI: list + preview + actions |
+| `Sources/Relux/Store/ClipboardStore.swift` | SQLite CRUD for clipboard entries + image file management |
+| `Sources/Relux/Clipboard/ClipboardMonitor.swift` | Timer-based polling, content capture, dedup, disabled app filtering |
+| `Sources/Relux/Clipboard/PasteService.swift` | Paste-back via CGEvent, clipboard manipulation |
+| `Sources/Relux/UI/ClipboardHistoryView.swift` | Two-pane UI: list + preview + actions |
 
 | Modified Files | Changes |
 |----------------|---------|
-| `Sources/Notty/HotkeyManager.swift` | Add `.clipboardHistory` shortcut |
-| `Sources/Notty/AppState.swift` | PanelMode enum, clipboard store/monitor lifecycle, previousApp tracking, expiry cleanup |
-| `Sources/Notty/AppDelegate.swift` | Second hotkey registration, toggleClipboardHistory(), previousApp tracking in togglePanel() |
-| `Sources/Notty/UI/OverlayView.swift` | Add PanelRootView wrapper |
-| `Sources/Notty/UI/SettingsView.swift` | Clipboard settings tab |
+| `Sources/Relux/HotkeyManager.swift` | Add `.clipboardHistory` shortcut |
+| `Sources/Relux/AppState.swift` | PanelMode enum, clipboard store/monitor lifecycle, previousApp tracking, expiry cleanup |
+| `Sources/Relux/AppDelegate.swift` | Second hotkey registration, toggleClipboardHistory(), previousApp tracking in togglePanel() |
+| `Sources/Relux/UI/OverlayView.swift` | Add PanelRootView wrapper |
+| `Sources/Relux/UI/SettingsView.swift` | Clipboard settings tab |

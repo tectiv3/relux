@@ -1,4 +1,4 @@
-# Notty
+# Relux
 
 Local-first Apple Notes assistant powered by MLX on Apple Silicon. Ask questions about your notes, get answers with sources — all on-device.
 
@@ -8,13 +8,13 @@ Local-first Apple Notes assistant powered by MLX on Apple Silicon. Ask questions
 - Apple Silicon
 - Xcode 16+
 - [xcodegen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
-- Local MLX models (GGUF format) in `~/.swama/models/`, `~/.cache/huggingface/hub/`, or `~/Library/Application Support/Notty/models/`
+- Local MLX models (GGUF format) in `~/.swama/models/`, `~/.cache/huggingface/hub/`, or `~/Library/Application Support/Relux/models/`
 
 ## Build & Run
 
 ```
 xcodegen generate
-open Notty.xcodeproj
+open Relux.xcodeproj
 ```
 
 Build and run from Xcode (⌘R).

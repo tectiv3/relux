@@ -2,7 +2,7 @@
 
 ## Overview
 
-Clipboard history extension for Notty. Monitors the system clipboard, stores copied items (text, RTF, HTML, images), and lets users browse/paste from history via a dedicated hotkey.
+Clipboard history extension for Relux. Monitors the system clipboard, stores copied items (text, RTF, HTML, images), and lets users browse/paste from history via a dedicated hotkey.
 
 ## Architecture: Integrated Extension
 
@@ -10,7 +10,7 @@ Clipboard history lives inside the existing `FloatingPanel` as an alternate view
 
 ## Data Model
 
-SQLite table in existing `notty.db`:
+SQLite table in existing `relux.db`:
 
 ```sql
 CREATE TABLE clipboard_history (
@@ -18,7 +18,7 @@ CREATE TABLE clipboard_history (
     content_type  TEXT NOT NULL,  -- "text", "rtf", "html", "image"
     text_content  TEXT,           -- plain text (for display/filter)
     raw_data      BLOB,          -- RTF/HTML bytes when applicable
-    image_path    TEXT,           -- relative to App Support/Notty/clipboard/
+    image_path    TEXT,           -- relative to App Support/Relux/clipboard/
     image_width   INTEGER,
     image_height  INTEGER,
     image_size    INTEGER,        -- bytes
@@ -30,7 +30,7 @@ CREATE TABLE clipboard_history (
 );
 ```
 
-Images stored as PNG files in `~/Library/Application Support/Notty/clipboard/`. Cleanup job deletes orphaned files when entries expire based on retention setting.
+Images stored as PNG files in `~/Library/Application Support/Relux/clipboard/`. Cleanup job deletes orphaned files when entries expire based on retention setting.
 
 ## Clipboard Monitor
 
@@ -45,7 +45,7 @@ On change detected:
 6. Record source app via `NSWorkspace.shared.frontmostApplication`
 7. Deduplicate — skip if text content matches most recent entry
 
-Self-paste suppression: when Notty pastes an item back, a flag suppresses recording the next changeCount bump.
+Self-paste suppression: when Relux pastes an item back, a flag suppresses recording the next changeCount bump.
 
 Starts automatically on app launch. No system clipboard history API exists on macOS — polling is the standard approach (used by Raycast, Maccy, Paste).
 

@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "Notty",
+    name: "Relux",
     platforms: [.macOS(.v14)],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift", .upToNextMinor(from: "0.30.6")),
@@ -11,12 +11,12 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "NottyCore"
+            name: "ReluxCore"
         ),
         .executableTarget(
-            name: "Notty",
+            name: "Relux",
             dependencies: [
-                "NottyCore",
+                "ReluxCore",
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
@@ -26,9 +26,9 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "NottyTool",
+            name: "ReluxTool",
             dependencies: [
-                "NottyCore",
+                "ReluxCore",
             ]
         ),
     ]

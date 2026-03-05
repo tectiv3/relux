@@ -32,9 +32,9 @@
 ## Key Files
 | File | Role |
 |------|------|
-| `Sources/Notty/UI/SettingsView.swift` | Settings window, all 4 tabs |
-| `Sources/Notty/UI/OverlayView.swift` | Main search panel |
-| `Sources/Notty/AppState.swift` | Combined search orchestration |
-| `Sources/Notty/Extensions/ExtensionProtocol.swift` | SearchItem/ExtensionResult types |
-| `Sources/Notty/Engine/QueryEngine.swift` | Note search & AI |
-| `Sources/Notty/MLX/MLXService.swift` | Model loading/inference |
+| `Sources/Relux/UI/SettingsView.swift` | Settings window, all 4 tabs |
+| `Sources/Relux/UI/OverlayView.swift` | Main search panel |
+| `Sources/Relux/AppState.swift` | Combined search orchestration |
+| `Sources/Relux/Extensions/ExtensionProtocol.swift` | SearchItem/ExtensionResult types |
+| `Sources/Relux/Engine/QueryEngine.swift` | Note search & AI |
+| `Sources/Relux/MLX/MLXService.swift` | Model loading/inference |

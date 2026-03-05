@@ -1,4 +1,4 @@
-# Notty — Decisions & Request History
+# Relux — Decisions & Request History
 
 Only architectural/behavioral decisions with downstream implications. Not bug fixes or cosmetic tweaks.
 
@@ -15,7 +15,7 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Tracks query→item selections (frequency + recency) to rank results
 - Query normalized to first 4 chars for grouping similar queries
 - Stores full SearchItem data so recents can be displayed on empty query
-- Data persisted in `~/Library/Application Support/Notty/` (frecency.json, recents.json)
+- Data persisted in `~/Library/Application Support/Relux/` (frecency.json, recents.json)
 
 ## UI Behavior
 
@@ -57,7 +57,7 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 
 ## Selection Capture
 
-- On hotkey press, selected text is read from the focused app via Accessibility API (`AXUIElement`) BEFORE Notty takes focus
+- On hotkey press, selected text is read from the focused app via Accessibility API (`AXUIElement`) BEFORE Relux takes focus
 - Stored in `AppState.currentSelection`, cleared on panel close
 - Scripts opt in via `acceptsSelection: Bool` — selection is piped as stdin
 - Web search uses selection as query when search bar is empty
@@ -78,7 +78,7 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Integrated as a second panel mode via `PanelMode` enum on AppState (`.search` / `.clipboard`)
 - `PanelRootView` wrapper switches between `OverlayView` and `ClipboardHistoryView` based on mode
 - Clipboard monitoring uses timer-based polling of `NSPasteboard.general.changeCount` every 0.5s
-- Storage: SQLite `clipboard_history` table in existing `notty.db`, images saved as PNG files in `~/Library/Application Support/Notty/clipboard/`
+- Storage: SQLite `clipboard_history` table in existing `relux.db`, images saved as PNG files in `~/Library/Application Support/Relux/clipboard/`
 - Paste-back: puts content on system clipboard, closes panel, activates previous app, simulates Cmd+V via CGEvent
 - `suppressNextCapture` flag prevents self-paste recording
 - Hotkey: Opt+Cmd+V (configurable via KeyboardShortcuts)
