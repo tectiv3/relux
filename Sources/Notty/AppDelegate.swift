@@ -54,7 +54,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let contentRect = NSRect(x: x, y: y, width: panelWidth, height: panelHeight)
         let floatingPanel = FloatingPanel(contentRect: contentRect)
 
-        let hostingView = NSHostingView(rootView: OverlayView().environment(appState))
+        let hostingView = NSHostingView(rootView: PanelRootView().environment(appState))
         hostingView.translatesAutoresizingMaskIntoConstraints = false
 
         if let contentView = floatingPanel.contentView {

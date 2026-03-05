@@ -1,5 +1,18 @@
 import SwiftUI
 
+struct PanelRootView: View {
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        switch appState.panelMode {
+        case .search:
+            OverlayView()
+        case .clipboard:
+            ClipboardHistoryView()
+        }
+    }
+}
+
 struct OverlayView: View {
     @Environment(AppState.self) private var appState
     @State private var query: String = ""
