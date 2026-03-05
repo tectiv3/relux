@@ -27,7 +27,10 @@ final class AppState {
     var previousApp: NSRunningApplication?
 
     var isReady: Bool {
-        mlx.hasLLMModel && store != nil
+        if extensionRegistry.isEnabled("notes") {
+            return mlx.hasLLMModel && store != nil
+        }
+        return store != nil
     }
 
     var indexProgress: IndexProgress?

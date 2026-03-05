@@ -22,18 +22,20 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             generalTab.tabItem { Label("General", systemImage: "gear") }
-            modelsTab.tabItem { Label("Models", systemImage: "cpu") }
+            notesTab.tabItem { Label("Notes", systemImage: "note.text") }
             scriptsTab.tabItem { Label("Scripts", systemImage: "terminal") }
             clipboardTab.tabItem { Label("Clipboard", systemImage: "clipboard") }
         }
         .frame(width: 450, height: 500)
         .onAppear {
-            discoveredModels = ModelDiscovery.discoverModels()
-            if let path = appState.savedLLMPath {
-                selectedLLM = LocalModel.matching(path: path, in: discoveredModels)
-            }
-            if let path = appState.savedEmbedderPath {
-                selectedEmbedder = LocalModel.matching(path: path, in: discoveredModels)
+            if appState.extensionRegistry.isEnabled("notes") {
+                discoveredModels = ModelDiscovery.discoverModels()
+                if let path = appState.savedLLMPath {
+                    selectedLLM = LocalModel.matching(path: path, in: discoveredModels)
+                }
+                if let path = appState.savedEmbedderPath {
+                    selectedEmbedder = LocalModel.matching(path: path, in: discoveredModels)
+                }
             }
         }
     }
@@ -107,68 +109,77 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Models Tab
+    // MARK: - Notes Tab
 
-    private var modelsTab: some View {
+    private var notesTab: some View {
         Form {
-            Section("LLM Model") {
-                Picker("Model:", selection: $selectedLLM) {
-                    Text("None").tag(LocalModel?.none)
-                    ForEach(discoveredModels) { model in
-                        Text("\(model.name) (\(formatSize(model.sizeBytes)))")
-                            .tag(Optional(model))
-                    }
-                }
-                .onChange(of: selectedLLM) { oldValue, newValue in
-                    guard let model = newValue, oldValue != newValue else { return }
-                    appState.savedLLMPath = model.standardizedPath
-                    appState.markSetupComplete()
-                    Task {
-                        try? await appState.mlx.loadLLM(model: model)
-                    }
-                }
-
-                if !appState.mlx.loadingStatus.isEmpty {
-                    HStack {
-                        ProgressView().controlSize(.small)
-                        Text(appState.mlx.loadingStatus)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+            Section {
+                Toggle("Enable Notes", isOn: Binding(
+                    get: { appState.extensionRegistry.isEnabled("notes") },
+                    set: { appState.setNotesEnabled($0) }
+                ))
             }
 
-            Section("Embedder Model") {
-                Picker("Model:", selection: $selectedEmbedder) {
-                    Text("None").tag(LocalModel?.none)
-                    ForEach(discoveredModels) { model in
-                        Text("\(model.name) (\(formatSize(model.sizeBytes)))")
-                            .tag(Optional(model))
+            if appState.extensionRegistry.isEnabled("notes") {
+                Section("LLM Model") {
+                    Picker("Model:", selection: $selectedLLM) {
+                        Text("None").tag(LocalModel?.none)
+                        ForEach(discoveredModels) { model in
+                            Text("\(model.name) (\(formatSize(model.sizeBytes)))")
+                                .tag(Optional(model))
+                        }
+                    }
+                    .onChange(of: selectedLLM) { oldValue, newValue in
+                        guard let model = newValue, oldValue != newValue else { return }
+                        appState.savedLLMPath = model.standardizedPath
+                        appState.markSetupComplete()
+                        Task {
+                            try? await appState.mlx.loadLLM(model: model)
+                        }
+                    }
+
+                    if !appState.mlx.loadingStatus.isEmpty {
+                        HStack {
+                            ProgressView().controlSize(.small)
+                            Text(appState.mlx.loadingStatus)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
-                .onChange(of: selectedEmbedder) { oldValue, newValue in
-                    guard let model = newValue, oldValue != newValue else { return }
-                    appState.savedEmbedderPath = model.standardizedPath
-                    Task {
-                        try? await appState.mlx.loadEmbedder(model: model)
+
+                Section("Embedder Model") {
+                    Picker("Model:", selection: $selectedEmbedder) {
+                        Text("None").tag(LocalModel?.none)
+                        ForEach(discoveredModels) { model in
+                            Text("\(model.name) (\(formatSize(model.sizeBytes)))")
+                                .tag(Optional(model))
+                        }
+                    }
+                    .onChange(of: selectedEmbedder) { oldValue, newValue in
+                        guard let model = newValue, oldValue != newValue else { return }
+                        appState.savedEmbedderPath = model.standardizedPath
+                        Task {
+                            try? await appState.mlx.loadEmbedder(model: model)
+                        }
                     }
                 }
-            }
 
-            Section("Indexing") {
-                Button("Re-index Notes") {
-                    appState.reindex()
-                }
-                .disabled(appState.isIndexing)
+                Section("Indexing") {
+                    Button("Re-index Notes") {
+                        appState.reindex()
+                    }
+                    .disabled(appState.isIndexing)
 
-                if appState.isIndexing, let progress = appState.indexProgress {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ProgressView(
-                            value: Double(progress.current),
-                            total: Double(progress.total)
-                        )
-                        Text(progress.currentTitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    if appState.isIndexing, let progress = appState.indexProgress {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ProgressView(
+                                value: Double(progress.current),
+                                total: Double(progress.total)
+                            )
+                            Text(progress.currentTitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
