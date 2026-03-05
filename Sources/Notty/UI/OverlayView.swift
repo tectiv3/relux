@@ -468,7 +468,8 @@ struct OverlayView: View {
         case .script:
             if let command = item.meta["command"] {
                 NSApp.keyWindow?.close()
-                ScriptRunner.run(command, env: appState.scriptSearcher.buildEnvironment())
+                let stdin = item.meta["acceptsSelection"] == "1" ? appState.currentSelection : nil
+                ScriptRunner.run(command, env: appState.scriptSearcher.buildEnvironment(), stdin: stdin)
             }
         }
     }
