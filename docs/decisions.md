@@ -64,3 +64,15 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - When disabled, existing fire-and-forget behavior with toast is preserved
 - Uses `AsyncStream<String>` via `ScriptRunner.stream()` reading `availableData` in a loop
 - Backward-compatible: existing scripts.json without the field default to `false`
+
+## Clipboard History
+
+- Integrated as a second panel mode via `PanelMode` enum on AppState (`.search` / `.clipboard`)
+- `PanelRootView` wrapper switches between `OverlayView` and `ClipboardHistoryView` based on mode
+- Clipboard monitoring uses timer-based polling of `NSPasteboard.general.changeCount` every 0.5s
+- Storage: SQLite `clipboard_history` table in existing `notty.db`, images saved as PNG files in `~/Library/Application Support/Notty/clipboard/`
+- Paste-back: puts content on system clipboard, closes panel, activates previous app, simulates Cmd+V via CGEvent
+- `suppressNextCapture` flag prevents self-paste recording
+- Hotkey: Opt+Cmd+V (configurable via KeyboardShortcuts)
+- Disabled apps list stored in UserDefaults, defaults include Keychain Access and Passwords
+- Retention-based cleanup runs once on app launch (configurable: 1/3/6 months)

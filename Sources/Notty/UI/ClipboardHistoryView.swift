@@ -7,6 +7,7 @@ struct ClipboardHistoryView: View {
     @State private var selectedIndex: Int = 0
     @State private var showActions: Bool = false
     @State private var actionIndex: Int = 0
+    @FocusState private var isFilterFocused: Bool
 
     private var filteredEntries: [ClipboardEntry] {
         if filter.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -83,6 +84,7 @@ struct ClipboardHistoryView: View {
         }
         .onAppear {
             loadEntries()
+            isFilterFocused = true
         }
         .onKeyPress(.upArrow) {
             if showActions {
@@ -170,6 +172,7 @@ struct ClipboardHistoryView: View {
             TextField("Type to filter entries...", text: $filter)
                 .textFieldStyle(.plain)
                 .font(.system(size: 16))
+                .focused($isFilterFocused)
                 .onChange(of: filter) { _, _ in
                     selectedIndex = 0
                 }

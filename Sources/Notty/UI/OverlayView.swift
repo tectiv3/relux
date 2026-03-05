@@ -31,6 +31,7 @@ struct OverlayView: View {
     @State private var searchTrigger: UUID = .init()
 
     @State private var streamingTask: Task<Void, Never>?
+    @FocusState private var isSearchFocused: Bool
 
     /// Display-ready answer with thinking blocks stripped
     private var answer: String {
@@ -178,6 +179,7 @@ struct OverlayView: View {
                 query = ""
             }
             searchTrigger = UUID()
+            isSearchFocused = true
         }
         .onKeyPress(.upArrow) {
             if showActions {
@@ -241,6 +243,7 @@ struct OverlayView: View {
             TextField("Search notes and apps...", text: $query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 16))
+                .focused($isSearchFocused)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
