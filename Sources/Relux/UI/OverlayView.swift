@@ -517,18 +517,10 @@ struct OverlayView: View {
     private func performSearch(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty {
-            results = appState.recentItems()
+            var selectionItems: [SearchItem] = []
             if let selection = appState.currentSelection {
                 let preview = String(selection.prefix(80))
-                results.append(SearchItem(
-                    id: "web-search-selection",
-                    title: "Search DuckDuckGo",
-                    subtitle: preview,
-                    icon: "magnifyingglass",
-                    kind: .webSearch,
-                    meta: ["query": selection]
-                ))
-                results.append(SearchItem(
+                selectionItems.append(SearchItem(
                     id: "translate-selection",
                     title: "Translate",
                     subtitle: preview,
@@ -536,9 +528,42 @@ struct OverlayView: View {
                     kind: .translate,
                     meta: ["text": selection]
                 ))
+                selectionItems.append(SearchItem(
+                    id: "web-search-selection",
+                    title: "Search DuckDuckGo",
+                    subtitle: preview,
+                    icon: "magnifyingglass",
+                    kind: .webSearch,
+                    meta: ["query": selection]
+                ))
             }
+            let recents = appState.recentItems().filter { $0.kind != .translate }
+            results = selectionItems + recents
         } else {
-            results = appState.performSearch(query: trimmed)
+            var searchResults = appState.performSearch(query: trimmed)
+            // Boost selection-aware items to top when selection exists
+            if appState.currentSelection != nil {
+                let selectionAware = searchResults.filter {
+                    $0.kind == .script && $0.meta["acceptsSelection"] == "1"
+                }
+                let rest = searchResults.filter {
+                    !($0.kind == .script && $0.meta["acceptsSelection"] == "1")
+                }
+                searchResults = selectionAware + rest
+            }
+            results = searchResults
+            if let selection = appState.currentSelection {
+                let preview = String(selection.prefix(80))
+                // Insert selection-aware items at the top
+                results.insert(SearchItem(
+                    id: "translate-selection",
+                    title: "Translate",
+                    subtitle: preview,
+                    icon: "character.book.closed",
+                    kind: .translate,
+                    meta: ["text": selection]
+                ), at: 0)
+            }
             results.append(SearchItem(
                 id: "web-search-ddg",
                 title: "Search DuckDuckGo",
@@ -547,17 +572,6 @@ struct OverlayView: View {
                 kind: .webSearch,
                 meta: ["query": trimmed]
             ))
-            if let selection = appState.currentSelection {
-                let preview = String(selection.prefix(80))
-                results.append(SearchItem(
-                    id: "translate-selection",
-                    title: "Translate",
-                    subtitle: preview,
-                    icon: "character.book.closed",
-                    kind: .translate,
-                    meta: ["text": selection]
-                ))
-            }
         }
         selectedIndex = 0
         showActions = false
@@ -576,7 +590,7 @@ struct OverlayView: View {
     private func openSelectedItem() {
         guard selectedIndex < results.count else { return }
         let item = results[selectedIndex]
-        if item.kind != .webSearch {
+        if item.kind != .webSearch, item.kind != .translate {
             appState.recordSelection(query: query, item: item)
         }
         switch item.kind {
