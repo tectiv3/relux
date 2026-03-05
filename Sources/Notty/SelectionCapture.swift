@@ -30,7 +30,8 @@ enum SelectionCapture {
 
     /// Prompts for Accessibility permission if not already granted.
     static func ensureAccessibilityPermission() {
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
+        let prompt = "AXTrustedCheckOptionPrompt" as CFString
+        let options = [prompt: true] as CFDictionary
         AXIsProcessTrustedWithOptions(options)
     }
 }

@@ -20,6 +20,7 @@ final class AppState {
 
     var indexProgress: IndexProgress?
     var isIndexing = false
+    var currentSelection: String?
     var needsFirstRun: Bool {
         !UserDefaults.standard.bool(forKey: "hasCompletedSetup")
     }

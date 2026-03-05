@@ -19,6 +19,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         applyAppearance()
 
+        SelectionCapture.ensureAccessibilityPermission()
         setupPanel()
 
         KeyboardShortcuts.onKeyUp(for: .toggleNotty) { [weak self] in
@@ -72,8 +73,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let frame = panel.frame
             UserDefaults.standard.set(frame.origin.x, forKey: "panelX")
             UserDefaults.standard.set(frame.origin.y, forKey: "panelY")
+            appState.currentSelection = nil
             panel.close()
         } else {
+            appState.currentSelection = SelectionCapture.captureSelectedText()
             applyForcedInputSource()
             panel.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
