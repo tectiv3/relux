@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct TranslateView: View {
@@ -11,6 +12,7 @@ struct TranslateView: View {
     @State private var streamedText: String = ""
     @State private var streamingTask: Task<Void, Never>?
     @State private var activeEntryId: Int64?
+    @State private var keyMonitor: Any?
     @FocusState private var isInputFocused: Bool
 
     private var languages: [String] {
@@ -83,36 +85,6 @@ struct TranslateView: View {
             }
             isInputFocused = true
         }
-        .onKeyPress(.upArrow) {
-            if showActions {
-                guard !currentActions.isEmpty else { return .ignored }
-                actionIndex = actionIndex <= 0 ? currentActions.count - 1 : actionIndex - 1
-                return .handled
-            }
-            guard !entries.isEmpty else { return .ignored }
-            selectedIndex = selectedIndex <= 0 ? entries.count - 1 : selectedIndex - 1
-            return .handled
-        }
-        .onKeyPress(.downArrow) {
-            if showActions {
-                guard !currentActions.isEmpty else { return .ignored }
-                actionIndex = actionIndex >= currentActions.count - 1 ? 0 : actionIndex + 1
-                return .handled
-            }
-            guard !entries.isEmpty else { return .ignored }
-            selectedIndex = selectedIndex >= entries.count - 1 ? 0 : selectedIndex + 1
-            return .handled
-        }
-        .onKeyPress(.return) {
-            if showActions {
-                guard actionIndex < currentActions.count else { return .ignored }
-                currentActions[actionIndex].action()
-                showActions = false
-                return .handled
-            }
-            translateCurrent()
-            return .handled
-        }
         .onKeyPress(.escape) {
             if showActions {
                 showActions = false
@@ -120,11 +92,8 @@ struct TranslateView: View {
             }
             return .ignored
         }
-        .onKeyPress(.delete) {
-            guard !showActions, let entry = selectedEntry else { return .ignored }
-            deleteEntry(entry)
-            return .handled
-        }
+        .onAppear { installKeyMonitor() }
+        .onDisappear { removeKeyMonitor() }
         .background {
             Button("") {
                 guard selectedEntry != nil else { return }
@@ -174,6 +143,9 @@ struct TranslateView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 16))
                 .focused($isInputFocused)
+                .onSubmit {
+                    translateCurrent()
+                }
 
             Picker("", selection: $selectedLanguage) {
                 ForEach(languages, id: \.self) { lang in
@@ -432,6 +404,57 @@ struct TranslateView: View {
                 .padding(.horizontal, 4)
         )
         .foregroundColor(isSelected ? .white : .primary)
+    }
+
+    // MARK: - Key Monitor
+
+    private func installKeyMonitor() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let key = event.specialKey
+            if key == .upArrow {
+                if showActions {
+                    guard !currentActions.isEmpty else { return event }
+                    actionIndex = actionIndex <= 0 ? currentActions.count - 1 : actionIndex - 1
+                } else {
+                    guard !entries.isEmpty else { return event }
+                    selectedIndex = selectedIndex <= 0 ? entries.count - 1 : selectedIndex - 1
+                }
+                return nil
+            }
+            if key == .downArrow {
+                if showActions {
+                    guard !currentActions.isEmpty else { return event }
+                    actionIndex = actionIndex >= currentActions.count - 1 ? 0 : actionIndex + 1
+                } else {
+                    guard !entries.isEmpty else { return event }
+                    selectedIndex = selectedIndex >= entries.count - 1 ? 0 : selectedIndex + 1
+                }
+                return nil
+            }
+            if key == .carriageReturn || key == .newline {
+                if showActions {
+                    guard actionIndex < currentActions.count else { return event }
+                    currentActions[actionIndex].action()
+                    showActions = false
+                    return nil
+                }
+            }
+            if key == .delete || key == .backspace {
+                // Only handle delete when not typing in input
+                if !isInputFocused, !showActions, let entry = selectedEntry {
+                    deleteEntry(entry)
+                    return nil
+                }
+            }
+            return event
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let monitor = keyMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyMonitor = nil
+        }
     }
 
     // MARK: - Actions
