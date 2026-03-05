@@ -30,7 +30,8 @@ enum StoreError: Error {
 
 @MainActor
 final class VectorStore {
-    private var db: OpaquePointer?
+    // nonisolated(unsafe) needed so deinit can call sqlite3_close
+    nonisolated(unsafe) private var db: OpaquePointer?
     private var cache: [EmbeddingEntry] = []
 
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)

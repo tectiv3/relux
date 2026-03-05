@@ -19,7 +19,7 @@ packages:
 
 targets:
   NottyCore:
-    type: library
+    type: library.static
     platform: macOS
     sources:
       - Sources/NottyCore
