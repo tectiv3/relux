@@ -12,7 +12,6 @@ final class ExtensionRegistry {
     private(set) var extensions: [Extension] = []
 
     init() {
-        register(id: "notes", name: "Notes", icon: "note.text", defaultEnabled: true)
         register(id: "translate", name: "Translate", icon: "character.book.closed", defaultEnabled: true)
     }
 

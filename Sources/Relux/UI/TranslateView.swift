@@ -48,7 +48,7 @@ struct TranslateView: View {
             topBar
             Divider()
 
-            if entries.isEmpty && !isTranslating {
+            if entries.isEmpty, !isTranslating {
                 Text("No translation history")
                     .font(.system(size: 13))
                     .foregroundColor(.secondary)
@@ -247,7 +247,7 @@ struct TranslateView: View {
     private var previewPanel: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                if isTranslating && selectedIndex == 0 {
+                if isTranslating, selectedIndex == 0 {
                     if streamedText.isEmpty {
                         HStack(spacing: 6) {
                             ProgressView()

@@ -7,9 +7,6 @@ import SwiftUI
 // swiftlint:disable:next type_body_length
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
-    @State private var discoveredModels: [LocalModel] = []
-    @State private var selectedLLM: LocalModel?
-    @State private var selectedEmbedder: LocalModel?
     @State private var selectedInputSourceId: String = UserDefaults.standard.string(forKey: "forceInputSourceId") ?? ""
     @State private var clearQueryOnOpen: Bool = UserDefaults.standard.bool(forKey: "clearQueryOnOpen")
     @State private var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
@@ -32,24 +29,12 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             generalTab.tabItem { Label("General", systemImage: "gear") }
-            notesTab.tabItem { Label("Notes", systemImage: "note.text") }
             scriptsTab.tabItem { Label("Scripts", systemImage: "terminal") }
             clipboardTab.tabItem { Label("Clipboard", systemImage: "clipboard") }
             translateTab
                 .tabItem { Label("Translate", systemImage: "character.book.closed") }
         }
         .frame(width: 450, height: 500)
-        .onAppear {
-            if appState.extensionRegistry.isEnabled("notes") {
-                discoveredModels = ModelDiscovery.discoverModels()
-                if let path = appState.savedLLMPath {
-                    selectedLLM = LocalModel.matching(path: path, in: discoveredModels)
-                }
-                if let path = appState.savedEmbedderPath {
-                    selectedEmbedder = LocalModel.matching(path: path, in: discoveredModels)
-                }
-            }
-        }
     }
 
     // MARK: - General Tab
@@ -84,6 +69,11 @@ struct SettingsView: View {
                     UserDefaults.standard.set(newValue, forKey: "appAppearance")
                     applyAppearance(newValue)
                 }
+
+                Toggle("Show menu bar icon", isOn: Binding(
+                    get: { appState.showMenuBarIcon },
+                    set: { appState.showMenuBarIcon = $0 }
+                ))
             }
 
             Section("Behavior") {
@@ -119,85 +109,6 @@ struct SettingsView: View {
         .onAppear {
             applyAppearance(selectedAppearance)
         }
-    }
-
-    // MARK: - Notes Tab
-
-    private var notesTab: some View {
-        Form {
-            Section {
-                Toggle("Enable Notes", isOn: Binding(
-                    get: { appState.extensionRegistry.isEnabled("notes") },
-                    set: { appState.setNotesEnabled($0) }
-                ))
-            }
-
-            if appState.extensionRegistry.isEnabled("notes") {
-                Section("LLM Model") {
-                    Picker("Model:", selection: $selectedLLM) {
-                        Text("None").tag(LocalModel?.none)
-                        ForEach(discoveredModels) { model in
-                            Text("\(model.name) (\(formatSize(model.sizeBytes)))")
-                                .tag(Optional(model))
-                        }
-                    }
-                    .onChange(of: selectedLLM) { oldValue, newValue in
-                        guard let model = newValue, oldValue != newValue else { return }
-                        appState.savedLLMPath = model.standardizedPath
-                        appState.markSetupComplete()
-                        Task {
-                            try? await appState.mlx.loadLLM(model: model)
-                        }
-                    }
-
-                    if !appState.mlx.loadingStatus.isEmpty {
-                        HStack {
-                            ProgressView().controlSize(.small)
-                            Text(appState.mlx.loadingStatus)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                Section("Embedder Model") {
-                    Picker("Model:", selection: $selectedEmbedder) {
-                        Text("None").tag(LocalModel?.none)
-                        ForEach(discoveredModels) { model in
-                            Text("\(model.name) (\(formatSize(model.sizeBytes)))")
-                                .tag(Optional(model))
-                        }
-                    }
-                    .onChange(of: selectedEmbedder) { oldValue, newValue in
-                        guard let model = newValue, oldValue != newValue else { return }
-                        appState.savedEmbedderPath = model.standardizedPath
-                        Task {
-                            try? await appState.mlx.loadEmbedder(model: model)
-                        }
-                    }
-                }
-
-                Section("Indexing") {
-                    Button("Re-index Notes") {
-                        appState.reindex()
-                    }
-                    .disabled(appState.isIndexing)
-
-                    if appState.isIndexing, let progress = appState.indexProgress {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ProgressView(
-                                value: Double(progress.current),
-                                total: Double(progress.total)
-                            )
-                            Text(progress.currentTitle)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .padding()
     }
 
     // MARK: - Scripts Tab
@@ -564,11 +475,6 @@ struct SettingsView: View {
     }
 
     // MARK: - Helpers
-
-    private func formatSize(_ bytes: UInt64) -> String {
-        let sizeGB = Double(bytes) / 1_073_741_824
-        return String(format: "%.1f GB", sizeGB)
-    }
 
     private func applyAppearance(_ mode: String) {
         Appearance.apply(mode)

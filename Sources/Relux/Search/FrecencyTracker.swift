@@ -73,7 +73,7 @@ final class FrecencyTracker {
                 title: stored.title,
                 subtitle: stored.subtitle,
                 icon: stored.icon,
-                kind: { switch stored.kind { case "app": .app; case "script": .script; case "translate": .translate; default: .note } }(),
+                kind: { switch stored.kind { case "app": .app; case "script": .script; case "translate": .translate; default: .app } }(),
                 meta: stored.meta
             )
         }

@@ -49,12 +49,12 @@ final class AnthropicService {
     static let defaultModel = "claude-sonnet-4-20250514"
 
     static let defaultSystemPrompt = """
-        You are a translation machine. Translate the user's text into {target_language}. \
-        Output ONLY the translated text with no additions whatsoever. \
-        No preamble, no explanation, no quotation marks, no markdown, no notes. \
-        Preserve original formatting including line breaks and whitespace. \
-        If the text is already in {target_language}, output it unchanged.
-        """
+    You are a translation machine. Translate the user's text into {target_language}. \
+    Output ONLY the translated text with no additions whatsoever. \
+    No preamble, no explanation, no quotation marks, no markdown, no notes. \
+    Preserve original formatting including line breaks and whitespace. \
+    If the text is already in {target_language}, output it unchanged.
+    """
 
     private var apiKey: String? {
         KeychainHelper.load(key: "anthropicApiKey")
@@ -76,9 +76,9 @@ final class AnthropicService {
                     return
                 }
                 do {
-                    let apiKey = await self.apiKey
-                    let model = await self.model
-                    let systemPrompt = await self.systemPrompt
+                    let apiKey = await apiKey
+                    let model = await model
+                    let systemPrompt = await systemPrompt
 
                     guard let apiKey, !apiKey.isEmpty else {
                         continuation.yield("[Error: Anthropic API key not set. Configure it in Settings → Translate.]")

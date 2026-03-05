@@ -1,7 +1,6 @@
 import Foundation
 
 enum SearchItemKind: Sendable {
-    case note
     case app
     case webSearch
     case script
@@ -15,15 +14,4 @@ struct SearchItem: Identifiable, Sendable {
     let icon: String
     let kind: SearchItemKind
     let meta: [String: String]
-}
-
-struct ExtensionResult: Sendable {
-    enum Kind: Sendable {
-        case token(String)
-        case sources([SearchItem])
-        case error(String)
-        case done
-    }
-
-    let kind: Kind
 }

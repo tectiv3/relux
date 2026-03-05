@@ -21,7 +21,7 @@ struct OverlayView: View {
     @State private var results: [SearchItem] = []
     @State private var selectedIndex: Int = 0
 
-    // LLM generation state
+    // Script output streaming state
     @State private var rawAnswer: String = ""
     @State private var isGenerating: Bool = false
 
@@ -35,23 +35,8 @@ struct OverlayView: View {
     @State private var streamingTask: Task<Void, Never>?
     @FocusState private var isSearchFocused: Bool
 
-    /// Display-ready answer with thinking blocks stripped
     private var answer: String {
-        Self.stripThinkingBlocks(rawAnswer)
-    }
-
-    private var isThinking: Bool {
-        rawAnswer.contains("<think>") && !rawAnswer.contains("</think>")
-    }
-
-    private var statusMessage: String? {
-        if appState.isIndexing {
-            if let p = appState.indexProgress {
-                return "Indexing notes (\(p.current)/\(p.total))..."
-            }
-            return "Indexing notes..."
-        }
-        return nil
+        rawAnswer
     }
 
     private var hasResults: Bool {
@@ -62,21 +47,6 @@ struct OverlayView: View {
         guard selectedIndex < results.count else { return [] }
         let item = results[selectedIndex]
         switch item.kind {
-        case .note:
-            return [
-                ItemAction(label: "Open in Notes", icon: "arrow.up.forward.app", shortcut: "⏎") {
-                    openSelectedItem()
-                },
-                ItemAction(label: "Ask AI about this", icon: "sparkles", shortcut: nil) {
-                    askAIAboutSelected()
-                },
-                ItemAction(label: "Copy snippet", icon: "doc.on.clipboard", shortcut: nil) {
-                    copySnippet()
-                },
-                ItemAction(label: "Remove from history", icon: "trash", shortcut: nil) {
-                    removeFromHistory()
-                },
-            ]
         case .app:
             return [
                 ItemAction(label: "Launch", icon: "arrow.up.forward.app", shortcut: "⏎") {
@@ -107,9 +77,6 @@ struct OverlayView: View {
                     ItemAction(label: "Copy output", icon: "doc.on.clipboard", shortcut: nil) {
                         copyOutput()
                     },
-                    ItemAction(label: "Ask AI about this", icon: "sparkles", shortcut: nil) {
-                        askAIAboutOutput()
-                    },
                     ItemAction(label: "Re-run", icon: "arrow.clockwise", shortcut: nil) {
                         openSelectedItem()
                     },
@@ -134,13 +101,6 @@ struct OverlayView: View {
             Spacer().frame(height: 6)
             searchBar
             Divider()
-
-            if let status = statusMessage, !hasResults {
-                Text(status)
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary)
-                    .padding(16)
-            }
 
             ZStack(alignment: .bottomTrailing) {
                 VStack(spacing: 0) {
@@ -251,7 +211,7 @@ struct OverlayView: View {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(.secondary)
                 .font(.system(size: 16))
-            TextField("Search notes and apps...", text: $query)
+            TextField("Search apps and scripts...", text: $query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 16))
                 .focused($isSearchFocused)
@@ -292,7 +252,6 @@ struct OverlayView: View {
         switch kind {
         case .app: "Applications"
         case .script: "Scripts"
-        case .note: "Notes"
         case .webSearch: "Web Search"
         case .translate: "Translate"
         }
@@ -443,15 +402,7 @@ struct OverlayView: View {
     private var answerSection: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                if isThinking {
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Thinking...")
-                            .font(.system(size: 13))
-                            .foregroundColor(.secondary)
-                    }
-                } else if isGenerating, answer.isEmpty {
+                if isGenerating, answer.isEmpty {
                     ProgressView()
                         .controlSize(.small)
                         .padding(.top, 4)
@@ -554,7 +505,6 @@ struct OverlayView: View {
             results = searchResults
             if let selection = appState.currentSelection {
                 let preview = String(selection.prefix(80))
-                // Insert selection-aware items at the top
                 results.insert(SearchItem(
                     id: "translate-selection",
                     title: "Translate",
@@ -579,7 +529,6 @@ struct OverlayView: View {
 
     private func kindLabel(for item: SearchItem) -> String {
         switch item.kind {
-        case .note: item.meta["folder"] ?? "Notes"
         case .app: "Application"
         case .webSearch: "Web Search"
         case .script: "Script"
@@ -594,10 +543,6 @@ struct OverlayView: View {
             appState.recordSelection(query: query, item: item)
         }
         switch item.kind {
-        case .note:
-            if let noteId = item.meta["noteId"] {
-                NoteExtractor.openNote(id: noteId)
-            }
         case .app:
             if let path = item.meta["path"] {
                 NSWorkspace.shared.openApplication(
@@ -641,80 +586,10 @@ struct OverlayView: View {
         }
     }
 
-    private func askAIAboutSelected() {
-        guard selectedIndex < results.count else { return }
-        showActions = false
-        isGenerating = true
-        rawAnswer = ""
-
-        Task { @MainActor in
-            guard let engine = appState.queryEngine else {
-                rawAnswer = "Not ready — please select a model in Settings."
-                isGenerating = false
-                return
-            }
-            var aiQuery = query
-            if let selection = appState.currentSelection {
-                aiQuery = "Context:\n\(selection)\n\nQuestion: \(query)"
-            }
-            for await result in engine.query(aiQuery) {
-                switch result.kind {
-                case let .token(text):
-                    rawAnswer += text
-                case .sources:
-                    break
-                case let .error(msg):
-                    rawAnswer += "\n[Error: \(msg)]"
-                case .done:
-                    break
-                }
-            }
-            isGenerating = false
-        }
-    }
-
-    private func copySnippet() {
-        guard selectedIndex < results.count else { return }
-        let item = results[selectedIndex]
-        let text = item.meta["snippet"] ?? item.title
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-        showActions = false
-    }
-
     private func copyOutput() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(answer, forType: .string)
         showActions = false
-    }
-
-    private func askAIAboutOutput() {
-        showActions = false
-        let outputText = answer
-        isGenerating = true
-        rawAnswer = ""
-
-        Task { @MainActor in
-            guard let engine = appState.queryEngine else {
-                rawAnswer = "Not ready — please select a model in Settings."
-                isGenerating = false
-                return
-            }
-            let aiQuery = "Context:\n\(outputText)\n\nQuestion: \(query.isEmpty ? "Summarize this" : query)"
-            for await result in engine.query(aiQuery) {
-                switch result.kind {
-                case let .token(text):
-                    rawAnswer += text
-                case .sources:
-                    break
-                case let .error(msg):
-                    rawAnswer += "\n[Error: \(msg)]"
-                case .done:
-                    break
-                }
-            }
-            isGenerating = false
-        }
     }
 
     private func clearOutput() {
@@ -740,19 +615,6 @@ struct OverlayView: View {
         results.remove(at: selectedIndex)
         selectedIndex = min(selectedIndex, results.count - 1)
         showActions = false
-    }
-
-    private static func stripThinkingBlocks(_ text: String) -> String {
-        var result = text
-        while let start = result.range(of: "<think>"),
-              let end = result.range(of: "</think>")
-        {
-            result.removeSubrange(start.lowerBound ..< end.upperBound)
-        }
-        if let start = result.range(of: "<think>") {
-            result = String(result[..<start.lowerBound])
-        }
-        return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

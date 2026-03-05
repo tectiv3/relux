@@ -40,8 +40,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
             }
-        } else {
-            appState.restoreModels()
         }
     }
 
