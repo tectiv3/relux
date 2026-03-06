@@ -8,7 +8,8 @@ struct CachedRates: Sendable {
     let fetchedAt: Date
 }
 
-final class ExchangeRateCache: Sendable {
+/// Only used from @MainActor via CalculatorService
+final class ExchangeRateCache: @unchecked Sendable {
     private let cacheURL: URL
 
     init() {
@@ -30,7 +31,7 @@ final class ExchangeRateCache: Sendable {
     func saveToDisk(_ cached: CachedRates) {
         let json: [String: Any] = [
             "rates": cached.rates,
-            "fetchedAt": cached.fetchedAt.timeIntervalSince1970
+            "fetchedAt": cached.fetchedAt.timeIntervalSince1970,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: json) else { return }
         try? data.write(to: cacheURL, options: .atomic)

@@ -177,7 +177,7 @@ final class ScriptSearcher {
 
     // MARK: - Persistence
 
-    private func load() {
+    func load() {
         if let data = try? Data(contentsOf: storePath),
            let decoded = try? JSONDecoder().decode([ScriptItem].self, from: data)
         {

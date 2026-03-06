@@ -23,7 +23,7 @@ final class CalculatorService {
         "JPY": "USD",
         "EUR": "USD",
         "USD": "JPY",
-        "GBP": "EUR"
+        "GBP": "EUR",
     ]
 
     func warmUp() {
@@ -84,18 +84,14 @@ final class CalculatorService {
     }
 
     private func isMathExpression(_ query: String) -> Bool {
+        // Strict whitelist to prevent NSExpression format string injection
+        let allowed = CharacterSet(charactersIn: "0123456789.+-*/^()×÷ ")
+        guard CharacterSet(charactersIn: query).isSubset(of: allowed) else { return false }
+
         let hasDigit = query.contains(where: \.isNumber)
         let operators = CharacterSet(charactersIn: "+-*/^×÷()")
         let hasOperator = query.unicodeScalars.contains(where: { operators.contains($0) })
-        guard hasDigit, hasOperator else { return false }
-
-        // Reject if it contains alphabetic words (e.g. "7zip", "mp3")
-        let words = query.components(separatedBy: .whitespaces)
-        for word in words {
-            let stripped = word.trimmingCharacters(in: CharacterSet(charactersIn: "+-*/^×÷().0123456789 "))
-            if !stripped.isEmpty { return false }
-        }
-        return true
+        return hasDigit && hasOperator
     }
 
     // MARK: - Currency
@@ -121,7 +117,8 @@ final class CalculatorService {
 
         let target: String
         if match.range(at: 3).location != NSNotFound,
-           let targetRange = Range(match.range(at: 3), in: query) {
+           let targetRange = Range(match.range(at: 3), in: query)
+        {
             target = String(query[targetRange]).uppercased()
         } else {
             guard let defaultTarget = defaultPairs[source] else { return nil }
@@ -231,11 +228,11 @@ enum CurrencyInfo {
         "BGN": "Bulgarian Lev",
         "HKD": "Hong Kong Dollar",
         "ISK": "Icelandic Krona",
-        "HRK": "Croatian Kuna"
+        "HRK": "Croatian Kuna",
     ]
 
     private static let zeroDecimalCurrencies: Set<String> = [
-        "JPY", "KRW", "IDR", "HUF", "CLP", "ISK"
+        "JPY", "KRW", "IDR", "HUF", "CLP", "ISK",
     ]
 
     static func name(for code: String) -> String? {

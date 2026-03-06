@@ -143,7 +143,18 @@ struct SettingsView: View {
                 .disabled(newScriptTitle.isEmpty || newScriptCommand.isEmpty)
             }
 
-            Section("Scripts") {
+            Section(header: HStack {
+                Text("Scripts")
+                Spacer()
+                Button {
+                    appState.scriptSearcher.load()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.borderless)
+                .help("Reload scripts from disk")
+            }) {
                 if appState.scriptSearcher.scripts.isEmpty {
                     Text("No scripts added yet")
                         .foregroundStyle(.secondary)
