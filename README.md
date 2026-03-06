@@ -1,6 +1,6 @@
 # Relux
 
-Local-first macOS utility (Command Bar / Clipboard History / Translator).
+A macOS menu-bar utility that puts app launching, clipboard history, translation, and more behind a single hotkey.
 
 ## Screenshots
 
@@ -23,12 +23,21 @@ Local-first macOS utility (Command Bar / Clipboard History / Translator).
   </tr>
 </table>
 
+## Features
+
+- **App launcher** — fuzzy search across installed applications
+- **Clipboard history** — searchable history, paste with `Cmd+Shift+V`
+- **Translator** — select any text, trigger the overlay, pick Translate from quick links; streams translation via Anthropic API (requires API key in Settings)
+- **Calculator** — inline math evaluation with currency conversion (rates fetched daily from ECB)
+- **Web search** — fall through to DuckDuckGo
+- **Custom scripts** — shell scripts that can read selected text and output back to the screen (or show a notification)
+
 ## Requirements
 
 - macOS 14+
 - Apple Silicon
 - Xcode 16+
-- [xcodegen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
+- [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
 
 ## Build & Run
 
@@ -41,11 +50,16 @@ Build and run from Xcode (⌘R).
 
 ## Usage
 
-- **⌥+Space** opens the search overlay
-- Type to search apps, scripts, or clipboard history
-- **Esc** or click outside to dismiss
+| Shortcut | Action |
+|---|---|
+| `Option+Space` | Open search overlay |
+| `Cmd+Shift+V` | Open clipboard history |
+| `Caps Lock` (on selection) | Quick links (translate, scripts, etc.) |
+| `Esc` / click outside | Dismiss |
 
-On first launch, Settings opens automatically.
+Keyboard shortcuts are configurable in Settings. On first launch Settings opens automatically.
+
+> **Tip:** For the best experience, rebind the overlay shortcut to Caps Lock or another dedicated key so it's always one tap away.
 
 ## Architecture
 
@@ -58,4 +72,4 @@ Shell (menu bar, hotkey, overlay)
     → TranslateStore (SQLite)
 ```
 
-Designed with a generic extension protocol so the overlay can later serve as a full launcher.
+Built around a generic extension protocol — the overlay is designed to be extended with new panel types.
