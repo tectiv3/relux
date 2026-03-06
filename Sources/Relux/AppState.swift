@@ -50,6 +50,18 @@ final class AppState {
         }
 
         calculatorService.warmUp()
+
+        let anthro = anthropicService
+        extensionRegistry.register(
+            id: "translate", name: "Translate", icon: "character.book.closed",
+            defaultEnabled: true, availabilityCheck: { anthro.hasApiKey }
+        )
+        extensionRegistry.register(
+            id: "calculator", name: "Calculator", icon: "equal.circle", defaultEnabled: true
+        )
+        extensionRegistry.register(
+            id: "jwt", name: "JWT Decoder", icon: "key.viewfinder", defaultEnabled: true
+        )
     }
 
     func markSetupComplete() {

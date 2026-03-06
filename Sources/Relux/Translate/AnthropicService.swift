@@ -56,6 +56,11 @@ final class AnthropicService {
     If the text is already in {target_language}, output it unchanged.
     """
 
+    var hasApiKey: Bool {
+        if let key = KeychainHelper.load(key: "anthropicApiKey"), !key.isEmpty { return true }
+        return false
+    }
+
     private var apiKey: String? {
         KeychainHelper.load(key: "anthropicApiKey")
     }

@@ -597,7 +597,7 @@ struct OverlayView: View {
             let selectionIsJWT = (appState.currentSelection?.split(separator: ".").count ?? 0) >= 2
                 && (appState.currentSelection?.count ?? 0) > 20
 
-            if isJWTKeyword || isJWTContent || selectionIsJWT {
+            if appState.extensionRegistry.isReady("jwt"), isJWTKeyword || isJWTContent || selectionIsJWT {
                 results.insert(SearchItem(
                     id: "jwt-decoder",
                     title: "JWT Decoder",
@@ -609,7 +609,7 @@ struct OverlayView: View {
             }
 
             // Calculator: evaluate math or currency
-            if appState.extensionRegistry.isEnabled("calculator"),
+            if appState.extensionRegistry.isReady("calculator"),
                let calcResult = appState.calculatorService.evaluate(trimmed)
             {
                 let meta: [String: String] = [
@@ -630,7 +630,7 @@ struct OverlayView: View {
                 ), at: 0)
             }
 
-            if let selection = appState.currentSelection {
+            if appState.extensionRegistry.isReady("translate"), let selection = appState.currentSelection {
                 let preview = String(selection.prefix(80))
                 results.insert(SearchItem(
                     id: "translate-selection",
@@ -659,8 +659,8 @@ struct OverlayView: View {
         case .app: "Application"
         case .webSearch: "Web Search"
         case .script: "Script"
-        case .translate: "Command"
-        case .calculator: "Calculator"
+        case .translate: "Extension"
+        case .calculator: "Extension"
         case .jwt: "Extension"
         }
     }
@@ -670,15 +670,17 @@ struct OverlayView: View {
         let preview = String(selection.prefix(80))
         var items: [SearchItem] = [
             SearchItem(
-                id: "translate-selection", title: "Translate", subtitle: preview,
-                icon: "character.book.closed", kind: .translate, meta: [:]
-            ),
-            SearchItem(
                 id: "web-search-selection", title: "Search DuckDuckGo", subtitle: preview,
                 icon: "magnifyingglass", kind: .webSearch, meta: ["query": selection]
             ),
         ]
-        if selection.split(separator: ".").count >= 2, selection.count > 20 {
+        if appState.extensionRegistry.isReady("translate") {
+            items.insert(SearchItem(
+                id: "translate-selection", title: "Translate", subtitle: preview,
+                icon: "character.book.closed", kind: .translate, meta: [:]
+            ), at: 0)
+        }
+        if appState.extensionRegistry.isReady("jwt"), selection.split(separator: ".").count >= 2, selection.count > 20 {
             items.insert(SearchItem(
                 id: "jwt-decoder", title: "JWT Decoder", subtitle: preview,
                 icon: "key.viewfinder", kind: .jwt, meta: [:]
