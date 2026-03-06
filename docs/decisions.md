@@ -85,3 +85,14 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Hotkey: Opt+Cmd+V (configurable via KeyboardShortcuts)
 - Disabled apps list stored in UserDefaults, defaults include Keychain Access and Passwords
 - Retention-based cleanup runs once on app launch (configurable: 1/3/6 months)
+
+## 2026-03-06: Remove MLX Dependencies
+
+**Context**: The project initially integrated `mlx-swift` and `mlx-swift-lm` for on-device LLM inference and embeddings.
+
+**Decision**: We have removed all MLX dependencies from `project.yml` and the codebase.
+
+**Rationale**:
+- Simplification of the architecture.
+- Focus on core utility features (Command Bar, Clipboard, Translation) rather than local LLM hosting.
+- Reduction in build complexity and binary size.

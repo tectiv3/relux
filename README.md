@@ -1,6 +1,6 @@
 # Relux
 
-Local-first Apple Notes assistant powered by MLX on Apple Silicon. Ask questions about your notes, get answers with sources — all on-device.
+Local-first macOS utility (Command Bar / Clipboard History / Translator).
 
 ## Requirements
 
@@ -8,7 +8,6 @@ Local-first Apple Notes assistant powered by MLX on Apple Silicon. Ask questions
 - Apple Silicon
 - Xcode 16+
 - [xcodegen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
-- Local MLX models (GGUF format) in `~/.swama/models/`, `~/.cache/huggingface/hub/`, or `~/Library/Application Support/Relux/models/`
 
 ## Build & Run
 
@@ -22,22 +21,20 @@ Build and run from Xcode (⌘R).
 ## Usage
 
 - **⌥+Space** opens the search overlay
-- Type a question about your notes and press Enter
-- Answers stream in with source note references
+- Type to search apps, scripts, or clipboard history
 - **Esc** or click outside to dismiss
 
-On first launch, Settings opens automatically — select an LLM and embedding model from your local models, then hit Re-index.
+On first launch, Settings opens automatically.
 
 ## Architecture
 
 ```
 Shell (menu bar, hotkey, overlay)
   → ExtensionProtocol
-    → NotesExtension
-      → NoteExtractor (AppleScript → Notes.app)
-      → VectorStore (SQLite + BLAS cosine similarity)
-      → QueryEngine (RAG: embed → retrieve → generate)
-  → MLXService (mlx-swift embeddings + LLM)
+    → AppSearcher
+    → ScriptSearcher
+    → ClipboardStore (SQLite)
+    → TranslateStore (SQLite)
 ```
 
 Designed with a generic extension protocol so the overlay can later serve as a full launcher.
