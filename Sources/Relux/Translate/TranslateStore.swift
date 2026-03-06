@@ -12,6 +12,14 @@ struct TranslationEntry: Identifiable, Sendable {
     let targetLang: String
     let model: String
     let createdAt: Date
+    let contentHash: String
+
+    static func hash(source: String, target: String) -> String {
+        let input = "\(source)\n\(target)"
+        var h: UInt64 = 5381
+        for byte in input.utf8 { h = 127 &* h &+ UInt64(byte) }
+        return String(h, radix: 36)
+    }
 }
 
 @MainActor
@@ -38,9 +46,12 @@ final class TranslateStore {
                 source_lang     TEXT,
                 target_lang     TEXT NOT NULL,
                 model           TEXT NOT NULL,
-                created_at      REAL NOT NULL
+                created_at      REAL NOT NULL,
+                content_hash    TEXT
             )
         """)
+        // migrate existing rows
+        try? execute("ALTER TABLE translation_history ADD COLUMN content_hash TEXT")
     }
 
     deinit {
@@ -56,10 +67,11 @@ final class TranslateStore {
         targetLang: String,
         model: String
     ) throws -> Int64 {
+        let hash = TranslationEntry.hash(source: sourceText, target: targetLang)
         let sql = """
             INSERT INTO translation_history
-                (source_text, translated_text, source_lang, target_lang, model, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (source_text, translated_text, source_lang, target_lang, model, created_at, content_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -77,6 +89,7 @@ final class TranslateStore {
         sqlite3_bind_text(stmt, 4, targetLang, -1, Self.transient)
         sqlite3_bind_text(stmt, 5, model, -1, Self.transient)
         sqlite3_bind_double(stmt, 6, Date().timeIntervalSince1970)
+        sqlite3_bind_text(stmt, 7, hash, -1, Self.transient)
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw StoreError.query
@@ -106,7 +119,7 @@ final class TranslateStore {
 
     func fetchAll(limit: Int = 500) -> [TranslationEntry] {
         let sql = """
-            SELECT id, source_text, translated_text, source_lang, target_lang, model, created_at \
+            SELECT id, source_text, translated_text, source_lang, target_lang, model, created_at, content_hash \
             FROM translation_history ORDER BY created_at DESC LIMIT ?
         """
         var stmt: OpaquePointer?
@@ -153,6 +166,10 @@ final class TranslateStore {
         let targetLang = String(cString: sqlite3_column_text(stmt, 4))
         let model = String(cString: sqlite3_column_text(stmt, 5))
         let createdAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 6))
+        // fallback for rows inserted before migration
+        let contentHash: String = sqlite3_column_type(stmt, 7) == SQLITE_NULL
+            ? TranslationEntry.hash(source: sourceText, target: targetLang)
+            : String(cString: sqlite3_column_text(stmt, 7))
 
         return TranslationEntry(
             id: id,
@@ -161,7 +178,8 @@ final class TranslateStore {
             sourceLang: sourceLang,
             targetLang: targetLang,
             model: model,
-            createdAt: createdAt
+            createdAt: createdAt,
+            contentHash: contentHash
         )
     }
 

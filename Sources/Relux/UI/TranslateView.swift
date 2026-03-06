@@ -78,7 +78,13 @@ struct TranslateView: View {
                 selectedLanguage = languages.first ?? "English"
             }
             loadEntries()
-            if let selection = appState.currentSelection, !selection.isEmpty {
+            if let hash = appState.translateNavigateHash {
+                appState.translateNavigateHash = nil
+                if let index = entries.firstIndex(where: { $0.contentHash == hash }) {
+                    selectedIndex = index
+                    inputText = entries[index].sourceText
+                }
+            } else if let selection = appState.currentSelection, !selection.isEmpty {
                 inputText = selection
                 appState.currentSelection = nil
                 translateCurrent()
@@ -491,6 +497,18 @@ struct TranslateView: View {
             isTranslating = false
             activeEntryId = nil
             loadEntries()
+
+            if let entry = entries.first {
+                let preview = String(entry.sourceText.prefix(80))
+                appState.recordSelection(query: "", item: SearchItem(
+                    id: "translate-selection",
+                    title: "Translate",
+                    subtitle: preview,
+                    icon: "character.book.closed",
+                    kind: .translate,
+                    meta: ["text": entry.sourceText, "hash": entry.contentHash]
+                ))
+            }
         }
     }
 

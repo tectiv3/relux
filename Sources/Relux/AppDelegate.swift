@@ -37,9 +37,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if appState.needsFirstRun {
-            Task { @MainActor in
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-            }
+            appState.markSetupComplete()
         }
     }
 

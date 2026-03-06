@@ -488,7 +488,7 @@ struct OverlayView: View {
                     meta: ["query": selection]
                 ))
             }
-            let recents = appState.recentItems().filter { $0.kind != .translate }
+            let recents = appState.recentItems()
             results = selectionItems + recents
         } else {
             var searchResults = appState.performSearch(query: trimmed)
@@ -532,14 +532,14 @@ struct OverlayView: View {
         case .app: "Application"
         case .webSearch: "Web Search"
         case .script: "Script"
-        case .translate: "Translate"
+        case .translate: "Command"
         }
     }
 
     private func openSelectedItem() {
         guard selectedIndex < results.count else { return }
         let item = results[selectedIndex]
-        if item.kind != .webSearch, item.kind != .translate {
+        if item.kind != .webSearch {
             appState.recordSelection(query: query, item: item)
         }
         switch item.kind {
@@ -560,6 +560,7 @@ struct OverlayView: View {
                 }
             }
         case .translate:
+            appState.translateNavigateHash = item.meta["hash"]
             appState.panelMode = .translate
         case .script:
             if let command = item.meta["command"] {

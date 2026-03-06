@@ -23,6 +23,7 @@ final class AppState {
     var translateStore: TranslateStore?
     let anthropicService = AnthropicService()
     var panelMode: PanelMode = .search
+    var translateNavigateHash: String?
     var previousApp: NSRunningApplication?
 
     var currentSelection: String?

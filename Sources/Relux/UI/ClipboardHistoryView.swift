@@ -7,6 +7,7 @@ struct ClipboardHistoryView: View {
     @State private var selectedIndex: Int = 0
     @State private var showActions: Bool = false
     @State private var actionIndex: Int = 0
+    @State private var keyMonitor: Any?
     @FocusState private var isFilterFocused: Bool
 
     private var filteredEntries: [ClipboardEntry] {
@@ -85,39 +86,11 @@ struct ClipboardHistoryView: View {
         .onAppear {
             loadEntries()
             isFilterFocused = true
+            installKeyMonitor()
         }
-        .onKeyPress(.upArrow) {
-            if showActions {
-                guard !currentActions.isEmpty else { return .ignored }
-                actionIndex = actionIndex <= 0 ? currentActions.count - 1 : actionIndex - 1
-                return .handled
-            }
-            let items = filteredEntries
-            guard !items.isEmpty else { return .ignored }
-            selectedIndex = selectedIndex <= 0 ? items.count - 1 : selectedIndex - 1
-            return .handled
-        }
-        .onKeyPress(.downArrow) {
-            if showActions {
-                guard !currentActions.isEmpty else { return .ignored }
-                actionIndex = actionIndex >= currentActions.count - 1 ? 0 : actionIndex + 1
-                return .handled
-            }
-            let items = filteredEntries
-            guard !items.isEmpty else { return .ignored }
-            selectedIndex = selectedIndex >= items.count - 1 ? 0 : selectedIndex + 1
-            return .handled
-        }
-        .onKeyPress(.return) {
-            if showActions {
-                guard actionIndex < currentActions.count else { return .ignored }
-                currentActions[actionIndex].action()
-                showActions = false
-                return .handled
-            }
-            guard let entry = selectedEntry else { return .ignored }
-            pasteEntry(entry, formatted: false)
-            return .handled
+        .onDisappear { removeKeyMonitor() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            isFilterFocused = true
         }
         .onKeyPress(.escape) {
             if showActions {
@@ -125,11 +98,6 @@ struct ClipboardHistoryView: View {
                 return .handled
             }
             return .ignored
-        }
-        .onKeyPress(.delete) {
-            guard !showActions, let entry = selectedEntry else { return .ignored }
-            deleteEntry(entry)
-            return .handled
         }
         .background {
             // Cmd+K to toggle actions
@@ -491,6 +459,61 @@ struct ClipboardHistoryView: View {
                 .padding(.trailing, 8)
                 .padding(.bottom, 8)
             }
+        }
+    }
+
+    // MARK: - Key Monitor
+
+    private func installKeyMonitor() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let key = event.specialKey
+            if key == .upArrow {
+                if showActions {
+                    guard !currentActions.isEmpty else { return event }
+                    actionIndex = actionIndex <= 0 ? currentActions.count - 1 : actionIndex - 1
+                } else {
+                    let items = filteredEntries
+                    guard !items.isEmpty else { return event }
+                    selectedIndex = selectedIndex <= 0 ? items.count - 1 : selectedIndex - 1
+                }
+                return nil
+            }
+            if key == .downArrow {
+                if showActions {
+                    guard !currentActions.isEmpty else { return event }
+                    actionIndex = actionIndex >= currentActions.count - 1 ? 0 : actionIndex + 1
+                } else {
+                    let items = filteredEntries
+                    guard !items.isEmpty else { return event }
+                    selectedIndex = selectedIndex >= items.count - 1 ? 0 : selectedIndex + 1
+                }
+                return nil
+            }
+            if key == .carriageReturn || key == .newline {
+                if showActions {
+                    guard actionIndex < currentActions.count else { return event }
+                    currentActions[actionIndex].action()
+                    showActions = false
+                    return nil
+                }
+                guard let entry = selectedEntry else { return event }
+                pasteEntry(entry, formatted: false)
+                return nil
+            }
+            if key == .delete || key == .backspace {
+                if !isFilterFocused, !showActions, let entry = selectedEntry {
+                    deleteEntry(entry)
+                    return nil
+                }
+            }
+            return event
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let monitor = keyMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyMonitor = nil
         }
     }
 
