@@ -39,7 +39,46 @@ enum ScriptRunner {
         }
     }
 
-    /// Runs a command and streams stdout chunks as they arrive.
+    /// Runs a command, collects stdout, and replaces the selection in the previous app via AX API.
+    static func runAndReplace(_ command: String, env: [String: String], stdin: String? = nil, in app: NSRunningApplication) {
+        Task.detached {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            process.arguments = ["-l", "-c", command]
+            process.environment = env
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+
+            if let stdin {
+                let inputPipe = Pipe()
+                process.standardInput = inputPipe
+                inputPipe.fileHandleForWriting.write(Data(stdin.utf8))
+                inputPipe.fileHandleForWriting.closeFile()
+            }
+
+            try? process.run()
+            process.waitUntilExit()
+
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+            guard !output.isEmpty else { return }
+
+            await MainActor.run {
+                app.activate()
+                // Brief delay for the app to regain focus before AX write
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    let success = SelectionCapture.replaceSelectedText(with: output, in: app)
+                    if !success {
+                        showToast("Failed to replace selection")
+                    }
+                }
+            }
+        }
+    }
+
     /// Runs a command and streams stdout chunks as they arrive.
     static func stream(_ command: String, env: [String: String], stdin: String? = nil) -> AsyncStream<String> {
         AsyncStream { continuation in

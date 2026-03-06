@@ -88,7 +88,7 @@ struct OverlayView: View {
                 },
             ]
         case .script:
-            if !answer.isEmpty, item.meta["capturesOutput"] == "1" {
+            if !answer.isEmpty, item.meta["outputMode"] == "capture" {
                 return [
                     ItemAction(label: "Copy output", icon: "doc.on.clipboard", shortcut: nil) {
                         copyOutput()
@@ -632,14 +632,15 @@ struct OverlayView: View {
 
             // Calculator: evaluate math or currency
             if appState.extensionRegistry.isEnabled("calculator"),
-               let calcResult = appState.calculatorService.evaluate(trimmed) {
+               let calcResult = appState.calculatorService.evaluate(trimmed)
+            {
                 let meta: [String: String] = [
                     "expression": calcResult.expression,
                     "answer": calcResult.answer,
                     "isCurrency": calcResult.isCurrency ? "1" : "0",
                     "sourceCurrency": calcResult.sourceCurrency ?? "",
                     "targetCurrency": calcResult.targetCurrency ?? "",
-                    "lastUpdated": calcResult.lastUpdated.map { String($0.timeIntervalSince1970) } ?? ""
+                    "lastUpdated": calcResult.lastUpdated.map { String($0.timeIntervalSince1970) } ?? "",
                 ]
                 results.insert(SearchItem(
                     id: "calculator-result",
@@ -716,8 +717,10 @@ struct OverlayView: View {
                 let acceptsStdin = item.meta["acceptsSelection"] == "1"
                 let stdin: String? = acceptsStdin ? (query.isEmpty ? appState.currentSelection : query) : nil
                 let env = appState.scriptSearcher.buildEnvironment()
+                let outputMode = ScriptOutputMode(rawValue: item.meta["outputMode"] ?? "") ?? .none
 
-                if item.meta["capturesOutput"] == "1" {
+                switch outputMode {
+                case .capture:
                     streamingTask?.cancel()
                     showActions = false
                     isGenerating = true
@@ -728,7 +731,13 @@ struct OverlayView: View {
                         }
                         isGenerating = false
                     }
-                } else {
+                case .replace:
+                    let previousApp = appState.previousApp
+                    NSApp.keyWindow?.close()
+                    if let previousApp {
+                        ScriptRunner.runAndReplace(command, env: env, stdin: stdin, in: previousApp)
+                    }
+                case .none:
                     NSApp.keyWindow?.close()
                     ScriptRunner.run(command, env: env, stdin: stdin)
                 }

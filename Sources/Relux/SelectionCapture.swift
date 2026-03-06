@@ -28,6 +28,23 @@ enum SelectionCapture {
         return text
     }
 
+    /// Replaces the selected text in the given app via the Accessibility API.
+    /// Does not touch the pasteboard.
+    static func replaceSelectedText(with replacement: String, in app: NSRunningApplication) -> Bool {
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+
+        var focusedElement: AnyObject?
+        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElement) == .success else {
+            return false
+        }
+
+        return AXUIElementSetAttributeValue(
+            focusedElement as! AXUIElement,
+            kAXSelectedTextAttribute as CFString,
+            replacement as CFString
+        ) == .success
+    }
+
     /// Prompts for Accessibility permission if not already granted.
     static func ensureAccessibilityPermission() {
         let prompt = "AXTrustedCheckOptionPrompt" as CFString

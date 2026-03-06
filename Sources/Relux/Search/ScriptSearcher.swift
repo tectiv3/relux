@@ -1,18 +1,32 @@
 import Foundation
 
+enum ScriptOutputMode: String, Codable, CaseIterable, Sendable {
+    case none
+    case capture
+    case replace
+
+    var label: String {
+        switch self {
+        case .none: "None"
+        case .capture: "Capture"
+        case .replace: "Replace"
+        }
+    }
+}
+
 struct ScriptItem: Codable, Identifiable, Sendable {
     let id: String
     var title: String
     var command: String
     var acceptsSelection: Bool
-    var capturesOutput: Bool
+    var outputMode: ScriptOutputMode
 
-    init(title: String, command: String, acceptsSelection: Bool = false, capturesOutput: Bool = false) {
+    init(title: String, command: String, acceptsSelection: Bool = false, outputMode: ScriptOutputMode = .none) {
         id = UUID().uuidString
         self.title = title
         self.command = command
         self.acceptsSelection = acceptsSelection
-        self.capturesOutput = capturesOutput
+        self.outputMode = outputMode
     }
 
     /// Backward-compatible decoding for existing scripts.json lacking new fields
@@ -22,7 +36,26 @@ struct ScriptItem: Codable, Identifiable, Sendable {
         title = try container.decode(String.self, forKey: .title)
         command = try container.decode(String.self, forKey: .command)
         acceptsSelection = try container.decodeIfPresent(Bool.self, forKey: .acceptsSelection) ?? false
-        capturesOutput = try container.decodeIfPresent(Bool.self, forKey: .capturesOutput) ?? false
+        // Migrate old capturesOutput bool to new outputMode enum
+        if let mode = try container.decodeIfPresent(ScriptOutputMode.self, forKey: .outputMode) {
+            outputMode = mode
+        } else {
+            let legacy = try container.decodeIfPresent(Bool.self, forKey: .capturesOutput) ?? false
+            outputMode = legacy ? .capture : .none
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, command, acceptsSelection, outputMode, capturesOutput
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(command, forKey: .command)
+        try container.encode(acceptsSelection, forKey: .acceptsSelection)
+        try container.encode(outputMode, forKey: .outputMode)
     }
 }
 
@@ -59,8 +92,8 @@ final class ScriptSearcher {
 
     // MARK: - Script Mutations
 
-    func add(title: String, command: String, acceptsSelection: Bool = false, capturesOutput: Bool = false) {
-        scripts.append(ScriptItem(title: title, command: command, acceptsSelection: acceptsSelection, capturesOutput: capturesOutput))
+    func add(title: String, command: String, acceptsSelection: Bool = false, outputMode: ScriptOutputMode = .none) {
+        scripts.append(ScriptItem(title: title, command: command, acceptsSelection: acceptsSelection, outputMode: outputMode))
         save()
     }
 
@@ -136,7 +169,7 @@ final class ScriptSearcher {
                 meta: [
                     "command": item.script.command,
                     "acceptsSelection": item.script.acceptsSelection ? "1" : "0",
-                    "capturesOutput": item.script.capturesOutput ? "1" : "0",
+                    "outputMode": item.script.outputMode.rawValue,
                 ]
             )
         }

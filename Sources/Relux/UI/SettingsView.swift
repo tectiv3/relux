@@ -168,16 +168,20 @@ struct SettingsView: View {
                             ))
                             .toggleStyle(.checkbox)
                             .help("Pass selected text as stdin")
-                            Toggle("output", isOn: Binding(
-                                get: { script.capturesOutput },
+                            Picker("", selection: Binding(
+                                get: { script.outputMode },
                                 set: { newValue in
                                     var updated = script
-                                    updated.capturesOutput = newValue
+                                    updated.outputMode = newValue
                                     appState.scriptSearcher.update(updated)
                                 }
-                            ))
-                            .toggleStyle(.checkbox)
-                            .help("Stream stdout into the panel")
+                            )) {
+                                ForEach(ScriptOutputMode.allCases, id: \.self) { mode in
+                                    Text(mode.label).tag(mode)
+                                }
+                            }
+                            .frame(width: 100)
+                            .help("None = fire & forget, Capture = stream into panel, Replace = replace selection")
                             Button(role: .destructive) {
                                 appState.scriptSearcher.remove(id: script.id)
                             } label: {
