@@ -749,6 +749,16 @@ struct OverlayView: View {
             }
             NSApp.keyWindow?.close()
         case .jwt:
+            let token = item.meta["token"] ?? appState.currentSelection
+            if let token, !token.isEmpty {
+                // Validate before opening — must have decodable parts
+                let parts = token.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ".")
+                guard parts.count >= 2 else {
+                    Toast.show("Not a valid JWT token")
+                    return
+                }
+                appState.currentSelection = token
+            }
             appState.panelMode = .jwt
         }
     }
