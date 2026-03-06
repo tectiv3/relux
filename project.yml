@@ -34,7 +34,7 @@ targets:
         INFOPLIST_FILE: Sources/Relux/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.relux.app
         PRODUCT_NAME: Relux
-        MARKETING_VERSION: "0.1.0"
+        MARKETING_VERSION: "1.8.0"
         CURRENT_PROJECT_VERSION: 1
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGN_STYLE: Manual
