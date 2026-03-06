@@ -13,6 +13,7 @@ final class AppSearcher {
         "/Applications/Utilities",
         "/System/Applications",
         "/System/Applications/Utilities",
+        "/System/Library/CoreServices/Applications",
         NSHomeDirectory() + "/Applications",
     ]
 
@@ -46,6 +47,16 @@ final class AppSearcher {
 
         NotificationCenter.default.addObserver(
             forName: .NSMetadataQueryDidFinishGathering,
+            object: mdQuery,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleQueryResults()
+            }
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: .NSMetadataQueryDidUpdate,
             object: mdQuery,
             queue: .main
         ) { [weak self] _ in
