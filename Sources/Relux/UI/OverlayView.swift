@@ -107,6 +107,12 @@ struct OverlayView: View {
                     removeFromHistory()
                 },
             ]
+        case .calculator:
+            return [
+                ItemAction(label: "Copy", icon: "doc.on.clipboard", shortcut: "⏎") {
+                    openSelectedItem()
+                },
+            ]
         }
     }
 
@@ -271,6 +277,7 @@ struct OverlayView: View {
         case .script: "Scripts"
         case .webSearch: "Web Search"
         case .translate: "Translate"
+        case .calculator: "Calculator"
         }
     }
 
@@ -551,6 +558,7 @@ struct OverlayView: View {
         case .webSearch: "Web Search"
         case .script: "Script"
         case .translate: "Command"
+        case .calculator: "Calculator"
         }
     }
 
@@ -601,6 +609,8 @@ struct OverlayView: View {
                     ScriptRunner.run(command, env: env, stdin: stdin)
                 }
             }
+        case .calculator:
+            break
         }
     }
 

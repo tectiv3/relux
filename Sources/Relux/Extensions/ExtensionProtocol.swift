@@ -5,6 +5,7 @@ enum SearchItemKind: Sendable {
     case webSearch
     case script
     case translate
+    case calculator
 }
 
 struct SearchItem: Identifiable, Sendable {
