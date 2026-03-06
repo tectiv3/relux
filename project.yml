@@ -44,14 +44,3 @@ targets:
       path: Sources/Relux/Relux.entitlements
       properties:
         com.apple.security.automation.apple-events: true
-
-  ReluxTool:
-    type: tool
-    platform: macOS
-    sources:
-      - Sources/ReluxTool
-    dependencies:
-      - target: ReluxCore
-    settings:
-      base:
-        SWIFT_VERSION: "6.0"

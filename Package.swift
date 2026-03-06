@@ -18,11 +18,5 @@ let package = Package(
                 "KeyboardShortcuts",
             ]
         ),
-        .executableTarget(
-            name: "ReluxTool",
-            dependencies: [
-                "ReluxCore",
-            ]
-        ),
     ]
 )
