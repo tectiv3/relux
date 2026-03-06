@@ -25,7 +25,8 @@ A macOS menu-bar utility that puts app launching, clipboard history, translation
 
 ## Features
 
-- **App launcher** — fuzzy search across installed applications
+- **App launcher** — fuzzy search across installed applications; search paths configurable in Settings
+- **System Settings** — search and open macOS System Settings categories directly (Wi-Fi, Keyboard, Privacy, etc.)
 - **Clipboard history** — searchable history, paste with `Cmd+Shift+V`
 - **Translator** — select any text, trigger the overlay, pick Translate from quick links; streams translation via Anthropic API (requires API key in Settings)
 - **Calculator** — inline math evaluation with currency conversion (rates fetched daily from ECB)
@@ -76,6 +77,7 @@ Keyboard shortcuts are configurable in Settings. On first launch Settings opens 
 Shell (menu bar, hotkey, overlay)
   → ExtensionProtocol
     → AppSearcher
+    → SystemSettingsSearcher
     → ScriptSearcher
     → ClipboardStore (SQLite)
     → TranslateStore (SQLite)
