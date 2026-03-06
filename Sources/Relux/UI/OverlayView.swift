@@ -641,14 +641,28 @@ struct OverlayView: View {
                     meta: [:]
                 ), at: 0)
             }
-            results.append(SearchItem(
-                id: "web-search-ddg",
-                title: "Search DuckDuckGo",
-                subtitle: trimmed,
-                icon: "magnifyingglass",
-                kind: .webSearch,
-                meta: ["query": trimmed]
-            ))
+
+            let isURL = trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://")
+                || trimmed.range(of: #"^[a-zA-Z0-9\-]+\.[a-zA-Z]{2,}"#, options: .regularExpression) != nil
+            if isURL {
+                results.append(SearchItem(
+                    id: "web-open-url",
+                    title: "Open URL",
+                    subtitle: trimmed,
+                    icon: "link",
+                    kind: .webSearch,
+                    meta: ["url": trimmed]
+                ))
+            } else {
+                results.append(SearchItem(
+                    id: "web-search-ddg",
+                    title: "Search DuckDuckGo",
+                    subtitle: trimmed,
+                    icon: "magnifyingglass",
+                    kind: .webSearch,
+                    meta: ["query": trimmed]
+                ))
+            }
         }
         selectedIndex = 0
         showActions = false
@@ -704,8 +718,15 @@ struct OverlayView: View {
                 )
             }
         case .webSearch:
-            if let q = item.meta["query"],
-               var components = URLComponents(string: "https://duckduckgo.com/")
+            if let rawURL = item.meta["url"] {
+                // Direct URL — open it, prepending https:// if needed
+                let urlString = rawURL.hasPrefix("http://") || rawURL.hasPrefix("https://")
+                    ? rawURL : "https://\(rawURL)"
+                if let url = URL(string: urlString) {
+                    NSWorkspace.shared.open(url)
+                }
+            } else if let q = item.meta["query"],
+                      var components = URLComponents(string: "https://duckduckgo.com/")
             {
                 components.queryItems = [URLQueryItem(name: "q", value: q)]
                 if let url = components.url {
