@@ -7,12 +7,13 @@ import SwiftUI
 // swiftlint:disable:next type_body_length
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
-    @State private var selectedInputSourceId: String = UserDefaults.standard.string(forKey: "forceInputSourceId") ?? ""
-    @State private var clearQueryOnOpen: Bool = UserDefaults.standard.bool(forKey: "clearQueryOnOpen")
-    @State private var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
-    @State private var selectedAppearance: String = UserDefaults.standard.string(forKey: "appAppearance") ?? "system"
-    @State private var availableInputSources: [(id: String, name: String)] = getKeyboardLayouts()
-    @State private var showMaxResults: Int = UserDefaults.standard.object(forKey: "maxSearchResults") as? Int ?? 10
+    @AppStorage("showMenuBarIcon") private var showMenuBarIcon = true
+    @State private var selectedInputSourceId: String = ""
+    @State private var clearQueryOnOpen: Bool = false
+    @State private var launchAtLogin: Bool = false
+    @State private var selectedAppearance: String = "system"
+    @State private var availableInputSources: [(id: String, name: String)] = []
+    @State private var showMaxResults: Int = 10
     @State private var clipboardEnabled: Bool =
         UserDefaults.standard.object(forKey: "clipboardEnabled") as? Bool ?? true
     @State private var clipboardRetention: Int =
@@ -35,6 +36,14 @@ struct SettingsView: View {
                 .tabItem { Label("Translate", systemImage: "character.book.closed") }
         }
         .frame(width: 450, height: 500)
+        .onAppear {
+            selectedInputSourceId = UserDefaults.standard.string(forKey: "forceInputSourceId") ?? ""
+            clearQueryOnOpen = UserDefaults.standard.bool(forKey: "clearQueryOnOpen")
+            launchAtLogin = SMAppService.mainApp.status == .enabled
+            selectedAppearance = UserDefaults.standard.string(forKey: "appAppearance") ?? "system"
+            availableInputSources = Self.getKeyboardLayouts()
+            showMaxResults = UserDefaults.standard.object(forKey: "maxSearchResults") as? Int ?? 10
+        }
     }
 
     // MARK: - General Tab
@@ -70,10 +79,7 @@ struct SettingsView: View {
                     applyAppearance(newValue)
                 }
 
-                Toggle("Show menu bar icon", isOn: Binding(
-                    get: { appState.showMenuBarIcon },
-                    set: { appState.showMenuBarIcon = $0 }
-                ))
+                Toggle("Show menu bar icon", isOn: $showMenuBarIcon)
             }
 
             Section("Behavior") {
@@ -102,6 +108,13 @@ struct SettingsView: View {
                         UserDefaults.standard.set(newValue, forKey: "forceInputSourceId")
                     }
                 }
+            }
+
+            Section {
+                Button("Quit Relux") {
+                    NSApp.terminate(nil)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
             }
         }
         .formStyle(.grouped)

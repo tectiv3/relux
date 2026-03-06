@@ -31,9 +31,6 @@ final class AppState {
         !UserDefaults.standard.bool(forKey: "hasCompletedSetup")
     }
 
-    var showMenuBarIcon: Bool = UserDefaults.standard.object(forKey: "showMenuBarIcon") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(showMenuBarIcon, forKey: "showMenuBarIcon") }
-    }
 
     func setup() throws {
         let clipStore = try ClipboardStore()
