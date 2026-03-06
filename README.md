@@ -32,7 +32,11 @@ A macOS menu-bar utility that puts app launching, clipboard history, translation
 - **Web search** — fall through to DuckDuckGo
 - **Custom scripts** — shell scripts that can read selected text and output back to the screen (or show a notification)
 
-## Requirements
+## Install
+
+Download the latest `.dmg` from [GitHub Releases](https://github.com/tectiv3/relux/releases). The app is signed and notarized by Apple.
+
+## Requirements (building from source)
 
 - macOS 14+
 - Apple Silicon
