@@ -9,6 +9,7 @@ IDENTITY="Developer ID Application"  # will match any Developer ID cert
 TEAM_ID="${RELUX_TEAM_ID:?Set RELUX_TEAM_ID env var to your Apple team ID}"
 APPLE_ID="${RELUX_APPLE_ID:?Set RELUX_APPLE_ID env var to your Apple ID email}"
 APP_PASSWORD="${RELUX_APP_PASSWORD:?Set RELUX_APP_PASSWORD env var (app-specific password from appleid.apple.com)}"
+HOMEBREW_TAP="$HOME/code/homebrew-relux"
 
 GIT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
 if [ -z "$GIT_TAG" ]; then
@@ -104,8 +105,26 @@ xcrun notarytool submit "$DMG_PATH" \
 echo "==> Stapling notarization ticket"
 xcrun stapler staple "$DMG_PATH"
 
+# ── GitHub Release ────────────────────────────────────────────────────
+echo "==> Opening GitHub release page — attach the DMG manually"
+open "https://github.com/tectiv3/relux/releases/new?tag=$GIT_TAG&title=Relux+$VERSION"
+
+# ── Update Homebrew tap ──────────────────────────────────────────────
+echo "==> Updating Homebrew cask"
+
+DMG_SHA=$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')
+CASK_FILE="$HOMEBREW_TAP/Casks/relux.rb"
+
+sed -i '' "s/version \".*\"/version \"$VERSION\"/" "$CASK_FILE"
+sed -i '' "s/sha256 \".*\"/sha256 \"$DMG_SHA\"/" "$CASK_FILE"
+
+git -C "$HOMEBREW_TAP" add -A
+git -C "$HOMEBREW_TAP" commit -m "Update Relux to $VERSION"
+git -C "$HOMEBREW_TAP" push
+
 # ── Done ─────────────────────────────────────────────────────────────
 echo ""
 echo "Done! Notarized DMG: $DMG_PATH"
 echo "  Version: $VERSION"
-echo "  Size: $(du -h "$DMG_PATH" | cut -f1)"
+echo "  SHA256:  $DMG_SHA"
+echo "  Release: https://github.com/tectiv3/relux/releases/tag/$GIT_TAG"

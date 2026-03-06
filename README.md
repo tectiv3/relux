@@ -34,7 +34,12 @@ A macOS menu-bar utility that puts app launching, clipboard history, translation
 
 ## Install
 
-Download the latest `.dmg` from [GitHub Releases](https://github.com/tectiv3/relux/releases). The app is signed and notarized by Apple.
+```bash
+brew tap tectiv3/relux
+brew install --cask relux
+```
+
+Or download the latest `.dmg` from [GitHub Releases](https://github.com/tectiv3/relux/releases). The app is signed and notarized by Apple.
 
 ## Requirements (building from source)
 
