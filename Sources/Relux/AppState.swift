@@ -17,6 +17,7 @@ final class AppState {
     let scriptSearcher = ScriptSearcher()
     let frecency = FrecencyTracker()
     let extensionRegistry = ExtensionRegistry()
+    let calculatorService = CalculatorService()
 
     var clipboardStore: ClipboardStore?
     var clipboardMonitor: ClipboardMonitor?
@@ -46,6 +47,8 @@ final class AppState {
         if let cutoffDate = Calendar.current.date(byAdding: .month, value: -retentionMonths, to: Date()) {
             try? clipStore.deleteExpired(before: cutoffDate)
         }
+
+        calculatorService.warmUp()
     }
 
     func markSetupComplete() {

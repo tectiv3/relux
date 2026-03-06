@@ -13,6 +13,7 @@ final class ExtensionRegistry {
 
     init() {
         register(id: "translate", name: "Translate", icon: "character.book.closed", defaultEnabled: true)
+        register(id: "calculator", name: "Calculator", icon: "equal.circle", defaultEnabled: true)
     }
 
     func isEnabled(_ id: String) -> Bool {
