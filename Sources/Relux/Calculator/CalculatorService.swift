@@ -54,6 +54,7 @@ final class CalculatorService {
             .replacingOccurrences(of: "×", with: "*")
             .replacingOccurrences(of: "÷", with: "/")
             .replacingOccurrences(of: "^", with: "**")
+            .replacingOccurrences(of: "=", with: "")
 
         // Strip trailing operators so partial input doesn't crash
         while let last = expr.last, "+-*/".contains(last) {
@@ -61,12 +62,9 @@ final class CalculatorService {
         }
         guard !expr.isEmpty else { return nil }
 
-        let nsExpr: NSExpression
-        do {
-            nsExpr = try NSExpression(format: expr)
-        } catch {
-            return nil
-        }
+        // NSExpression(format:) raises ObjC exceptions on bad input (uncatchable in Swift)
+        // Validation in isMathExpression should prevent this, but guard with NSExpression.init(expressionType:)
+        let nsExpr = NSExpression(format: expr)
 
         guard let result = nsExpr.expressionValue(with: nil, context: nil) as? NSNumber else {
             return nil
@@ -84,14 +82,28 @@ final class CalculatorService {
     }
 
     private func isMathExpression(_ query: String) -> Bool {
+        let cleaned = query.replacingOccurrences(of: "=", with: "")
+        guard !cleaned.isEmpty else { return false }
+
         // Strict whitelist to prevent NSExpression format string injection
         let allowed = CharacterSet(charactersIn: "0123456789.+-*/^()×÷ ")
-        guard CharacterSet(charactersIn: query).isSubset(of: allowed) else { return false }
+        guard CharacterSet(charactersIn: cleaned).isSubset(of: allowed) else { return false }
 
-        let hasDigit = query.contains(where: \.isNumber)
-        let operators = CharacterSet(charactersIn: "+-*/^×÷()")
-        let hasOperator = query.unicodeScalars.contains(where: { operators.contains($0) })
-        return hasDigit && hasOperator
+        let hasDigit = cleaned.contains(where: \.isNumber)
+        let arithmeticOps = CharacterSet(charactersIn: "+-*/^×÷")
+        let hasArithmeticOp = cleaned.unicodeScalars.contains(where: { arithmeticOps.contains($0) })
+        guard hasDigit, hasArithmeticOp else { return false }
+
+        // Balanced parentheses
+        var depth = 0
+        for ch in cleaned {
+            if ch == "(" { depth += 1 }
+            if ch == ")" { depth -= 1 }
+            if depth < 0 { return false }
+        }
+        if depth != 0 { return false }
+
+        return true
     }
 
     // MARK: - Currency
