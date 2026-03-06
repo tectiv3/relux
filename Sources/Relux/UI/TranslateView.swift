@@ -510,7 +510,27 @@ struct TranslateView: View {
         showActions = false
         inputText = entry.sourceText
         selectedLanguage = entry.targetLang
-        translateCurrent()
+
+        streamingTask?.cancel()
+        isTranslating = true
+        streamedText = ""
+        activeEntryId = entry.id
+
+        streamingTask = Task { @MainActor in
+            var full = ""
+            for await chunk in appState.anthropicService.translate(text: entry.sourceText, targetLanguage: entry.targetLang) {
+                full += chunk
+                streamedText = full
+            }
+
+            if let store = appState.translateStore {
+                try? store.updateTranslation(id: entry.id, translatedText: full)
+            }
+
+            isTranslating = false
+            activeEntryId = nil
+            loadEntries()
+        }
     }
 
     private func copyTranslation(_ entry: TranslationEntry) {

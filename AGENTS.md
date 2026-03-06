@@ -1,6 +1,8 @@
 ## CRITICAL WORKFLOW - ALWAYS FOLLOW THIS
 
-Activate serena project relux at the start of each session. Update docs/decisions.md whenever user requests a change to architecture, dependencies, or build system.
+Activate serena project relux at the start of each session.
+List memories and read one about task completion.
+Update docs/decisions.md whenever user requests a change to architecture, dependencies, or build system.
 
 ## Build System
 

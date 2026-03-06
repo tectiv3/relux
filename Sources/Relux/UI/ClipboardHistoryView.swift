@@ -90,6 +90,7 @@ struct ClipboardHistoryView: View {
         }
         .onDisappear { removeKeyMonitor() }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            loadEntries()
             isFilterFocused = true
         }
         .onKeyPress(.escape) {
