@@ -188,6 +188,10 @@ struct OverlayView: View {
         }
         .onAppear {
             isSearchFocused = true
+            // Delayed fallback for when view appears after a mode swap
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                isSearchFocused = true
+            }
         }
         .onKeyPress(.upArrow) {
             if showActions {

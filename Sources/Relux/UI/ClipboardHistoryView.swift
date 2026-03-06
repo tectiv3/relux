@@ -89,6 +89,9 @@ struct ClipboardHistoryView: View {
             installKeyMonitor()
         }
         .onDisappear { removeKeyMonitor() }
+        .onReceive(NotificationCenter.default.publisher(for: .panelWillClose)) { _ in
+            removeKeyMonitor()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             loadEntries()
             isFilterFocused = true
