@@ -81,6 +81,7 @@ struct TranslateView: View {
             if let selection = appState.currentSelection, !selection.isEmpty {
                 inputText = selection
                 appState.currentSelection = nil
+                translateCurrent()
             }
             isInputFocused = true
         }
@@ -462,12 +463,24 @@ struct TranslateView: View {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
+        let lang = selectedLanguage
+        let hash = TranslationEntry.hash(source: text, target: lang)
+
+        // Reuse existing translation if available
+        if let store = appState.translateStore,
+           let existing = store.findByHash(hash)
+        {
+            store.bumpTimestamp(id: existing.id)
+            loadEntries()
+            selectedIndex = 0
+            return
+        }
+
         streamingTask?.cancel()
         isTranslating = true
         streamedText = ""
         selectedIndex = 0
 
-        let lang = selectedLanguage
         let model = appState.anthropicService.model
 
         if let store = appState.translateStore,

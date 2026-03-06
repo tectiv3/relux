@@ -96,3 +96,17 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Simplification of the architecture.
 - Focus on core utility features (Command Bar, Clipboard, Translation) rather than local LLM hosting.
 - Reduction in build complexity and binary size.
+
+## Translation Dedup & History Sorting
+
+- Translation history uses `content_hash` (djb2 hash of source text + target language) to detect duplicate translations
+- When a duplicate is requested, the existing entry's `updated_at` is bumped instead of re-translating
+- History sorted by `COALESCE(updated_at, created_at) DESC` — most recently used on top
+- `created_at` is immutable (original creation time), `updated_at` tracks last access
+- This pattern (content hash dedup + updated_at sorting) should be reused for clipboard history if needed
+
+## Recents Dedup in Search Panel
+
+- Search results with fixed ids (e.g., `translate-selection`) are deduped against recents by id
+- Selection-aware items (built fresh with preview subtitle) take priority over their stored recents counterpart
+- No kind-based filtering needed — id-based dedup handles all cases generically

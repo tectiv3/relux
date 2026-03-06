@@ -480,7 +480,7 @@ struct OverlayView: View {
                     subtitle: preview,
                     icon: "character.book.closed",
                     kind: .translate,
-                    meta: ["text": selection]
+                    meta: [:]
                 ))
                 selectionItems.append(SearchItem(
                     id: "web-search-selection",
@@ -491,7 +491,8 @@ struct OverlayView: View {
                     meta: ["query": selection]
                 ))
             }
-            let recents = appState.recentItems().filter { $0.kind != .translate }
+            let selectionIds = Set(selectionItems.map(\.id))
+            let recents = appState.recentItems().filter { !selectionIds.contains($0.id) }
             results = selectionItems + recents
         } else {
             var searchResults = appState.performSearch(query: trimmed)
@@ -514,7 +515,7 @@ struct OverlayView: View {
                     subtitle: preview,
                     icon: "character.book.closed",
                     kind: .translate,
-                    meta: ["text": selection]
+                    meta: [:]
                 ), at: 0)
             }
             results.append(SearchItem(

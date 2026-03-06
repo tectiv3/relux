@@ -12,6 +12,7 @@ struct TranslationEntry: Identifiable, Sendable {
     let targetLang: String
     let model: String
     let createdAt: Date
+    let updatedAt: Date
     let contentHash: String
 
     static func hash(source: String, target: String) -> String {
@@ -54,6 +55,8 @@ final class TranslateStore {
         """)
         // migrate existing rows
         try? execute("ALTER TABLE translation_history ADD COLUMN content_hash TEXT")
+        try? execute("ALTER TABLE translation_history ADD COLUMN updated_at REAL")
+        try? execute("UPDATE translation_history SET updated_at = created_at WHERE updated_at IS NULL")
     }
 
     deinit {
@@ -72,8 +75,8 @@ final class TranslateStore {
         let hash = TranslationEntry.hash(source: sourceText, target: targetLang)
         let sql = """
             INSERT INTO translation_history
-                (source_text, translated_text, source_lang, target_lang, model, created_at, content_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (source_text, translated_text, source_lang, target_lang, model, created_at, updated_at, content_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -90,8 +93,10 @@ final class TranslateStore {
         }
         sqlite3_bind_text(stmt, 4, targetLang, -1, Self.transient)
         sqlite3_bind_text(stmt, 5, model, -1, Self.transient)
-        sqlite3_bind_double(stmt, 6, Date().timeIntervalSince1970)
-        sqlite3_bind_text(stmt, 7, hash, -1, Self.transient)
+        let now = Date().timeIntervalSince1970
+        sqlite3_bind_double(stmt, 6, now)
+        sqlite3_bind_double(stmt, 7, now)
+        sqlite3_bind_text(stmt, 8, hash, -1, Self.transient)
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw StoreError.query
@@ -121,8 +126,9 @@ final class TranslateStore {
 
     func fetchAll(limit: Int = 500) -> [TranslationEntry] {
         let sql = """
-            SELECT id, source_text, translated_text, source_lang, target_lang, model, created_at, content_hash \
-            FROM translation_history ORDER BY created_at DESC LIMIT ?
+            SELECT id, source_text, translated_text, source_lang, target_lang,
+                model, created_at, updated_at, content_hash
+            FROM translation_history ORDER BY COALESCE(updated_at, created_at) DESC LIMIT ?
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
@@ -135,6 +141,33 @@ final class TranslateStore {
             entries.append(readRow(stmt))
         }
         return entries
+    }
+
+    func findByHash(_ hash: String) -> TranslationEntry? {
+        let sql = """
+            SELECT id, source_text, translated_text, source_lang, target_lang,
+                model, created_at, updated_at, content_hash
+            FROM translation_history WHERE content_hash = ? AND translated_text != '' LIMIT 1
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, hash, -1, Self.transient)
+
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return readRow(stmt)
+    }
+
+    func bumpTimestamp(id: Int64) {
+        let sql = "UPDATE translation_history SET updated_at = ? WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970)
+        sqlite3_bind_int64(stmt, 2, id)
+        sqlite3_step(stmt)
     }
 
     // MARK: - Delete
@@ -168,10 +201,12 @@ final class TranslateStore {
         let targetLang = String(cString: sqlite3_column_text(stmt, 4))
         let model = String(cString: sqlite3_column_text(stmt, 5))
         let createdAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 6))
-        // fallback for rows inserted before migration
-        let contentHash: String = sqlite3_column_type(stmt, 7) == SQLITE_NULL
+        let updatedAt: Date = sqlite3_column_type(stmt, 7) == SQLITE_NULL
+            ? createdAt
+            : Date(timeIntervalSince1970: sqlite3_column_double(stmt, 7))
+        let contentHash: String = sqlite3_column_type(stmt, 8) == SQLITE_NULL
             ? TranslationEntry.hash(source: sourceText, target: targetLang)
-            : String(cString: sqlite3_column_text(stmt, 7))
+            : String(cString: sqlite3_column_text(stmt, 8))
 
         return TranslationEntry(
             id: id,
@@ -181,6 +216,7 @@ final class TranslateStore {
             targetLang: targetLang,
             model: model,
             createdAt: createdAt,
+            updatedAt: updatedAt,
             contentHash: contentHash
         )
     }
