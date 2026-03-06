@@ -79,11 +79,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             UserDefaults.standard.set(frame.origin.x, forKey: "panelX")
             UserDefaults.standard.set(frame.origin.y, forKey: "panelY")
             appState.currentSelection = nil
+            appState.panelClosedAt = Date()
             panel.close()
         } else {
             appState.previousApp = NSWorkspace.shared.frontmostApplication
             appState.currentSelection = SelectionCapture.captureSelectedText()
-            appState.panelMode = .search
+            // Keep last panel mode if closed within 60s
+            if Date().timeIntervalSince(appState.panelClosedAt) > 60 {
+                appState.panelMode = .search
+            }
             applyForcedInputSource()
             panel.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)

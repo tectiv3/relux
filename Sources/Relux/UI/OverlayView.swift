@@ -143,6 +143,9 @@ struct OverlayView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             showActions = false
+            streamingTask?.cancel()
+            rawAnswer = ""
+            isGenerating = false
             if UserDefaults.standard.bool(forKey: "clearQueryOnOpen") {
                 query = ""
             }
@@ -488,7 +491,7 @@ struct OverlayView: View {
                     meta: ["query": selection]
                 ))
             }
-            let recents = appState.recentItems()
+            let recents = appState.recentItems().filter { $0.kind != .translate }
             results = selectionItems + recents
         } else {
             var searchResults = appState.performSearch(query: trimmed)
@@ -560,7 +563,6 @@ struct OverlayView: View {
                 }
             }
         case .translate:
-            appState.translateNavigateHash = item.meta["hash"]
             appState.panelMode = .translate
         case .script:
             if let command = item.meta["command"] {

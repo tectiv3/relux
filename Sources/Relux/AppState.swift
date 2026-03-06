@@ -23,14 +23,13 @@ final class AppState {
     var translateStore: TranslateStore?
     let anthropicService = AnthropicService()
     var panelMode: PanelMode = .search
-    var translateNavigateHash: String?
+    var panelClosedAt: Date = .distantPast
     var previousApp: NSRunningApplication?
 
     var currentSelection: String?
     var needsFirstRun: Bool {
         !UserDefaults.standard.bool(forKey: "hasCompletedSetup")
     }
-
 
     func setup() throws {
         let clipStore = try ClipboardStore()

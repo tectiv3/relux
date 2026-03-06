@@ -17,7 +17,9 @@ struct TranslationEntry: Identifiable, Sendable {
     static func hash(source: String, target: String) -> String {
         let input = "\(source)\n\(target)"
         var h: UInt64 = 5381
-        for byte in input.utf8 { h = 127 &* h &+ UInt64(byte) }
+        for byte in input.utf8 {
+            h = 127 &* h &+ UInt64(byte)
+        }
         return String(h, radix: 36)
     }
 }
