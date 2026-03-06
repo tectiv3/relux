@@ -296,13 +296,19 @@ struct OverlayView: View {
                             .padding(.bottom, 2)
 
                         ForEach(section.items, id: \.item.id) { index, item in
-                            resultRow(item: item, isSelected: index == selectedIndex)
-                                .id(index)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    selectedIndex = index
-                                    openSelectedItem()
+                            Group {
+                                if item.kind == .calculator {
+                                    calculatorCard(item: item, isSelected: index == selectedIndex)
+                                } else {
+                                    resultRow(item: item, isSelected: index == selectedIndex)
                                 }
+                            }
+                            .id(index)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selectedIndex = index
+                                openSelectedItem()
+                            }
                         }
                     }
                 }
@@ -329,6 +335,67 @@ struct OverlayView: View {
                 .font(.system(size: 14))
                 .frame(width: 24, height: 24)
         }
+    }
+
+    private func calculatorCard(item: SearchItem, isSelected: Bool) -> some View {
+        let expression = item.meta["expression"] ?? item.title
+        let answer = item.meta["answer"] ?? ""
+        let isCurrency = item.meta["isCurrency"] == "1"
+        let sourceCurrency = item.meta["sourceCurrency"]
+        let targetCurrency = item.meta["targetCurrency"]
+        let lastUpdated = item.meta["lastUpdated"].flatMap { Double($0) }.map { Date(timeIntervalSince1970: $0) }
+
+        return HStack(spacing: 0) {
+            VStack(spacing: 4) {
+                Text(expression)
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                if isCurrency, let source = sourceCurrency {
+                    Text(source)
+                        .font(.system(size: 11))
+                        .foregroundColor(isSelected ? .white.opacity(0.6) : .secondary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            VStack(spacing: 2) {
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 16))
+                    .foregroundColor(isSelected ? .white.opacity(0.6) : .secondary)
+                if isCurrency, let updated = lastUpdated {
+                    Text(relativeTime(updated))
+                        .font(.system(size: 9))
+                        .foregroundColor(isSelected ? .white.opacity(0.4) : .secondary.opacity(0.7))
+                }
+            }
+            .frame(width: 80)
+
+            VStack(spacing: 4) {
+                Text(answer)
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                if isCurrency, let target = targetCurrency {
+                    Text(target)
+                        .font(.system(size: 11))
+                        .foregroundColor(isSelected ? .white.opacity(0.6) : .secondary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.08))
+                .padding(.horizontal, 4)
+        )
+        .foregroundColor(isSelected ? .white : .primary)
+    }
+
+    private func relativeTime(_ date: Date) -> String {
+        let seconds = Int(-date.timeIntervalSinceNow)
+        if seconds < 60 { return "Updated just now" }
+        if seconds < 3600 { return "Updated \(seconds / 60)m ago" }
+        if seconds < 86400 { return "Updated \(seconds / 3600)h ago" }
+        return "Updated \(seconds / 86400)d ago"
     }
 
     private func resultRow(item: SearchItem, isSelected: Bool) -> some View {
@@ -452,7 +519,11 @@ struct OverlayView: View {
                 keyboardHint(key: "\u{2191}\u{2193}", label: "Navigate")
                 keyboardHint(key: "esc", label: "Back")
             } else {
-                keyboardHint(key: "\u{23CE}", label: "Open")
+                if selectedIndex < results.count, results[selectedIndex].kind == .calculator {
+                    keyboardHint(key: "\u{23CE}", label: "Copy Answer")
+                } else {
+                    keyboardHint(key: "\u{23CE}", label: "Open")
+                }
                 keyboardHint(key: "\u{2318}K", label: "Actions")
                 keyboardHint(key: "\u{2191}\u{2193}", label: "Navigate")
                 keyboardHint(key: "esc", label: "Close")
