@@ -1,5 +1,8 @@
 import AppKit
+import os
 import SwiftUI
+
+private let log = Logger(subsystem: "com.relux.app", category: "jwt")
 
 struct JWTView: View {
     @Environment(AppState.self) private var appState
@@ -82,8 +85,12 @@ struct JWTView: View {
         }
         .onAppear {
             if let selection = appState.currentSelection, !selection.isEmpty {
+                log.info("JWT view opened with selection (\(selection.prefix(40))...)")
                 inputText = selection
                 appState.currentSelection = nil
+                saveToFrecency()
+            } else {
+                log.info("JWT view opened with no selection")
             }
             isInputFocused = true
             installKeyMonitor()
@@ -322,7 +329,10 @@ extension JWTView {
     }
 
     func copyPayload() {
-        guard !decodedPayload.isEmpty else { return }
+        guard !decodedPayload.isEmpty else {
+            log.debug("copyPayload: decodedPayload is empty")
+            return
+        }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(decodedPayload, forType: .string)
         showActions = false
@@ -339,7 +349,11 @@ extension JWTView {
 
     func saveToFrecency() {
         let token = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !token.isEmpty else { return }
+        guard !token.isEmpty else {
+            log.debug("saveToFrecency: no token to save")
+            return
+        }
+        log.info("Saving JWT to frecency (\(token.prefix(40))...)")
         appState.recordSelection(query: "", item: SearchItem(
             id: "jwt-decoder",
             title: "JWT Decoder",
