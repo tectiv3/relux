@@ -690,7 +690,7 @@ struct OverlayView: View {
     private func openSelectedItem() {
         guard selectedIndex < results.count else { return }
         let item = results[selectedIndex]
-        if item.kind != .webSearch {
+        if item.kind != .webSearch, item.kind != .calculator {
             appState.recordSelection(query: query, item: item)
         }
         switch item.kind {
