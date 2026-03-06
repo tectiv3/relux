@@ -13,6 +13,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_: Notification) {
         UserDefaults.standard.register(defaults: [
+            "showMenuBarIcon": true,
             "clipboardEnabled": true,
             "clipboardRetentionMonths": 3,
             "clipboardDisabledApps": ClipboardMonitor.defaultDisabledApps,
