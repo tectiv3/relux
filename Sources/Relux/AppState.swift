@@ -8,6 +8,7 @@ enum PanelMode: Sendable {
     case search
     case clipboard
     case translate
+    case jwt
 }
 
 @MainActor

@@ -13,6 +13,8 @@ struct PanelRootView: View {
                 ClipboardHistoryView()
             case .translate:
                 TranslateView()
+            case .jwt:
+                JWTView()
             }
         }
         .background {
@@ -110,6 +112,12 @@ struct OverlayView: View {
         case .calculator:
             return [
                 ItemAction(label: "Copy", icon: "doc.on.clipboard", shortcut: "⏎") {
+                    openSelectedItem()
+                },
+            ]
+        case .jwt:
+            return [
+                ItemAction(label: "Open", icon: "key.viewfinder", shortcut: "⏎") {
                     openSelectedItem()
                 },
             ]
@@ -278,6 +286,7 @@ struct OverlayView: View {
         case .webSearch: "Web Search"
         case .translate: "Translate"
         case .calculator: "Calculator"
+        case .jwt: "JWT Tools"
         }
     }
 
@@ -600,6 +609,27 @@ struct OverlayView: View {
             }
             results = searchResults
 
+            // JWT Decoder
+            if appState.extensionRegistry.isEnabled("jwt") {
+                let lower = trimmed.lowercased()
+                let isJWTKeyword = lower.contains("jwt")
+                // Check if the query itself is a JWT
+                let isJWTContent = trimmed.split(separator: ".").count >= 2 && trimmed.count > 20
+                // Check selection
+                let selectionIsJWT = (appState.currentSelection?.split(separator: ".").count ?? 0) >= 2 && (appState.currentSelection?.count ?? 0) > 20
+
+                if isJWTKeyword || isJWTContent || selectionIsJWT {
+                    results.insert(SearchItem(
+                        id: "jwt-decoder",
+                        title: "JWT Decoder",
+                        subtitle: "Decode and inspect JSON Web Token",
+                        icon: "key.viewfinder",
+                        kind: .jwt,
+                        meta: [:]
+                    ), at: 0)
+                }
+            }
+
             // Calculator: evaluate math or currency
             if appState.extensionRegistry.isEnabled("calculator"),
                let calcResult = appState.calculatorService.evaluate(trimmed) {
@@ -652,6 +682,7 @@ struct OverlayView: View {
         case .script: "Script"
         case .translate: "Command"
         case .calculator: "Calculator"
+        case .jwt: "Extension"
         }
     }
 
@@ -708,6 +739,8 @@ struct OverlayView: View {
                 NSPasteboard.general.setString(answer, forType: .string)
             }
             NSApp.keyWindow?.close()
+        case .jwt:
+            appState.panelMode = .jwt
         }
     }
 
