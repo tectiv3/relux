@@ -1,5 +1,9 @@
 import AppKit
 
+extension Notification.Name {
+    static let panelWillClose = Notification.Name("panelWillClose")
+}
+
 final class FloatingPanel: NSPanel {
     init(contentRect: NSRect) {
         super.init(
@@ -32,6 +36,11 @@ final class FloatingPanel: NSPanel {
 
     override var canBecomeMain: Bool {
         false
+    }
+
+    override func close() {
+        NotificationCenter.default.post(name: .panelWillClose, object: nil)
+        super.close()
     }
 
     override func cancelOperation(_: Any?) {

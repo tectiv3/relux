@@ -100,6 +100,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let frame = panel.frame
             UserDefaults.standard.set(frame.origin.x, forKey: "panelX")
             UserDefaults.standard.set(frame.origin.y, forKey: "panelY")
+            appState.panelClosedAt = Date()
             panel.close()
             return
         }

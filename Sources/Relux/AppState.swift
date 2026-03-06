@@ -19,6 +19,7 @@ final class AppState {
     let frecency = FrecencyTracker()
     let extensionRegistry = ExtensionRegistry()
     let calculatorService = CalculatorService()
+    let systemSettingsSearcher = SystemSettingsSearcher()
 
     var clipboardStore: ClipboardStore?
     var clipboardMonitor: ClipboardMonitor?
@@ -78,12 +79,13 @@ final class AppState {
         let limit = maxSearchResults
         var appResults = appSearcher.search(query, limit: limit)
         var scriptResults = scriptSearcher.search(query, limit: limit)
+        let settingsResults = systemSettingsSearcher.search(query, limit: limit)
 
         let term = query
         appResults.sort { frecency.boost(query: term, itemId: $0.id) > frecency.boost(query: term, itemId: $1.id) }
         scriptResults.sort { frecency.boost(query: term, itemId: $0.id) > frecency.boost(query: term, itemId: $1.id) }
 
-        return Array((appResults + scriptResults).prefix(limit))
+        return Array((appResults + settingsResults + scriptResults).prefix(limit))
     }
 
     func recordSelection(query: String, item: SearchItem) {

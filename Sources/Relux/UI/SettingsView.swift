@@ -26,6 +26,8 @@ struct SettingsView: View {
     @State private var translateLanguages: [String] = ["English"]
     @State private var newLanguage: String = ""
     @State private var showClearTranslateConfirmation: Bool = false
+    @State private var searchPaths: [String] = []
+    @State private var newSearchPath: String = ""
 
     var body: some View {
         TabView {
@@ -43,6 +45,7 @@ struct SettingsView: View {
             selectedAppearance = UserDefaults.standard.string(forKey: "appAppearance") ?? "system"
             availableInputSources = Self.getKeyboardLayouts()
             showMaxResults = UserDefaults.standard.object(forKey: "maxSearchResults") as? Int ?? 10
+            searchPaths = appState.appSearcher.searchPaths
         }
     }
 
@@ -92,6 +95,51 @@ struct SettingsView: View {
                     .onChange(of: showMaxResults) { _, newValue in
                         UserDefaults.standard.set(newValue, forKey: "maxSearchResults")
                     }
+            }
+
+            Section {
+                ForEach(Array(searchPaths.enumerated()), id: \.offset) { index, path in
+                    HStack {
+                        Image(systemName: "folder")
+                            .foregroundColor(.secondary)
+                            .font(.system(size: 12))
+                        Text(path)
+                            .font(.system(size: 12, design: .monospaced))
+                            .lineLimit(1)
+                        Spacer()
+                        Button(role: .destructive) {
+                            searchPaths.remove(at: index)
+                            appState.appSearcher.searchPaths = searchPaths
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+
+                HStack {
+                    TextField("/path/to/directory", text: $newSearchPath)
+                        .font(.system(size: 12, design: .monospaced))
+                    Button("Add") {
+                        let trimmed = newSearchPath.trimmingCharacters(in: .whitespaces)
+                        guard !trimmed.isEmpty, !searchPaths.contains(trimmed) else { return }
+                        searchPaths.append(trimmed)
+                        appState.appSearcher.searchPaths = searchPaths
+                        newSearchPath = ""
+                    }
+                    .disabled(newSearchPath.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+
+                Button("Reset to Defaults") {
+                    searchPaths = AppSearcher.defaultSearchPaths
+                    appState.appSearcher.searchPaths = searchPaths
+                }
+                .font(.system(size: 12))
+            } header: {
+                Text("Search Paths")
+            } footer: {
+                Text("Directories indexed for application search.")
+                    .font(.caption)
             }
 
             Section("Keyboard Layout") {

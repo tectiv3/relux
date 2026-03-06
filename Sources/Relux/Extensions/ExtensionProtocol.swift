@@ -7,6 +7,7 @@ enum SearchItemKind: Sendable {
     case translate
     case calculator
     case jwt
+    case systemSettings
 }
 
 struct SearchItem: Identifiable, Sendable {

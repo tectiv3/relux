@@ -54,7 +54,6 @@ final class TranslateStore {
                 updated_at      REAL NOT NULL
             )
         """)
-        
     }
 
     deinit {
