@@ -47,16 +47,14 @@ final class TranslateStore {
                 source_text     TEXT NOT NULL,
                 translated_text TEXT NOT NULL,
                 source_lang     TEXT,
+                content_hash    TEXT,
                 target_lang     TEXT NOT NULL,
                 model           TEXT NOT NULL,
                 created_at      REAL NOT NULL,
-                content_hash    TEXT
+                updated_at      REAL NOT NULL
             )
         """)
-        // migrate existing rows
-        try? execute("ALTER TABLE translation_history ADD COLUMN content_hash TEXT")
-        try? execute("ALTER TABLE translation_history ADD COLUMN updated_at REAL")
-        try? execute("UPDATE translation_history SET updated_at = created_at WHERE updated_at IS NULL")
+        
     }
 
     deinit {

@@ -572,26 +572,7 @@ struct OverlayView: View {
     private func performSearch(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty {
-            var selectionItems: [SearchItem] = []
-            if let selection = appState.currentSelection {
-                let preview = String(selection.prefix(80))
-                selectionItems.append(SearchItem(
-                    id: "translate-selection",
-                    title: "Translate",
-                    subtitle: preview,
-                    icon: "character.book.closed",
-                    kind: .translate,
-                    meta: [:]
-                ))
-                selectionItems.append(SearchItem(
-                    id: "web-search-selection",
-                    title: "Search DuckDuckGo",
-                    subtitle: preview,
-                    icon: "magnifyingglass",
-                    kind: .webSearch,
-                    meta: ["query": selection]
-                ))
-            }
+            let selectionItems = selectionQuickActions()
             let selectionIds = Set(selectionItems.map(\.id))
             let recents = appState.recentItems().filter { !selectionIds.contains($0.id) }
             results = selectionItems + recents
@@ -610,24 +591,21 @@ struct OverlayView: View {
             results = searchResults
 
             // JWT Decoder
-            if appState.extensionRegistry.isEnabled("jwt") {
-                let lower = trimmed.lowercased()
-                let isJWTKeyword = lower.contains("jwt")
-                // Check if the query itself is a JWT
-                let isJWTContent = trimmed.split(separator: ".").count >= 2 && trimmed.count > 20
-                // Check selection
-                let selectionIsJWT = (appState.currentSelection?.split(separator: ".").count ?? 0) >= 2 && (appState.currentSelection?.count ?? 0) > 20
+            let lower = trimmed.lowercased()
+            let isJWTKeyword = lower.contains("jwt")
+            let isJWTContent = trimmed.split(separator: ".").count >= 2 && trimmed.count > 20
+            let selectionIsJWT = (appState.currentSelection?.split(separator: ".").count ?? 0) >= 2
+                && (appState.currentSelection?.count ?? 0) > 20
 
-                if isJWTKeyword || isJWTContent || selectionIsJWT {
-                    results.insert(SearchItem(
-                        id: "jwt-decoder",
-                        title: "JWT Decoder",
-                        subtitle: "Decode and inspect JSON Web Token",
-                        icon: "key.viewfinder",
-                        kind: .jwt,
-                        meta: [:]
-                    ), at: 0)
-                }
+            if isJWTKeyword || isJWTContent || selectionIsJWT {
+                results.insert(SearchItem(
+                    id: "jwt-decoder",
+                    title: "JWT Decoder",
+                    subtitle: "Decode and inspect JSON Web Token",
+                    icon: "key.viewfinder",
+                    kind: .jwt,
+                    meta: [:]
+                ), at: 0)
             }
 
             // Calculator: evaluate math or currency
@@ -685,6 +663,28 @@ struct OverlayView: View {
         case .calculator: "Calculator"
         case .jwt: "Extension"
         }
+    }
+
+    private func selectionQuickActions() -> [SearchItem] {
+        guard let selection = appState.currentSelection else { return [] }
+        let preview = String(selection.prefix(80))
+        var items: [SearchItem] = [
+            SearchItem(
+                id: "translate-selection", title: "Translate", subtitle: preview,
+                icon: "character.book.closed", kind: .translate, meta: [:]
+            ),
+            SearchItem(
+                id: "web-search-selection", title: "Search DuckDuckGo", subtitle: preview,
+                icon: "magnifyingglass", kind: .webSearch, meta: ["query": selection]
+            ),
+        ]
+        if selection.split(separator: ".").count >= 2, selection.count > 20 {
+            items.insert(SearchItem(
+                id: "jwt-decoder", title: "JWT Decoder", subtitle: preview,
+                icon: "key.viewfinder", kind: .jwt, meta: [:]
+            ), at: 0)
+        }
+        return items
     }
 
     private func openSelectedItem() {

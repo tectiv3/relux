@@ -16,4 +16,4 @@
 
 ## IMPORTANT
 - Always run this workflow before declaring a task complete. Never skip any step.
-- Never use $() command substitution in git commit commands
+- Use the `/commit` skill for git commits (plain `-m "message"`, no `$()` / heredocs / backticks)
