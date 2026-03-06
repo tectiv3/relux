@@ -110,3 +110,50 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Search results with fixed ids (e.g., `translate-selection`) are deduped against recents by id
 - Selection-aware items (built fresh with preview subtitle) take priority over their stored recents counterpart
 - No kind-based filtering needed — id-based dedup handles all cases generically
+
+## Calculator Extension
+
+- Inline calculator triggered by math expressions or currency patterns in the search query
+- Math eval uses `NSExpression` with a hardened input whitelist (digits, operators, parens, decimal points only)
+- Currency conversion via ECB daily reference rates, parsed from XML with `ECBXMLParser`
+- `ExchangeRateCache` persists rates as JSON in app support dir; stale after 24h, fetched fresh on next use
+- Results shown in a two-column card UI (Raycast-style), copied to clipboard on selection
+- Excluded from frecency tracking — calculator results are ephemeral, not worth recording as recents
+- Registered in `ExtensionRegistry` with a readiness gate (`extensionReady`) so search skips it until rates are loaded
+
+## JWT Extension
+
+- Decodes JWT tokens pasted or captured via selection — displays header and payload in a two-panel view
+- Pure client-side base64 decoding, no signature verification
+- Frecency integration persists the last decoded token in `meta["token"]` inside recents.json
+- Excluded from generic `recordSelection` in `openSelectedItem` to prevent overwriting stored token with empty dict
+- Actions overlay (Cmd+K) for copying header/payload/full token
+- Lives in `Sources/Relux/JWT/JWTView.swift` as a self-contained view with inline key monitor
+
+## System Settings Search
+
+- Hardcoded list of macOS 13+ System Settings categories with `x-apple.systempreferences:` deep-link URLs
+- `SystemSettingsSearcher` matches by pane name and keyword synonyms (e.g. "wifi" → Wi-Fi, "keychain" → Passwords)
+- Results shown as `.systemSettings` kind with gear icon, opened via `NSWorkspace.shared.open(url)`
+- List is static — may need updating across macOS versions
+
+## Configurable Search Paths
+
+- `AppSearcher` search scopes are user-configurable via Settings → General → Search Paths
+- Persisted in UserDefaults key `appSearchPaths`
+- Defaults include `/Applications`, `/Applications/Utilities`, `/System/Applications`, `/System/Applications/Utilities`, `~/Applications`
+- Scopes converted to `URL` objects for reliable `NSMetadataQuery` recursion
+- Changing paths restarts the Spotlight query immediately
+
+## Script Output Modes
+
+- `ScriptOutputMode` enum replaces the previous `capturesOutput: Bool` on scripts
+- Three modes: `.none` (fire-and-forget with toast), `.capture` (stream stdout into panel), `.replace` (replace active selection with stdout)
+- `.replace` checks script exit code before replacing — on non-zero exit, shows error toast instead
+- Backward-compatible: existing scripts.json entries without the field default to `.none`
+
+## Shared Toast Utility
+
+- `Toast` enum in `Sources/Relux/UI/Toast.swift` provides app-wide floating toast notifications
+- Extracted from ScriptRunner's private implementation so other features (JWT validation, script errors) can reuse it
+- Static `show(_:icon:)` method creates a borderless `NSPanel` positioned at top-center of the active screen

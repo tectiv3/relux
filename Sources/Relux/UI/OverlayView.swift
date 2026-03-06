@@ -121,6 +121,12 @@ struct OverlayView: View {
                     openSelectedItem()
                 },
             ]
+        case .systemSettings:
+            return [
+                ItemAction(label: "Open", icon: "gear", shortcut: "⏎") {
+                    openSelectedItem()
+                },
+            ]
         }
     }
 
@@ -287,6 +293,7 @@ struct OverlayView: View {
         case .translate: "Translate"
         case .calculator: "Calculator"
         case .jwt: "JWT Tools"
+        case .systemSettings: "System Settings"
         }
     }
 
@@ -676,6 +683,7 @@ struct OverlayView: View {
         case .translate: "Extension"
         case .calculator: "Extension"
         case .jwt: "Extension"
+        case .systemSettings: "System Settings"
         }
     }
 
@@ -783,6 +791,11 @@ struct OverlayView: View {
                 appState.currentSelection = token
             }
             appState.panelMode = .jwt
+        case .systemSettings:
+            if let urlString = item.meta["url"], let url = URL(string: urlString) {
+                NSWorkspace.shared.open(url)
+            }
+            NSApp.keyWindow?.close()
         }
     }
 

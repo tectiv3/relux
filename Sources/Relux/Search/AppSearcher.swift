@@ -8,21 +8,41 @@ struct AppItem {
 
 @MainActor
 final class AppSearcher {
+    static let defaultSearchPaths: [String] = [
+        "/Applications",
+        "/Applications/Utilities",
+        "/System/Applications",
+        "/System/Applications/Utilities",
+        NSHomeDirectory() + "/Applications",
+    ]
+
     private var apps: [AppItem] = []
     private var query: NSMetadataQuery?
 
+    var searchPaths: [String] {
+        didSet {
+            UserDefaults.standard.set(searchPaths, forKey: "appSearchPaths")
+            restartSpotlightQuery()
+        }
+    }
+
     init() {
+        searchPaths = UserDefaults.standard.stringArray(forKey: "appSearchPaths")
+            ?? Self.defaultSearchPaths
+        startSpotlightQuery()
+    }
+
+    private func restartSpotlightQuery() {
+        query?.stop()
+        query = nil
+        apps = []
         startSpotlightQuery()
     }
 
     private func startSpotlightQuery() {
         let mdQuery = NSMetadataQuery()
         mdQuery.predicate = NSPredicate(format: "kMDItemContentType == 'com.apple.application-bundle'")
-        mdQuery.searchScopes = [
-            "/Applications",
-            "/System/Applications",
-            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path,
-        ]
+        mdQuery.searchScopes = searchPaths.map { URL(fileURLWithPath: $0) }
 
         NotificationCenter.default.addObserver(
             forName: .NSMetadataQueryDidFinishGathering,
