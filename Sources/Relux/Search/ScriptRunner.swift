@@ -45,9 +45,10 @@ enum ScriptRunner {
             process.executableURL = URL(fileURLWithPath: "/bin/zsh")
             process.arguments = ["-l", "-c", command]
             process.environment = env
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = pipe
+            let stdoutPipe = Pipe()
+            let stderrPipe = Pipe()
+            process.standardOutput = stdoutPipe
+            process.standardError = stderrPipe
 
             if let stdin {
                 let inputPipe = Pipe()
@@ -59,7 +60,19 @@ enum ScriptRunner {
             try? process.run()
             process.waitUntilExit()
 
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if process.terminationStatus != 0 {
+                let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                let errMsg = String(data: errData, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? "exit \(process.terminationStatus)"
+                await MainActor.run {
+                    let msg = errMsg.isEmpty
+                        ? "Script failed (exit \(process.terminationStatus))" : errMsg
+                    Toast.show(msg, icon: "terminal")
+                }
+                return
+            }
+
+            let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
             let output = String(data: data, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
@@ -67,7 +80,6 @@ enum ScriptRunner {
 
             await MainActor.run {
                 app.activate()
-                // Brief delay for the app to regain focus before AX write
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                     let success = SelectionCapture.replaceSelectedText(with: output, in: app)
                     if !success {
