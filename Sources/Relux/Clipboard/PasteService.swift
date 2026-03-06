@@ -5,9 +5,9 @@ import os
 private let log = Logger(subsystem: "com.relux.app", category: "pasteservice")
 
 enum PasteService {
-    /// Put text on clipboard and paste into the previously active app
+    /// Put text on clipboard and paste into the focused app
     @MainActor
-    static func pasteText(_ text: String, asRichText rtfData: Data? = nil, to app: NSRunningApplication?, monitor: ClipboardMonitor?) {
+    static func pasteText(_ text: String, asRichText rtfData: Data? = nil, monitor: ClipboardMonitor?) {
         let pb = NSPasteboard.general
         monitor?.suppressNextCapture = true
         pb.clearContents()
@@ -15,18 +15,18 @@ enum PasteService {
             pb.setData(rtfData, forType: .rtf)
         }
         pb.setString(text, forType: .string)
-        sendPaste(to: app)
+        sendPaste()
     }
 
-    /// Put image on clipboard and paste into the previously active app
+    /// Put image on clipboard and paste into the focused app
     @MainActor
-    static func pasteImage(at path: URL, to app: NSRunningApplication?, monitor: ClipboardMonitor?) {
+    static func pasteImage(at path: URL, monitor: ClipboardMonitor?) {
         guard let image = NSImage(contentsOf: path) else { return }
         let pb = NSPasteboard.general
         monitor?.suppressNextCapture = true
         pb.clearContents()
         pb.writeObjects([image])
-        sendPaste(to: app)
+        sendPaste()
     }
 
     /// Copy text to clipboard without pasting
@@ -42,11 +42,8 @@ enum PasteService {
     }
 
     @MainActor
-    private static func sendPaste(to app: NSRunningApplication?) {
+    private static func sendPaste() {
         NSApp.keyWindow?.close()
-
-        guard let app else { return }
-        app.activate()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             simulateCmdV()

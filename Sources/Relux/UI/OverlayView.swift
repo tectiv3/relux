@@ -591,7 +591,7 @@ struct OverlayView: View {
 
     private func copyOutput() {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(answer, forType: .string)
+        NSPasteboard.general.setString(answer.trimmingCharacters(in: .whitespacesAndNewlines), forType: .string)
         showActions = false
     }
 

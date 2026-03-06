@@ -522,10 +522,10 @@ struct ClipboardHistoryView: View {
     private func pasteEntry(_ entry: ClipboardEntry, formatted: Bool) {
         if entry.contentType == "image", let imagePath = entry.imagePath {
             let url = appState.clipboardStore!.imageDir.appendingPathComponent(imagePath)
-            PasteService.pasteImage(at: url, to: appState.previousApp, monitor: appState.clipboardMonitor)
+            PasteService.pasteImage(at: url, monitor: appState.clipboardMonitor)
         } else if let text = entry.textContent {
             let rtfData = formatted ? entry.rawData : nil
-            PasteService.pasteText(text, asRichText: rtfData, to: appState.previousApp, monitor: appState.clipboardMonitor)
+            PasteService.pasteText(text, asRichText: rtfData, monitor: appState.clipboardMonitor)
         }
     }
 
