@@ -599,6 +599,28 @@ struct OverlayView: View {
                 searchResults = selectionAware + rest
             }
             results = searchResults
+
+            // Calculator: evaluate math or currency
+            if appState.extensionRegistry.isEnabled("calculator"),
+               let calcResult = appState.calculatorService.evaluate(trimmed) {
+                let meta: [String: String] = [
+                    "expression": calcResult.expression,
+                    "answer": calcResult.answer,
+                    "isCurrency": calcResult.isCurrency ? "1" : "0",
+                    "sourceCurrency": calcResult.sourceCurrency ?? "",
+                    "targetCurrency": calcResult.targetCurrency ?? "",
+                    "lastUpdated": calcResult.lastUpdated.map { String($0.timeIntervalSince1970) } ?? ""
+                ]
+                results.insert(SearchItem(
+                    id: "calculator-result",
+                    title: calcResult.expression,
+                    subtitle: calcResult.answer,
+                    icon: "equal.circle",
+                    kind: .calculator,
+                    meta: meta
+                ), at: 0)
+            }
+
             if let selection = appState.currentSelection {
                 let preview = String(selection.prefix(80))
                 results.insert(SearchItem(
@@ -681,7 +703,11 @@ struct OverlayView: View {
                 }
             }
         case .calculator:
-            break
+            if let answer = item.meta["answer"] {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(answer, forType: .string)
+            }
+            NSApp.keyWindow?.close()
         }
     }
 
