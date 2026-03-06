@@ -2,15 +2,29 @@ import SwiftUI
 
 struct PanelRootView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        switch appState.panelMode {
-        case .search:
-            OverlayView()
-        case .clipboard:
-            ClipboardHistoryView()
-        case .translate:
-            TranslateView()
+        Group {
+            switch appState.panelMode {
+            case .search:
+                OverlayView()
+            case .clipboard:
+                ClipboardHistoryView()
+            case .translate:
+                TranslateView()
+            }
+        }
+        .background {
+            Button("") {
+                NSApp.keyWindow?.close()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    NSApp.activate(ignoringOtherApps: true)
+                    openSettings()
+                }
+            }
+            .keyboardShortcut(",", modifiers: .command)
+            .hidden()
         }
     }
 }
