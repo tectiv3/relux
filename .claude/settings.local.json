@@ -14,7 +14,9 @@
       "Bash(/opt/homebrew/bin/swiftformat:*)",
       "Bash(swiftlint lint:*)",
       "Bash(swiftlint:*)",
-      "Skill(check)"
+      "Skill(check)",
+      "Bash(gh api:*)",
+      "Bash(gh search:*)"
     ]
   }
 }

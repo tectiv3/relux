@@ -12,22 +12,12 @@ packages:
     from: 2.0.0
 
 targets:
-  ReluxCore:
-    type: library.static
-    platform: macOS
-    sources:
-      - Sources/ReluxCore
-    settings:
-      base:
-        SWIFT_VERSION: "6.0"
-
   Relux:
     type: application
     platform: macOS
     sources:
       - Sources/Relux
     dependencies:
-      - target: ReluxCore
       - package: KeyboardShortcuts
     settings:
       base:
@@ -39,6 +29,7 @@ targets:
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGN_STYLE: Manual
         SWIFT_VERSION: "6.0"
+        SWIFT_INSTALL_OBJC_HEADER: "NO"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     entitlements:
       path: Sources/Relux/Relux.entitlements

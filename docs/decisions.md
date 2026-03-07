@@ -7,7 +7,7 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - `SourceNote` replaced with generic `SearchItem` supporting `.note` and `.app` kinds — all future result types extend this
 - Search is instant, as-you-type — keyword matching on VectorStore cache + app name fuzzy matching. No embedding needed for basic search.
 - LLM generation is opt-in only, behind Cmd+K → "Ask AI" action. Never auto-triggers.
-- App search scans `/Applications`, `~/Applications`, `/System/Applications`, caches at init
+- App search uses configurable Spotlight scopes (default includes `/Applications`, Utilities, `/System/Library/CoreServices/Applications`, `~/Applications`); live re-indexes via `NSMetadataQueryDidUpdate`
 - Do NOT use `Bundle(url:)` to read app bundles — triggers App Management permission. Only use `FileManager` + path inspection.
 
 ## Frecency System
@@ -141,9 +141,10 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 
 - `AppSearcher` search scopes are user-configurable via Settings → General → Search Paths
 - Persisted in UserDefaults key `appSearchPaths`
-- Defaults include `/Applications`, `/Applications/Utilities`, `/System/Applications`, `/System/Applications/Utilities`, `~/Applications`
+- Defaults include `/Applications`, `/Applications/Utilities`, `/System/Applications`, `/System/Applications/Utilities`, `/System/Library/CoreServices/Applications`, `~/Applications`
 - Scopes converted to `URL` objects for reliable `NSMetadataQuery` recursion
 - Changing paths restarts the Spotlight query immediately
+- Live re-indexing via `NSMetadataQueryDidUpdate` observer — newly installed apps appear without restart
 
 ## Script Output Modes
 
