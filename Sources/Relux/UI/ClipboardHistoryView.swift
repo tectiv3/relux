@@ -89,8 +89,12 @@ struct ClipboardHistoryView: View {
         .onAppear {
             loadEntries()
             isFilterFocused = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                isFilterFocused = true
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            guard appState.panelMode == .clipboard else { return }
             loadEntries()
             isFilterFocused = true
         }

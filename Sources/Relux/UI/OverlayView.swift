@@ -182,6 +182,7 @@ struct OverlayView: View {
             performSearch(query)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            guard appState.panelMode == .search else { return }
             showActions = false
             streamingTask?.cancel()
             rawAnswer = ""
