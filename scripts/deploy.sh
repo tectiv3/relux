@@ -106,8 +106,15 @@ echo "==> Stapling notarization ticket"
 xcrun stapler staple "$DMG_PATH"
 
 # ── GitHub Release ────────────────────────────────────────────────────
-echo "==> Opening GitHub release page — attach the DMG manually"
-open "https://github.com/tectiv3/relux/releases/new?tag=$GIT_TAG&title=Relux+$VERSION"
+if command -v gh &>/dev/null; then
+  echo "==> Creating GitHub release and uploading DMG"
+  gh release create "$GIT_TAG" "$DMG_PATH" \
+    --title "Relux $VERSION" \
+    --generate-notes
+else
+  echo "==> Opening GitHub release page — attach the DMG manually"
+  open "https://github.com/tectiv3/relux/releases/new?tag=$GIT_TAG&title=Relux+$VERSION"
+fi
 
 # ── Update Homebrew tap ──────────────────────────────────────────────
 echo "==> Updating Homebrew cask"

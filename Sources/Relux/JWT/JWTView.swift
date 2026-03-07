@@ -224,10 +224,7 @@ struct JWTView: View {
                         .font(.system(size: 11, weight: .bold))
                         .foregroundColor(.secondary)
                     if !decodedPayload.isEmpty {
-                        Text(decodedPayload)
-                            .font(.system(size: 13, design: .monospaced))
-                            .foregroundColor(.purple)
-                            .textSelection(.enabled)
+                        TimestampAnnotatedText(text: decodedPayload, color: .purple)
                     } else {
                         Text("Could not decode payload")
                             .font(.system(size: 12))
@@ -455,4 +452,52 @@ struct JWTAction {
     let icon: String
     let shortcut: String?
     let action: () -> Void
+}
+
+// MARK: - Timestamp Tooltips
+
+private struct TimestampAnnotatedText: View {
+    let text: String
+    let color: Color
+
+    /// Unix timestamps between 2001-01-01 and 2100-01-01
+    private static let timestampRange: ClosedRange<Double> = 978_307_200 ... 4_102_444_800
+
+    private static let dateFormatter: DateFormatter = {
+        let fmt = DateFormatter()
+        fmt.dateStyle = .full
+        fmt.timeStyle = .long
+        return fmt
+    }()
+
+    private static let timestampPattern = /:\s*(\d{10,13})\b/
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(text.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
+                if let tooltip = Self.timestampTooltip(for: line) {
+                    Text(line)
+                        .help(tooltip)
+                } else {
+                    Text(line)
+                }
+            }
+        }
+        .font(.system(size: 13, design: .monospaced))
+        .foregroundColor(color)
+        .textSelection(.enabled)
+    }
+
+    private static func timestampTooltip(for line: String) -> String? {
+        guard let match = line.firstMatch(of: timestampPattern),
+              let value = Double(match.1)
+        else { return nil }
+
+        // Support both seconds (10 digits) and milliseconds (13 digits)
+        let seconds = value > 9_999_999_999 ? value / 1000 : value
+        guard timestampRange.contains(seconds) else { return nil }
+
+        let date = Date(timeIntervalSince1970: seconds)
+        return dateFormatter.string(from: date)
+    }
 }
