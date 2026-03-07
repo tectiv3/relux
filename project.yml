@@ -12,23 +12,12 @@ packages:
     from: 2.0.0
 
 targets:
-  ReluxCore:
-    type: library.static
-    platform: macOS
-    sources:
-      - Sources/ReluxCore
-    settings:
-      base:
-        SWIFT_VERSION: "6.0"
-        SWIFT_INSTALL_OBJC_HEADER: "NO"
-
   Relux:
     type: application
     platform: macOS
     sources:
       - Sources/Relux
     dependencies:
-      - target: ReluxCore
       - package: KeyboardShortcuts
     settings:
       base:
