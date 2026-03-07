@@ -41,7 +41,7 @@ struct ClipboardHistoryView: View {
                 copyEntry(entry)
             },
         ]
-        if entry.rawData != nil {
+        if entry.contentType == "rtf" || entry.contentType == "html" {
             actions.append(ClipAction(label: "Paste Formatted to \(previousAppName)", icon: "textformat", shortcut: "⌘⇧⏎") {
                 pasteEntry(entry, formatted: true)
             })
@@ -195,7 +195,7 @@ struct ClipboardHistoryView: View {
     private var listPanel: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(spacing: 0) {
+                LazyVStack(spacing: 0) {
                     Spacer().frame(height: 4)
                     ForEach(Array(groupedEntries.enumerated()), id: \.element.label) { _, section in
                         Text(section.label)
@@ -291,7 +291,7 @@ struct ClipboardHistoryView: View {
                                     .clipShape(RoundedRectangle(cornerRadius: 4))
                             }
                         } else if let text = entry.textContent {
-                            Text(text)
+                            Text(text.count > 10000 ? String(text.prefix(10000)) + "\n…" : text)
                                 .font(.system(size: 13, design: .monospaced))
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -528,14 +528,15 @@ struct ClipboardHistoryView: View {
             let url = appState.clipboardStore!.imageDir.appendingPathComponent(imagePath)
             PasteService.pasteImage(at: url, monitor: appState.clipboardMonitor)
         } else if let text = entry.textContent {
-            let rtfData = formatted ? entry.rawData : nil
+            let rtfData = formatted ? appState.clipboardStore?.fetchRawData(id: entry.id) : nil
             PasteService.pasteText(text, asRichText: rtfData, monitor: appState.clipboardMonitor)
         }
     }
 
     private func copyEntry(_ entry: ClipboardEntry) {
         if let text = entry.textContent {
-            PasteService.copyToClipboard(text, asRichText: entry.rawData, monitor: appState.clipboardMonitor)
+            let rtfData = appState.clipboardStore?.fetchRawData(id: entry.id)
+            PasteService.copyToClipboard(text, asRichText: rtfData, monitor: appState.clipboardMonitor)
         }
         NSApp.keyWindow?.close()
     }

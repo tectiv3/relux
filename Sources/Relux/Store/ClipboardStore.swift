@@ -118,8 +118,20 @@ final class ClipboardStore {
 
     // MARK: - Query
 
+    func fetchRawData(id: Int64) -> Data? {
+        let sql = "SELECT raw_data FROM clipboard_history WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, id)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        guard let ptr = sqlite3_column_blob(stmt, 0) else { return nil }
+        let size = Int(sqlite3_column_bytes(stmt, 0))
+        return Data(bytes: ptr, count: size)
+    }
+
     func fetchAll(limit: Int = 500) -> [ClipboardEntry] {
-        let sql = "SELECT id, content_type, text_content, raw_data, image_path, image_width, image_height, image_size, source_app, source_name, char_count, word_count, created_at FROM clipboard_history ORDER BY created_at DESC LIMIT ?"
+        let sql = "SELECT id, content_type, text_content, NULL, image_path, image_width, image_height, image_size, source_app, source_name, char_count, word_count, created_at FROM clipboard_history ORDER BY created_at DESC LIMIT ?"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
@@ -134,7 +146,7 @@ final class ClipboardStore {
     }
 
     func search(filter: String) -> [ClipboardEntry] {
-        let sql = "SELECT id, content_type, text_content, raw_data, image_path, image_width, image_height, image_size, source_app, source_name, char_count, word_count, created_at FROM clipboard_history WHERE text_content LIKE ? ORDER BY created_at DESC LIMIT 200"
+        let sql = "SELECT id, content_type, text_content, NULL, image_path, image_width, image_height, image_size, source_app, source_name, char_count, word_count, created_at FROM clipboard_history WHERE text_content LIKE ? ORDER BY created_at DESC LIMIT 200"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
