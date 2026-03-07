@@ -312,6 +312,7 @@ struct TranslateView: View {
             } else {
                 keyboardHint(key: "\u{23CE}", label: "Translate")
                 keyboardHint(key: "\u{2318}K", label: "Actions")
+                keyboardHint(key: "\u{2326}", label: "Delete")
                 keyboardHint(key: "\u{2191}\u{2193}", label: "Navigate")
                 keyboardHint(key: "esc", label: "Close")
             }
@@ -439,9 +440,8 @@ struct TranslateView: View {
                     return nil
                 }
             }
-            if key == .delete || key == .backspace {
-                // Only handle delete when not typing in input
-                if !isInputFocused, !showActions, let entry = selectedEntry {
+            if key == .deleteForward {
+                if !showActions, let entry = selectedEntry {
                     deleteEntry(entry)
                     return nil
                 }

@@ -54,6 +54,7 @@ final class FrecencyTracker {
                 case .script: "script"
                 case .translate: "translate"
                 case .jwt: "jwt"
+                case .systemSettings: "systemSettings"
                 default: "app"
                 }
             }(),
@@ -87,6 +88,7 @@ final class FrecencyTracker {
                     case "script": .script
                     case "translate": .translate
                     case "jwt": .jwt
+                    case "systemSettings": .systemSettings
                     default: .app
                     }
                 }(),

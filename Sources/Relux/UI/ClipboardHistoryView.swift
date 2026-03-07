@@ -89,8 +89,12 @@ struct ClipboardHistoryView: View {
         .onAppear {
             loadEntries()
             isFilterFocused = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                isFilterFocused = true
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            guard appState.panelMode == .clipboard else { return }
             loadEntries()
             isFilterFocused = true
         }
@@ -436,6 +440,7 @@ struct ClipboardHistoryView: View {
 
             if selectedEntry != nil {
                 keyboardHint(key: "⏎", label: "Paste to \(previousAppName)")
+                keyboardHint(key: "⌦", label: "Delete")
             }
             keyboardHint(key: "⌘K", label: "Actions")
         }
@@ -577,9 +582,9 @@ struct ClipboardHistoryView: View {
             pasteEntry(entry, formatted: false)
             return .handled
         }
-        // Backspace — let text field handle it when filter has text, otherwise delete entry
-        if keyPress.key == .delete {
-            if filter.isEmpty, !showActions, let entry = selectedEntry {
+        // Forward delete — delete selected entry
+        if keyPress.key == .deleteForward {
+            if !showActions, let entry = selectedEntry {
                 deleteEntry(entry)
                 return .handled
             }
