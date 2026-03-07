@@ -15,7 +15,8 @@
       "Bash(swiftlint lint:*)",
       "Bash(swiftlint:*)",
       "Skill(check)",
-      "Bash(gh api:*)"
+      "Bash(gh api:*)",
+      "Bash(gh search:*)"
     ]
   }
 }

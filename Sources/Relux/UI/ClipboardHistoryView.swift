@@ -7,17 +7,20 @@ struct ClipboardHistoryView: View {
     @State private var selectedIndex: Int = 0
     @State private var showActions: Bool = false
     @State private var actionIndex: Int = 0
-    @State private var keyMonitor: Any?
     @FocusState private var isFilterFocused: Bool
 
     private var filteredEntries: [ClipboardEntry] {
         if filter.trimmingCharacters(in: .whitespaces).isEmpty {
             return entries
         }
-        let lower = filter.lowercased()
+        let query = filter.lowercased()
         return entries.filter { entry in
-            entry.textContent?.lowercased().contains(lower) == true
-                || entry.sourceName?.lowercased().contains(lower) == true
+            let text = entry.textContent ?? ""
+            let firstLine = String(text.split(separator: "\n", maxSplits: 1).first ?? "")
+            // Exact substring on full text, fuzzy only on first line
+            return text.lowercased().contains(query)
+                || fuzzyMatch(query: query, target: firstLine)
+                || fuzzyMatch(query: query, target: entry.sourceName ?? "")
         }
     }
 
@@ -86,22 +89,13 @@ struct ClipboardHistoryView: View {
         .onAppear {
             loadEntries()
             isFilterFocused = true
-            installKeyMonitor()
-        }
-        .onDisappear { removeKeyMonitor() }
-        .onReceive(NotificationCenter.default.publisher(for: .panelWillClose)) { _ in
-            removeKeyMonitor()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             loadEntries()
             isFilterFocused = true
         }
-        .onKeyPress(.escape) {
-            if showActions {
-                showActions = false
-                return .handled
-            }
-            return .ignored
+        .onKeyPress { keyPress in
+            handleKeyPress(keyPress)
         }
         .background {
             // Cmd+K to toggle actions
@@ -208,7 +202,7 @@ struct ClipboardHistoryView: View {
 
                         ForEach(section.items, id: \.entry.id) { index, entry in
                             entryRow(entry: entry, isSelected: index == selectedIndex)
-                                .id(index)
+                                .id(entry.id)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
                                     selectedIndex = index
@@ -222,8 +216,11 @@ struct ClipboardHistoryView: View {
                 }
             }
             .onChange(of: selectedIndex) { _, newIndex in
-                withAnimation {
-                    proxy.scrollTo(newIndex, anchor: .center)
+                let items = filteredEntries
+                if newIndex >= 0, newIndex < items.count {
+                    withAnimation {
+                        proxy.scrollTo(items[newIndex].id, anchor: .center)
+                    }
                 }
             }
         }
@@ -236,7 +233,7 @@ struct ClipboardHistoryView: View {
                 .font(.system(size: 13))
                 .frame(width: 20)
 
-            Text(entryTitle(for: entry))
+            Text(highlightedTitle(for: entry, isSelected: isSelected))
                 .font(.system(size: 13))
                 .lineLimit(1)
 
@@ -272,6 +269,68 @@ struct ClipboardHistoryView: View {
             let firstLine = text.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? text
             return String(firstLine.prefix(80))
         }
+    }
+
+    private func highlightedTitle(for entry: ClipboardEntry, isSelected: Bool) -> AttributedString {
+        let title = entryTitle(for: entry)
+        var result = AttributedString(title)
+        let query = filter.lowercased()
+        guard !query.isEmpty else { return result }
+
+        let titleLower = title.lowercased()
+        guard let matchedIndices = fuzzyMatchIndices(query: query, target: titleLower) else {
+            return result
+        }
+
+        let highlightColor: Color = isSelected ? .white.opacity(0.5) : .accentColor
+        for idx in matchedIndices {
+            let offset = titleLower.distance(from: titleLower.startIndex, to: idx)
+            let attrStart = result.index(result.startIndex, offsetByCharacters: offset)
+            let attrEnd = result.index(attrStart, offsetByCharacters: 1)
+            result[attrStart..<attrEnd].foregroundColor = highlightColor
+            result[attrStart..<attrEnd].underlineStyle = .single
+        }
+
+        return result
+    }
+
+    /// Returns matched character indices for the tightest fuzzy match, or nil if no match.
+    /// Tries exact substring first, then fuzzy with span limit.
+    private func fuzzyMatchIndices(query: String, target: String) -> [String.Index]? {
+        // Exact substring
+        if let range = target.range(of: query) {
+            return Array(target[range].indices)
+        }
+        // Fuzzy: try each occurrence of the first char, pick tightest
+        let queryChars = Array(query)
+        guard let firstChar = queryChars.first else { return nil }
+        let maxSpan = query.count * 2
+        var bestIndices: [String.Index]?
+        var bestSpan = Int.max
+
+        var startSearch = target.startIndex
+        while let anchor = target[startSearch...].firstIndex(of: firstChar) {
+            var indices = [anchor]
+            var idx = target.index(after: anchor)
+            var matched = true
+            for ch in queryChars.dropFirst() {
+                guard let found = target[idx...].firstIndex(of: ch) else {
+                    matched = false
+                    break
+                }
+                indices.append(found)
+                idx = target.index(after: found)
+            }
+            if matched {
+                let span = target.distance(from: anchor, to: indices.last!) + 1
+                if span <= maxSpan, span < bestSpan {
+                    bestSpan = span
+                    bestIndices = indices
+                }
+            }
+            startSearch = target.index(after: anchor)
+        }
+        return bestIndices
     }
 
     // MARK: - Preview Panel
@@ -466,59 +525,68 @@ struct ClipboardHistoryView: View {
         }
     }
 
-    // MARK: - Key Monitor
+    // MARK: - Key Handling
 
-    private func installKeyMonitor() {
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let key = event.specialKey
-            if key == .upArrow {
-                if showActions {
-                    guard !currentActions.isEmpty else { return event }
-                    actionIndex = actionIndex <= 0 ? currentActions.count - 1 : actionIndex - 1
-                } else {
-                    let items = filteredEntries
-                    guard !items.isEmpty else { return event }
-                    selectedIndex = selectedIndex <= 0 ? items.count - 1 : selectedIndex - 1
-                }
-                return nil
+    private func handleKeyPress(_ keyPress: KeyPress) -> KeyPress.Result {
+        // Escape — clear filter first, close actions, then let panel dismiss
+        if keyPress.key == .escape {
+            if showActions {
+                showActions = false
+                return .handled
             }
-            if key == .downArrow {
-                if showActions {
-                    guard !currentActions.isEmpty else { return event }
-                    actionIndex = actionIndex >= currentActions.count - 1 ? 0 : actionIndex + 1
-                } else {
-                    let items = filteredEntries
-                    guard !items.isEmpty else { return event }
-                    selectedIndex = selectedIndex >= items.count - 1 ? 0 : selectedIndex + 1
-                }
-                return nil
+            if !filter.isEmpty {
+                filter = ""
+                selectedIndex = 0
+                return .handled
             }
-            if key == .carriageReturn || key == .newline {
-                if showActions {
-                    guard actionIndex < currentActions.count else { return event }
-                    currentActions[actionIndex].action()
-                    showActions = false
-                    return nil
-                }
-                guard let entry = selectedEntry else { return event }
-                pasteEntry(entry, formatted: false)
-                return nil
-            }
-            if key == .delete || key == .backspace {
-                if !isFilterFocused, !showActions, let entry = selectedEntry {
-                    deleteEntry(entry)
-                    return nil
-                }
-            }
-            return event
+            return .ignored
         }
-    }
+        // Arrow up — always navigates list (or actions overlay)
+        if keyPress.key == .upArrow {
+            if showActions {
+                guard !currentActions.isEmpty else { return .ignored }
+                actionIndex = actionIndex <= 0 ? currentActions.count - 1 : actionIndex - 1
+            } else {
+                let items = filteredEntries
+                guard !items.isEmpty else { return .ignored }
+                selectedIndex = selectedIndex <= 0 ? items.count - 1 : selectedIndex - 1
+            }
+            return .handled
+        }
+        // Arrow down
+        if keyPress.key == .downArrow {
+            if showActions {
+                guard !currentActions.isEmpty else { return .ignored }
+                actionIndex = actionIndex >= currentActions.count - 1 ? 0 : actionIndex + 1
+            } else {
+                let items = filteredEntries
+                guard !items.isEmpty else { return .ignored }
+                selectedIndex = selectedIndex >= items.count - 1 ? 0 : selectedIndex + 1
+            }
+            return .handled
+        }
+        // Enter
+        if keyPress.key == .return {
+            if showActions {
+                guard actionIndex < currentActions.count else { return .ignored }
+                currentActions[actionIndex].action()
+                showActions = false
+                return .handled
+            }
+            guard let entry = selectedEntry else { return .ignored }
+            pasteEntry(entry, formatted: false)
+            return .handled
+        }
+        // Backspace — let text field handle it when filter has text, otherwise delete entry
+        if keyPress.key == .delete {
+            if filter.isEmpty, !showActions, let entry = selectedEntry {
+                deleteEntry(entry)
+                return .handled
+            }
+            return .ignored
+        }
 
-    private func removeKeyMonitor() {
-        if let monitor = keyMonitor {
-            NSEvent.removeMonitor(monitor)
-            keyMonitor = nil
-        }
+        return .ignored
     }
 
     // MARK: - Actions
@@ -556,6 +624,36 @@ struct ClipboardHistoryView: View {
     }
 
     // MARK: - Helpers
+
+    /// Fuzzy subsequence match with span limit.
+    /// Tries every occurrence of the first query char as a starting point
+    /// and returns true if any produces a tight enough match.
+    private func fuzzyMatch(query: String, target: String) -> Bool {
+        let target = target.lowercased()
+        let queryChars = Array(query)
+        guard let firstChar = queryChars.first else { return false }
+        let maxSpan = query.count * 2
+
+        var startSearch = target.startIndex
+        while let anchor = target[startSearch...].firstIndex(of: firstChar) {
+            var idx = target.index(after: anchor)
+            var matched = true
+            for ch in queryChars.dropFirst() {
+                guard let found = target[idx...].firstIndex(of: ch) else {
+                    matched = false
+                    break
+                }
+                idx = target.index(after: found)
+            }
+            if matched {
+                let lastIdx = target.index(before: idx)
+                let span = target.distance(from: anchor, to: lastIdx) + 1
+                if span <= maxSpan { return true }
+            }
+            startSearch = target.index(after: anchor)
+        }
+        return false
+    }
 
     private func formatBytes(_ bytes: Int) -> String {
         let kb = Double(bytes) / 1024
