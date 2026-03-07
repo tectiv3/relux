@@ -27,6 +27,12 @@ struct PanelRootView: View {
             }
             .keyboardShortcut(",", modifiers: .command)
             .hidden()
+
+            Button("") {
+                NSApp.terminate(nil)
+            }
+            .keyboardShortcut("q", modifiers: .command)
+            .hidden()
         }
     }
 }
