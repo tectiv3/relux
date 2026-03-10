@@ -13,7 +13,7 @@ enum SearchItemKind: Sendable {
 struct SearchItem: Identifiable, Sendable {
     let id: String
     let title: String
-    let subtitle: String
+    var subtitle: String
     let icon: String
     let kind: SearchItemKind
     var meta: [String: String]
