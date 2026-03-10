@@ -353,9 +353,21 @@ struct OverlayView: View {
     private func itemIcon(for item: SearchItem) -> some View {
         if item.kind == .app, let path = item.meta["path"] {
             let nsImage = NSWorkspace.shared.icon(forFile: path)
+            let bundleID = Bundle(path: path)?.bundleIdentifier
+            let isRunning = bundleID.map { id in
+                NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == id }
+            } ?? false
             Image(nsImage: nsImage)
                 .resizable()
                 .frame(width: 24, height: 24)
+                .overlay(alignment: .bottomLeading) {
+                    if isRunning {
+                        Circle()
+                            .fill(Color.accentColor)
+                            .frame(width: 6, height: 6)
+                            .offset(x: -2, y: 2)
+                    }
+                }
         } else {
             Image(systemName: item.icon)
                 .foregroundColor(.secondary)

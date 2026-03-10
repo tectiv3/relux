@@ -235,7 +235,9 @@ final class ScriptSearcher {
             } else if script.acceptsSelection {
                 let effective = stdinValue ?? query
                 if script.inputFilter.matches(effective) {
-                    scored.append((script, 10))
+                    // Format-matched input is a strong signal
+                    let filterScore = script.inputFilter == .any ? 10 : 70
+                    scored.append((script, filterScore))
                 }
             }
         }
