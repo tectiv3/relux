@@ -73,12 +73,12 @@ final class AppState {
         UserDefaults.standard.object(forKey: "maxSearchResults") as? Int ?? 10
     }
 
-    func performSearch(query: String) -> [SearchItem] {
+    func performSearch(query: String, stdinValue: String? = nil) -> [SearchItem] {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
 
         let limit = maxSearchResults
         var appResults = appSearcher.search(query, limit: limit)
-        var scriptResults = scriptSearcher.search(query, limit: limit)
+        var scriptResults = scriptSearcher.search(query, limit: limit, stdinValue: stdinValue)
         let settingsResults = systemSettingsSearcher.search(query, limit: limit)
 
         let term = query

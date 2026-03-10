@@ -14,19 +14,95 @@ enum ScriptOutputMode: String, Codable, CaseIterable, Sendable {
     }
 }
 
+enum InputFilter: Codable, Sendable, Equatable {
+    case any
+    case integer
+    case number
+    case url
+    case json
+    case datetime
+    case regex(String)
+
+    var label: String {
+        switch self {
+        case .any: "Any"
+        case .integer: "Integer"
+        case .number: "Number"
+        case .url: "URL"
+        case .json: "JSON"
+        case .datetime: "Date/Time"
+        case .regex: "Regex"
+        }
+    }
+
+    var regexPattern: String? {
+        if case let .regex(pattern) = self { return pattern }
+        return nil
+    }
+
+    func matches(_ input: String) -> Bool {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        switch self {
+        case .any:
+            return true
+        case .integer:
+            return trimmed.range(of: #"^\d+$"#, options: .regularExpression) != nil
+        case .number:
+            return trimmed.range(of: #"^-?\d+\.?\d*$"#, options: .regularExpression) != nil
+        case .url:
+            return trimmed.range(of: #"^https?://"#, options: .regularExpression) != nil
+                || trimmed.range(of: #"^[a-zA-Z0-9\-]+\.[a-zA-Z]{2,}"#, options: .regularExpression) != nil
+        case .json:
+            return trimmed.hasPrefix("{") || trimmed.hasPrefix("[")
+        case .datetime:
+            return trimmed.range(of: #"^\d{4}-\d{2}-\d{2}(\s\d{2}:\d{2}(:\d{2})?)?$"#, options: .regularExpression) != nil
+        case let .regex(pattern):
+            return trimmed.range(of: pattern, options: .regularExpression) != nil
+        }
+    }
+
+    /// Tag string for use in SwiftUI Picker bindings
+    var tag: String {
+        switch self {
+        case .any: "any"
+        case .integer: "integer"
+        case .number: "number"
+        case .url: "url"
+        case .json: "json"
+        case .datetime: "datetime"
+        case .regex: "regex"
+        }
+    }
+
+    static func fromTag(_ tag: String, existingPattern: String? = nil) -> InputFilter {
+        switch tag {
+        case "integer": .integer
+        case "number": .number
+        case "url": .url
+        case "json": .json
+        case "datetime": .datetime
+        case "regex": .regex(existingPattern ?? "")
+        default: .any
+        }
+    }
+}
+
 struct ScriptItem: Codable, Identifiable, Sendable {
     let id: String
     var title: String
     var command: String
     var acceptsSelection: Bool
     var outputMode: ScriptOutputMode
+    var inputFilter: InputFilter
 
-    init(title: String, command: String, acceptsSelection: Bool = false, outputMode: ScriptOutputMode = .none) {
+    init(title: String, command: String, acceptsSelection: Bool = false, outputMode: ScriptOutputMode = .none, inputFilter: InputFilter = .any) {
         id = UUID().uuidString
         self.title = title
         self.command = command
         self.acceptsSelection = acceptsSelection
         self.outputMode = outputMode
+        self.inputFilter = inputFilter
     }
 
     /// Backward-compatible decoding for existing scripts.json lacking new fields
@@ -43,10 +119,11 @@ struct ScriptItem: Codable, Identifiable, Sendable {
             let legacy = try container.decodeIfPresent(Bool.self, forKey: .capturesOutput) ?? false
             outputMode = legacy ? .capture : .none
         }
+        inputFilter = try container.decodeIfPresent(InputFilter.self, forKey: .inputFilter) ?? .any
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, command, acceptsSelection, outputMode, capturesOutput
+        case id, title, command, acceptsSelection, outputMode, capturesOutput, inputFilter
     }
 
     func encode(to encoder: Encoder) throws {
@@ -56,6 +133,7 @@ struct ScriptItem: Codable, Identifiable, Sendable {
         try container.encode(command, forKey: .command)
         try container.encode(acceptsSelection, forKey: .acceptsSelection)
         try container.encode(outputMode, forKey: .outputMode)
+        try container.encode(inputFilter, forKey: .inputFilter)
     }
 }
 
@@ -137,7 +215,7 @@ final class ScriptSearcher {
 
     // MARK: - Search
 
-    func search(_ query: String, limit: Int = 5) -> [SearchItem] {
+    func search(_ query: String, limit: Int = 5, stdinValue: String? = nil) -> [SearchItem] {
         guard !query.isEmpty else { return [] }
         let q = query.lowercased()
 
@@ -153,8 +231,10 @@ final class ScriptSearcher {
             } else if fuzzyMatch(query: q, target: name) {
                 scored.append((script, 40))
             } else if script.acceptsSelection {
-                // Always show stdin scripts so the query can be piped to them
-                scored.append((script, 10))
+                let effective = stdinValue ?? query
+                if script.inputFilter.matches(effective) {
+                    scored.append((script, 10))
+                }
             }
         }
 

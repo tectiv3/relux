@@ -241,6 +241,40 @@ struct SettingsView: View {
                             }
                             .frame(width: 100)
                             .help("None = fire & forget, Capture = stream into panel, Replace = replace selection")
+                            if script.acceptsSelection {
+                                Picker("", selection: Binding(
+                                    get: { script.inputFilter.tag },
+                                    set: { newValue in
+                                        var updated = script
+                                        updated.inputFilter = InputFilter.fromTag(newValue, existingPattern: script.inputFilter.regexPattern)
+                                        appState.scriptSearcher.update(updated)
+                                    }
+                                )) {
+                                    Text("Any").tag("any")
+                                    Text("Integer").tag("integer")
+                                    Text("Number").tag("number")
+                                    Text("URL").tag("url")
+                                    Text("JSON").tag("json")
+                                    Text("Date/Time").tag("datetime")
+                                    Text("Regex").tag("regex")
+                                }
+                                .frame(width: 100)
+                                .help("Only show when input matches this type")
+                                if case .regex = script.inputFilter {
+                                    TextField("Pattern", text: Binding(
+                                        get: { script.inputFilter.regexPattern ?? "" },
+                                        set: { newValue in
+                                            var updated = script
+                                            updated.inputFilter = .regex(newValue)
+                                            appState.scriptSearcher.update(updated)
+                                        }
+                                    ))
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .frame(width: 120)
+                                    .help("Regular expression to match input against")
+                                }
+                            }
                             Button(role: .destructive) {
                                 appState.scriptSearcher.remove(id: script.id)
                             } label: {

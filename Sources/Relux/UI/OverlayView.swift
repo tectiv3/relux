@@ -595,7 +595,7 @@ struct OverlayView: View {
             let recents = appState.recentItems().filter { !selectionIds.contains($0.id) }
             results = selectionItems + recents
         } else {
-            var searchResults = appState.performSearch(query: trimmed)
+            var searchResults = appState.performSearch(query: trimmed, stdinValue: appState.currentSelection)
             // Boost selection-aware items to top when selection exists
             if appState.currentSelection != nil {
                 let selectionAware = searchResults.filter {
