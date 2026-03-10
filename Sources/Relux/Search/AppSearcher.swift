@@ -19,6 +19,8 @@ final class AppSearcher {
 
     private var apps: [AppItem] = []
     private var query: NSMetadataQuery?
+    private var newlyDetected: Set<String> = []
+    private var watchSources: [DispatchSourceFileSystemObject] = []
 
     var searchPaths: [String] {
         didSet {
@@ -31,13 +33,69 @@ final class AppSearcher {
         searchPaths = UserDefaults.standard.stringArray(forKey: "appSearchPaths")
             ?? Self.defaultSearchPaths
         startSpotlightQuery()
+        startDirectoryWatchers()
     }
 
     private func restartSpotlightQuery() {
         query?.stop()
         query = nil
         apps = []
+        newlyDetected.removeAll()
         startSpotlightQuery()
+    }
+
+    // Only watch the two main install targets, not all searchPaths
+    // (system dirs rarely change, and /Applications/Utilities is flat inside /Applications)
+    private func startDirectoryWatchers() {
+        stopDirectoryWatchers()
+
+        let watchPaths = ["/Applications", NSHomeDirectory() + "/Applications"]
+        for dirPath in watchPaths {
+            let fd = open(dirPath, O_EVTONLY)
+            guard fd >= 0 else { continue }
+
+            let source = DispatchSource.makeFileSystemObjectSource(
+                fileDescriptor: fd,
+                eventMask: .write,
+                queue: .main
+            )
+            source.setEventHandler { [weak self] in
+                Task { @MainActor in
+                    self?.handleDirectoryChange(at: dirPath)
+                }
+            }
+            source.setCancelHandler {
+                close(fd)
+            }
+            source.resume()
+            watchSources.append(source)
+        }
+    }
+
+    private func stopDirectoryWatchers() {
+        for source in watchSources {
+            source.cancel()
+        }
+        watchSources = []
+    }
+
+    private func handleDirectoryChange(at dirPath: String) {
+        let dirURL = URL(fileURLWithPath: dirPath)
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: dirURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        let knownPaths = Set(apps.map { $0.path.path })
+        for url in contents where url.pathExtension == "app" {
+            let path = url.path
+            guard !knownPaths.contains(path) else { continue }
+
+            let name = url.deletingPathExtension().lastPathComponent
+            apps.append(AppItem(name: name, path: url))
+            newlyDetected.insert(path)
+        }
     }
 
     private func startSpotlightQuery() {
@@ -88,6 +146,20 @@ final class AppSearcher {
         }
 
         mdQuery.enableUpdates()
+
+        // Drain: any app now in Spotlight is no longer "newly detected"
+        let spotlightPaths = Set(found.values.map { $0.path.path })
+        newlyDetected.subtract(spotlightPaths)
+
+        // Merge: preserve FSEvents-detected apps that Spotlight hasn't indexed yet
+        for path in newlyDetected {
+            let url = URL(fileURLWithPath: path)
+            let name = url.deletingPathExtension().lastPathComponent
+            if found[name] == nil {
+                found[name] = AppItem(name: name, path: url)
+            }
+        }
+
         apps = Array(found.values).sorted {
             $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
@@ -97,17 +169,20 @@ final class AppSearcher {
         guard !query.isEmpty else { return [] }
         let q = query.lowercased()
 
-        var scored: [(app: AppItem, score: Int)] = []
+        var scored: [(app: AppItem, score: Int, isNew: Bool)] = []
+        let boost = 20
         for app in apps {
             let name = app.name.lowercased()
+            let isNew = newlyDetected.contains(app.path.path)
+            let b = isNew ? boost : 0
             if name == q {
-                scored.append((app, 100))
+                scored.append((app, 100 + b, isNew))
             } else if name.hasPrefix(q) {
-                scored.append((app, 80))
+                scored.append((app, 80 + b, isNew))
             } else if name.contains(q) {
-                scored.append((app, 60))
+                scored.append((app, 60 + b, isNew))
             } else if fuzzyMatch(query: q, target: name) {
-                scored.append((app, 40))
+                scored.append((app, 40 + b, isNew))
             }
         }
 
@@ -119,7 +194,8 @@ final class AppSearcher {
                 subtitle: item.app.path.deletingLastPathComponent().path,
                 icon: "app.dashed",
                 kind: .app,
-                meta: ["path": item.app.path.path]
+                meta: ["path": item.app.path.path],
+                isNew: item.isNew
             )
         }
     }

@@ -58,7 +58,9 @@ enum InputFilter: Codable, Sendable, Equatable {
         case .datetime:
             return trimmed.range(of: #"^\d{4}-\d{2}-\d{2}(\s\d{2}:\d{2}(:\d{2})?)?$"#, options: .regularExpression) != nil
         case let .regex(pattern):
-            return trimmed.range(of: pattern, options: .regularExpression) != nil
+            guard !pattern.isEmpty,
+                  let re = try? NSRegularExpression(pattern: pattern) else { return false }
+            return re.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)) != nil
         }
     }
 

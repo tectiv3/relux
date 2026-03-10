@@ -433,6 +433,17 @@ struct OverlayView: View {
                 .font(.system(size: 13, weight: .medium))
                 .lineLimit(1)
 
+            if item.isNew {
+                Text("NEW")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(
+                        Capsule().fill(Color.blue)
+                    )
+            }
+
             Text(item.subtitle)
                 .font(.system(size: 12))
                 .foregroundColor(isSelected ? .white.opacity(0.5) : .secondary)
