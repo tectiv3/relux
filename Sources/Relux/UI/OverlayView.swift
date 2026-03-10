@@ -863,10 +863,13 @@ struct OverlayView: View {
                     }
                 }
 
+                var recorded = item
                 if let rawInput {
-                    item.subtitle = String(rawInput.prefix(80)).replacingOccurrences(of: "\n", with: " ")
+                    let cleaned = String(rawInput.prefix(80))
+                        .unicodeScalars.filter { CharacterSet.controlCharacters.inverted.contains($0) }
+                    recorded.subtitle = String(cleaned)
                 }
-                appState.recordSelection(query: query, item: item)
+                appState.recordSelection(query: query, item: recorded)
                 let env = appState.scriptSearcher.buildEnvironment()
                 let outputMode = ScriptOutputMode(rawValue: item.meta["outputMode"] ?? "") ?? .none
 
