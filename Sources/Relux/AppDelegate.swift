@@ -51,10 +51,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let savedX = UserDefaults.standard.object(forKey: "panelX") as? CGFloat
         let savedY = UserDefaults.standard.object(forKey: "panelY") as? CGFloat
 
-        let x = savedX ?? (screenFrame.midX - panelWidth / 2)
-        let y = savedY ?? (screenFrame.origin.y + screenFrame.height * 0.65 - panelHeight / 2)
+        let posX = savedX ?? (screenFrame.midX - panelWidth / 2)
+        let posY = savedY ?? (screenFrame.origin.y + screenFrame.height * 0.65 - panelHeight / 2)
 
-        let contentRect = NSRect(x: x, y: y, width: panelWidth, height: panelHeight)
+        let contentRect = NSRect(x: posX, y: posY, width: panelWidth, height: panelHeight)
         let floatingPanel = FloatingPanel(contentRect: contentRect)
 
         let hostingView = NSHostingView(rootView: PanelRootView().environment(appState))

@@ -677,8 +677,8 @@ struct SettingsView: View {
                             }
                         }
                     }
-                    .onMove { from, to in
-                        translateLanguages.move(fromOffsets: from, toOffset: to)
+                    .onMove { from, destination in
+                        translateLanguages.move(fromOffsets: from, toOffset: destination)
                         UserDefaults.standard.set(translateLanguages, forKey: "translateLanguages")
                     }
                     .onDelete { offsets in

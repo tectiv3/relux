@@ -45,7 +45,10 @@ struct ClipboardHistoryView: View {
             },
         ]
         if entry.contentType == "rtf" || entry.contentType == "html" {
-            actions.append(ClipAction(label: "Paste Formatted to \(previousAppName)", icon: "textformat", shortcut: "⌘⇧⏎") {
+            actions.append(ClipAction(
+                label: "Paste Formatted to \(previousAppName)",
+                icon: "textformat", shortcut: "⌘⇧⏎"
+            ) {
                 pasteEntry(entry, formatted: true)
             })
         }
@@ -264,8 +267,8 @@ struct ClipboardHistoryView: View {
     private func entryTitle(for entry: ClipboardEntry) -> String {
         switch entry.contentType {
         case "image":
-            if let w = entry.imageWidth, let h = entry.imageHeight {
-                return "Image (\(w)×\(h))"
+            if let width = entry.imageWidth, let height = entry.imageHeight {
+                return "Image (\(width)×\(height))"
             }
             return "Image"
         default:
@@ -291,8 +294,8 @@ struct ClipboardHistoryView: View {
             let offset = titleLower.distance(from: titleLower.startIndex, to: idx)
             let attrStart = result.index(result.startIndex, offsetByCharacters: offset)
             let attrEnd = result.index(attrStart, offsetByCharacters: 1)
-            result[attrStart..<attrEnd].foregroundColor = highlightColor
-            result[attrStart..<attrEnd].underlineStyle = .single
+            result[attrStart ..< attrEnd].foregroundColor = highlightColor
+            result[attrStart ..< attrEnd].underlineStyle = .single
         }
 
         return result
@@ -317,8 +320,8 @@ struct ClipboardHistoryView: View {
             var indices = [anchor]
             var idx = target.index(after: anchor)
             var matched = true
-            for ch in queryChars.dropFirst() {
-                guard let found = target[idx...].firstIndex(of: ch) else {
+            for char in queryChars.dropFirst() {
+                guard let found = target[idx...].firstIndex(of: char) else {
                     matched = false
                     break
                 }
@@ -391,8 +394,8 @@ struct ClipboardHistoryView: View {
             }
 
             if entry.contentType == "image" {
-                if let w = entry.imageWidth, let h = entry.imageHeight {
-                    infoRow(label: "Dimensions") { Text("\(w)×\(h)") }
+                if let width = entry.imageWidth, let height = entry.imageHeight {
+                    infoRow(label: "Dimensions") { Text("\(width)×\(height)") }
                 }
                 if let size = entry.imageSize {
                     infoRow(label: "Image size") { Text(formatBytes(size)) }
@@ -643,8 +646,8 @@ struct ClipboardHistoryView: View {
         while let anchor = target[startSearch...].firstIndex(of: firstChar) {
             var idx = target.index(after: anchor)
             var matched = true
-            for ch in queryChars.dropFirst() {
-                guard let found = target[idx...].firstIndex(of: ch) else {
+            for char in queryChars.dropFirst() {
+                guard let found = target[idx...].firstIndex(of: char) else {
                     matched = false
                     break
                 }
@@ -661,11 +664,11 @@ struct ClipboardHistoryView: View {
     }
 
     private func formatBytes(_ bytes: Int) -> String {
-        let kb = Double(bytes) / 1024
-        if kb < 1024 {
-            return String(format: "%.0f KB", kb)
+        let kilobytes = Double(bytes) / 1024
+        if kilobytes < 1024 {
+            return String(format: "%.0f KB", kilobytes)
         }
-        return String(format: "%.1f MB", kb / 1024)
+        return String(format: "%.1f MB", kilobytes / 1024)
     }
 
     private func formatTime(_ date: Date) -> String {

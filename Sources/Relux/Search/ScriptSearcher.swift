@@ -85,13 +85,14 @@ enum InputFilter: Codable, Sendable, Equatable {
         case .json:
             return trimmed.hasPrefix("{") || trimmed.hasPrefix("[")
         case .datetime:
-            return trimmed.range(of: #"^\d{4}-\d{2}-\d{2}(\s\d{2}:\d{2}(:\d{2})?)?$"#, options: .regularExpression) != nil
+            let pattern = #"^\d{4}-\d{2}-\d{2}(\s\d{2}:\d{2}(:\d{2})?)?$"#
+            return trimmed.range(of: pattern, options: .regularExpression) != nil
         case let .regex(pattern):
             guard !pattern.isEmpty,
-                  let re = try? NSRegularExpression(pattern: pattern) else { return false }
+                  let regex = try? NSRegularExpression(pattern: pattern) else { return false }
             // Limit to first 4 KB to guard against pathological patterns on large input
             let safe = trimmed.count > 4096 ? String(trimmed.prefix(4096)) : trimmed
-            return re.firstMatch(
+            return regex.firstMatch(
                 in: safe,
                 options: .withoutAnchoringBounds,
                 range: NSRange(safe.startIndex..., in: safe)
@@ -257,8 +258,8 @@ final class ScriptSearcher {
     /// Builds environment for script execution: login shell env + enabled custom vars
     func buildEnvironment() -> [String: String] {
         var env = ProcessInfo.processInfo.environment
-        for v in envVars where v.enabled && !v.name.isEmpty {
-            env[v.name] = v.value
+        for envVar in envVars where envVar.enabled && !envVar.name.isEmpty {
+            env[envVar.name] = envVar.value
         }
         return env
     }
@@ -267,18 +268,18 @@ final class ScriptSearcher {
 
     func search(_ query: String, limit: Int = 5, stdinValue: String? = nil) -> [SearchItem] {
         guard !query.isEmpty else { return [] }
-        let q = query.lowercased()
+        let lowercasedQuery = query.lowercased()
 
         var scored: [(script: ScriptItem, score: Int)] = []
         for script in scripts {
             let name = script.title.lowercased()
-            if name == q {
+            if name == lowercasedQuery {
                 scored.append((script, 100))
-            } else if name.hasPrefix(q) {
+            } else if name.hasPrefix(lowercasedQuery) {
                 scored.append((script, 80))
-            } else if name.contains(q) {
+            } else if name.contains(lowercasedQuery) {
                 scored.append((script, 60))
-            } else if fuzzyMatch(query: q, target: name) {
+            } else if fuzzyMatch(query: lowercasedQuery, target: name) {
                 scored.append((script, 40))
             } else if script.inputMode.acceptsInput {
                 let effective = stdinValue ?? query
@@ -343,8 +344,8 @@ final class ScriptSearcher {
 
     private func fuzzyMatch(query: String, target: String) -> Bool {
         var targetIdx = target.startIndex
-        for ch in query {
-            guard let found = target[targetIdx...].firstIndex(of: ch) else { return false }
+        for char in query {
+            guard let found = target[targetIdx...].firstIndex(of: char) else { return false }
             targetIdx = target.index(after: found)
         }
         return true

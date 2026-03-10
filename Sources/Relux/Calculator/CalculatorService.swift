@@ -96,9 +96,9 @@ final class CalculatorService {
 
         // Balanced parentheses
         var depth = 0
-        for ch in cleaned {
-            if ch == "(" { depth += 1 }
-            if ch == ")" { depth -= 1 }
+        for char in cleaned {
+            if char == "(" { depth += 1 }
+            if char == ")" { depth -= 1 }
             if depth < 0 { return false }
         }
         if depth != 0 { return false }

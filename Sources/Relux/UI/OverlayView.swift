@@ -828,10 +828,10 @@ struct OverlayView: View {
                 if let url = URL(string: urlString) {
                     NSWorkspace.shared.open(url)
                 }
-            } else if let q = item.meta["query"],
+            } else if let query = item.meta["query"],
                       var components = URLComponents(string: "https://duckduckgo.com/")
             {
-                components.queryItems = [URLQueryItem(name: "q", value: q)]
+                components.queryItems = [URLQueryItem(name: "q", value: query)]
                 if let url = components.url {
                     NSWorkspace.shared.open(url)
                 }

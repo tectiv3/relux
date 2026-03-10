@@ -23,6 +23,7 @@ struct ClipboardEntry: Identifiable, Sendable {
 
 @MainActor
 final class ClipboardStore {
+    // swiftlint:disable:next identifier_name
     private nonisolated(unsafe) var db: OpaquePointer?
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
@@ -131,7 +132,12 @@ final class ClipboardStore {
     }
 
     func fetchAll(limit: Int = 500) -> [ClipboardEntry] {
-        let sql = "SELECT id, content_type, text_content, NULL, image_path, image_width, image_height, image_size, source_app, source_name, char_count, word_count, created_at FROM clipboard_history ORDER BY created_at DESC LIMIT ?"
+        let sql = """
+        SELECT id, content_type, text_content, NULL, image_path, \
+        image_width, image_height, image_size, source_app, \
+        source_name, char_count, word_count, created_at \
+        FROM clipboard_history ORDER BY created_at DESC LIMIT ?
+        """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
@@ -146,7 +152,14 @@ final class ClipboardStore {
     }
 
     func search(filter: String) -> [ClipboardEntry] {
-        let sql = "SELECT id, content_type, text_content, NULL, image_path, image_width, image_height, image_size, source_app, source_name, char_count, word_count, created_at FROM clipboard_history WHERE text_content LIKE ? ORDER BY created_at DESC LIMIT 200"
+        let sql = """
+        SELECT id, content_type, text_content, NULL, image_path, \
+        image_width, image_height, image_size, source_app, \
+        source_name, char_count, word_count, created_at \
+        FROM clipboard_history \
+        WHERE text_content LIKE ? \
+        ORDER BY created_at DESC LIMIT 200
+        """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
@@ -197,10 +210,10 @@ final class ClipboardStore {
 
     func clearAll() throws {
         // Delete all image files
-        let fm = FileManager.default
-        if let files = try? fm.contentsOfDirectory(at: imageDir, includingPropertiesForKeys: nil) {
+        let fileManager = FileManager.default
+        if let files = try? fileManager.contentsOfDirectory(at: imageDir, includingPropertiesForKeys: nil) {
             for file in files {
-                try? fm.removeItem(at: file)
+                try? fileManager.removeItem(at: file)
             }
         }
         try execute("DELETE FROM clipboard_history")
@@ -245,7 +258,12 @@ final class ClipboardStore {
     // MARK: - Private
 
     private func fetchById(id: Int64) -> ClipboardEntry? {
-        let sql = "SELECT id, content_type, text_content, raw_data, image_path, image_width, image_height, image_size, source_app, source_name, char_count, word_count, created_at FROM clipboard_history WHERE id = ?"
+        let sql = """
+        SELECT id, content_type, text_content, raw_data, image_path, \
+        image_width, image_height, image_size, source_app, \
+        source_name, char_count, word_count, created_at \
+        FROM clipboard_history WHERE id = ?
+        """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
