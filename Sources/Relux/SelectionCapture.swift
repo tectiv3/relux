@@ -15,17 +15,48 @@ enum SelectionCapture {
         guard AXUIElementCopyAttributeValue(focusedApp as! AXUIElement, kAXFocusedUIElementAttribute as CFString, &focusedElement) == .success else {
             return nil
         }
+        let element = focusedElement as! AXUIElement
 
+        // Standard path — works for most native apps
         var selectedText: AnyObject?
-        guard AXUIElementCopyAttributeValue(focusedElement as! AXUIElement, kAXSelectedTextAttribute as CFString, &selectedText) == .success else {
+        if AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selectedText) == .success,
+           let text = selectedText as? String,
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return text
+        }
+
+        // Text marker path — WebKit views (Safari, Orion) use markers instead
+        if let text = selectedTextViaMarkers(from: element),
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return text
+        }
+
+        return nil
+    }
+
+    /// Extracts selected text using AX text markers (used by Safari/WebKit).
+    private static func selectedTextViaMarkers(from element: AXUIElement) -> String? {
+        var markerRange: AnyObject?
+        let mrResult = AXUIElementCopyAttributeValue(
+            element,
+            "AXSelectedTextMarkerRange" as CFString,
+            &markerRange
+        )
+        guard mrResult == .success, markerRange != nil else {
             return nil
         }
 
-        let text = selectedText as? String
-        guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        var text: AnyObject?
+        let stResult = AXUIElementCopyParameterizedAttributeValue(
+            element,
+            "AXStringForTextMarkerRange" as CFString,
+            markerRange!,
+            &text
+        )
+        guard stResult == .success else {
             return nil
         }
-        return text
+        return text as? String
     }
 
     /// Replaces the selected text in the given app via the Accessibility API.
