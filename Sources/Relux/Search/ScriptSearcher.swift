@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let logger = Logger(subsystem: "com.relux.app", category: "ScriptSearcher")
 
 enum ScriptOutputMode: String, Codable, CaseIterable, Sendable {
     case none
@@ -41,16 +44,25 @@ enum InputFilter: Codable, Sendable, Equatable {
     }
 
     func matches(_ input: String) -> Bool {
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        var trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Also remove control characters which might break regex
+        trimmed = trimmed.trimmingCharacters(in: .controlCharacters)
+        
         guard !trimmed.isEmpty else { return false }
         switch self {
         case .any:
             return true
         case .integer:
-            return trimmed.range(of: #"^\d+$"#, options: .regularExpression) != nil
+            return Int(trimmed) != nil
         case .number:
-            return trimmed.range(of: #"^-?\d+\.?\d*$"#, options: .regularExpression) != nil
+            guard let val = Double(trimmed), val.isFinite else { return false }
+            return true
         case .url:
+            // Basic URL detection
+            if let url = URL(string: trimmed), url.scheme != nil, url.host != nil {
+                return true
+            }
+            // Fallback to regex for things that look like URLs but might lack scheme
             return trimmed.range(of: #"^https?://"#, options: .regularExpression) != nil
                 || trimmed.range(of: #"^[a-zA-Z0-9\-]+\.[a-zA-Z]{2,}"#, options: .regularExpression) != nil
         case .json:
@@ -265,15 +277,22 @@ final class ScriptSearcher {
     // MARK: - Persistence
 
     func load() {
-        if let data = try? Data(contentsOf: storePath),
-           let decoded = try? JSONDecoder().decode([ScriptItem].self, from: data)
-        {
-            scripts = decoded
+        do {
+            if FileManager.default.fileExists(atPath: storePath.path) {
+                let data = try Data(contentsOf: storePath)
+                scripts = try JSONDecoder().decode([ScriptItem].self, from: data)
+            }
+        } catch {
+            logger.error("Failed to load scripts: \(error)")
         }
-        if let data = try? Data(contentsOf: envPath),
-           let decoded = try? JSONDecoder().decode([EnvVar].self, from: data)
-        {
-            envVars = decoded
+        
+        do {
+            if FileManager.default.fileExists(atPath: envPath.path) {
+                let data = try Data(contentsOf: envPath)
+                envVars = try JSONDecoder().decode([EnvVar].self, from: data)
+            }
+        } catch {
+            logger.error("Failed to load env vars: \(error)")
         }
     }
 

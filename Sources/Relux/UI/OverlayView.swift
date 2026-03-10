@@ -660,7 +660,7 @@ struct OverlayView: View {
                     return false
                 }
 
-                results = selectionItems + matching + recents
+                results = matching + selectionItems + recents
             } else {
                 results = selectionItems + recents
             }

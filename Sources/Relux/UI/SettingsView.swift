@@ -174,23 +174,11 @@ struct SettingsView: View {
 
     // MARK: - Scripts Tab
 
-    @State private var newScriptTitle = ""
-    @State private var newScriptCommand = ""
+    @State private var expandedScriptId: String?
+    @State private var editingScript: ScriptItem?
 
     private var scriptsTab: some View {
         Form {
-            Section("Add Script") {
-                TextField("Title", text: $newScriptTitle)
-                TextField("Command", text: $newScriptCommand)
-                Button("Add") {
-                    guard !newScriptTitle.isEmpty, !newScriptCommand.isEmpty else { return }
-                    appState.scriptSearcher.add(title: newScriptTitle, command: newScriptCommand)
-                    newScriptTitle = ""
-                    newScriptCommand = ""
-                }
-                .disabled(newScriptTitle.isEmpty || newScriptCommand.isEmpty)
-            }
-
             Section(header: HStack {
                 Text("Scripts")
                 Spacer()
@@ -208,82 +196,20 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(appState.scriptSearcher.scripts) { script in
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(script.title).font(.system(size: 13, weight: .medium))
-                                Text(script.command)
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            Spacer()
-                            Toggle("stdin", isOn: Binding(
-                                get: { script.acceptsSelection },
-                                set: { newValue in
-                                    var updated = script
-                                    updated.acceptsSelection = newValue
-                                    appState.scriptSearcher.update(updated)
-                                }
-                            ))
-                            .toggleStyle(.checkbox)
-                            .help("Pass selected text as stdin")
-                            Picker("", selection: Binding(
-                                get: { script.outputMode },
-                                set: { newValue in
-                                    var updated = script
-                                    updated.outputMode = newValue
-                                    appState.scriptSearcher.update(updated)
-                                }
-                            )) {
-                                ForEach(ScriptOutputMode.allCases, id: \.self) { mode in
-                                    Text(mode.label).tag(mode)
-                                }
-                            }
-                            .frame(width: 100)
-                            .help("None = fire & forget, Capture = stream into panel, Replace = replace selection")
-                            if script.acceptsSelection {
-                                Picker("", selection: Binding(
-                                    get: { script.inputFilter.tag },
-                                    set: { newValue in
-                                        var updated = script
-                                        updated.inputFilter = InputFilter.fromTag(newValue, existingPattern: script.inputFilter.regexPattern)
-                                        appState.scriptSearcher.update(updated)
-                                    }
-                                )) {
-                                    Text("Any").tag("any")
-                                    Text("Integer").tag("integer")
-                                    Text("Number").tag("number")
-                                    Text("URL").tag("url")
-                                    Text("JSON").tag("json")
-                                    Text("Date/Time").tag("datetime")
-                                    Text("Regex").tag("regex")
-                                }
-                                .frame(width: 100)
-                                .help("Only show when input matches this type")
-                                if case .regex = script.inputFilter {
-                                    TextField("Pattern", text: Binding(
-                                        get: { script.inputFilter.regexPattern ?? "" },
-                                        set: { newValue in
-                                            var updated = script
-                                            updated.inputFilter = .regex(newValue)
-                                            appState.scriptSearcher.update(updated)
-                                        }
-                                    ))
-                                    .textFieldStyle(.roundedBorder)
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .frame(width: 120)
-                                    .help("Regular expression to match input against")
-                                }
-                            }
-                            Button(role: .destructive) {
-                                appState.scriptSearcher.remove(id: script.id)
-                            } label: {
-                                Image(systemName: "trash")
-                            }
-                            .buttonStyle(.borderless)
-                        }
+                        scriptRow(script)
                     }
                 }
+
+                Button {
+                    appState.scriptSearcher.add(title: "", command: "")
+                    if let last = appState.scriptSearcher.scripts.last {
+                        expandedScriptId = last.id
+                        editingScript = last
+                    }
+                } label: {
+                    Label("Add Script", systemImage: "plus")
+                }
+                .buttonStyle(.borderless)
             }
 
             Section {
@@ -306,6 +232,183 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
+        .onDisappear { commitEditing() }
+    }
+
+    @ViewBuilder
+    private func scriptRow(_ script: ScriptItem) -> some View {
+        let isExpanded = expandedScriptId == script.id
+
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 12)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(script.title.isEmpty ? "Untitled" : script.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(script.title.isEmpty ? .secondary : .primary)
+                    Text(script.command.isEmpty ? "no command" : script.command)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                if !isExpanded {
+                    scriptBadges(script)
+                }
+
+                Button(role: .destructive) {
+                    appState.scriptSearcher.remove(id: script.id)
+                    if expandedScriptId == script.id {
+                        expandedScriptId = nil
+                        editingScript = nil
+                    }
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    commitEditing()
+                    if isExpanded {
+                        expandedScriptId = nil
+                        editingScript = nil
+                    } else {
+                        expandedScriptId = script.id
+                        editingScript = script
+                    }
+                }
+            }
+
+            if isExpanded, editingScript != nil {
+                Divider()
+                    .padding(.vertical, 6)
+
+                scriptEditForm()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func scriptBadges(_ script: ScriptItem) -> some View {
+        if script.acceptsSelection {
+            scriptBadge("stdin")
+        }
+        if script.outputMode != .none {
+            scriptBadge(script.outputMode.label)
+        }
+        if script.inputFilter != .any, script.acceptsSelection {
+            scriptBadge(script.inputFilter.label)
+        }
+    }
+
+    private func scriptBadge(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .medium))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(.quaternary)
+            .clipShape(RoundedRectangle(cornerRadius: 3))
+    }
+
+    @ViewBuilder
+    private func scriptEditForm() -> some View {
+        if editingScript != nil {
+            VStack(alignment: .leading, spacing: 8) {
+                LabeledContent("Title") {
+                    TextField("Script title", text: Binding(
+                        get: { editingScript?.title ?? "" },
+                        set: { editingScript?.title = $0 }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                }
+
+                LabeledContent("Command") {
+                    TextField("Shell command", text: Binding(
+                        get: { editingScript?.command ?? "" },
+                        set: { editingScript?.command = $0 }
+                    ))
+                    .font(.system(size: 12, design: .monospaced))
+                    .textFieldStyle(.roundedBorder)
+                }
+
+                Toggle("Accepts stdin (pass selected text)", isOn: Binding(
+                    get: { editingScript?.acceptsSelection ?? false },
+                    set: { editingScript?.acceptsSelection = $0 }
+                ))
+                .toggleStyle(.checkbox)
+
+                scriptEditPickers()
+            }
+            .padding(.leading, 24)
+            .padding(.bottom, 4)
+        }
+    }
+
+    @ViewBuilder
+    private func scriptEditPickers() -> some View {
+        HStack(spacing: 16) {
+            LabeledContent("Output") {
+                Picker("", selection: Binding(
+                    get: { editingScript?.outputMode ?? .none },
+                    set: { editingScript?.outputMode = $0 }
+                )) {
+                    ForEach(ScriptOutputMode.allCases, id: \.self) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .frame(width: 100)
+            }
+
+            if editingScript?.acceptsSelection == true {
+                LabeledContent("Filter") {
+                    Picker("", selection: Binding(
+                        get: { editingScript?.inputFilter.tag ?? "any" },
+                        set: { newValue in
+                            let pattern = editingScript?.inputFilter.regexPattern
+                            editingScript?.inputFilter = InputFilter.fromTag(newValue, existingPattern: pattern)
+                        }
+                    )) {
+                        Text("Any").tag("any")
+                        Text("Integer").tag("integer")
+                        Text("Number").tag("number")
+                        Text("URL").tag("url")
+                        Text("JSON").tag("json")
+                        Text("Date/Time").tag("datetime")
+                        Text("Regex").tag("regex")
+                    }
+                    .frame(width: 100)
+                }
+            }
+        }
+
+        if editingScript?.acceptsSelection == true, editingScript?.inputFilter.regexPattern != nil {
+            LabeledContent("Pattern") {
+                TextField("Regular expression", text: Binding(
+                    get: { editingScript?.inputFilter.regexPattern ?? "" },
+                    set: { editingScript?.inputFilter = .regex($0) }
+                ))
+                .font(.system(size: 11, design: .monospaced))
+                .textFieldStyle(.roundedBorder)
+            }
+        }
+    }
+
+    private func commitEditing() {
+        guard let editing = editingScript else { return }
+        // Only save if it has meaningful content
+        if editing.title.isEmpty, editing.command.isEmpty {
+            appState.scriptSearcher.remove(id: editing.id)
+        } else {
+            appState.scriptSearcher.update(editing)
+        }
     }
 
     // MARK: - Env Var Row
