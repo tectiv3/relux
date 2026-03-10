@@ -662,24 +662,30 @@ struct OverlayView: View {
 
             let isURL = trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://")
                 || trimmed.range(of: #"^[a-zA-Z0-9\-]+\.[a-zA-Z]{2,}"#, options: .regularExpression) != nil
-            if isURL {
-                results.append(SearchItem(
+            let webItem = if isURL {
+                SearchItem(
                     id: "web-open-url",
                     title: "Open URL",
                     subtitle: trimmed,
                     icon: "link",
                     kind: .webSearch,
                     meta: ["url": trimmed]
-                ))
+                )
             } else {
-                results.append(SearchItem(
+                SearchItem(
                     id: "web-search-ddg",
                     title: "Search DuckDuckGo",
                     subtitle: trimmed,
                     icon: "magnifyingglass",
                     kind: .webSearch,
                     meta: ["query": trimmed]
-                ))
+                )
+            }
+            // Insert web search before scripts
+            if let firstScript = results.firstIndex(where: { $0.kind == .script }) {
+                results.insert(webItem, at: firstScript)
+            } else {
+                results.append(webItem)
             }
         }
         selectedIndex = 0
@@ -775,12 +781,12 @@ struct OverlayView: View {
                     }
                 case .replace:
                     let previousApp = appState.previousApp
-                    NSApp.keyWindow?.close()
+                    dismissPanel()
                     if let previousApp {
                         ScriptRunner.runAndReplace(command, env: env, stdin: stdin, in: previousApp)
                     }
                 case .none:
-                    NSApp.keyWindow?.close()
+                    dismissPanel()
                     ScriptRunner.run(command, env: env, stdin: stdin)
                 }
             }
@@ -789,7 +795,7 @@ struct OverlayView: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(answer, forType: .string)
             }
-            NSApp.keyWindow?.close()
+            dismissPanel()
         case .jwt:
             let token = item.meta["token"] ?? appState.currentSelection
             if let token, !token.isEmpty {
@@ -806,8 +812,14 @@ struct OverlayView: View {
             if let urlString = item.meta["url"], let url = URL(string: urlString) {
                 NSWorkspace.shared.open(url)
             }
-            NSApp.keyWindow?.close()
+            dismissPanel()
         }
+    }
+
+    private func dismissPanel() {
+        appState.currentSelection = nil
+        appState.panelClosedAt = Date()
+        NSApp.keyWindow?.close()
     }
 
     private func copyOutput() {
