@@ -244,7 +244,10 @@ final class ScriptSearcher {
 
         scored.sort { $0.score > $1.score }
         return scored.prefix(limit).map { item in
-            SearchItem(
+            // Only advertise acceptsSelection when the filter actually matches
+            let effectivelyAccepts = item.script.acceptsSelection
+                && (stdinValue == nil || item.script.inputFilter.matches(stdinValue!))
+            return SearchItem(
                 id: "script:\(item.script.id)",
                 title: item.script.title,
                 subtitle: item.script.command,
@@ -252,7 +255,7 @@ final class ScriptSearcher {
                 kind: .script,
                 meta: [
                     "command": item.script.command,
-                    "acceptsSelection": item.script.acceptsSelection ? "1" : "0",
+                    "acceptsSelection": effectivelyAccepts ? "1" : "0",
                     "outputMode": item.script.outputMode.rawValue,
                 ]
             )

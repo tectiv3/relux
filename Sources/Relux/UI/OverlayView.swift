@@ -615,8 +615,55 @@ struct OverlayView: View {
         if trimmed.isEmpty {
             let selectionItems = selectionQuickActions()
             let selectionIds = Set(selectionItems.map(\.id))
-            let recents = appState.recentItems().filter { !selectionIds.contains($0.id) }
-            results = selectionItems + recents
+            var recents = appState.recentItems().filter { !selectionIds.contains($0.id) }
+
+            if let selection = appState.currentSelection {
+                let scriptsByID = Dictionary(
+                    uniqueKeysWithValues: appState.scriptSearcher.scripts.map { ("script:\($0.id)", $0) }
+                )
+
+                // 1. Find all scripts that match the current selection
+                // We want these at the top, regardless of whether they are in recents or not
+                let matching = appState.scriptSearcher.scripts
+                    .filter { $0.acceptsSelection && $0.inputFilter.matches(selection) }
+                    .map { script in
+                        SearchItem(
+                            id: "script:\(script.id)",
+                            title: script.title,
+                            subtitle: script.command,
+                            icon: "terminal",
+                            kind: .script,
+                            meta: [
+                                "command": script.command,
+                                "acceptsSelection": "1",
+                                "outputMode": script.outputMode.rawValue,
+                            ]
+                        )
+                    }
+
+                let matchingIds = Set(matching.map(\.id))
+
+                // 2. Filter recents
+                recents.removeAll { item in
+                    // Remove if it's already in matching list (to avoid duplicates and ensure promotion)
+                    if matchingIds.contains(item.id) { return true }
+
+                    // Remove if it's a script that accepts selection but doesn't match the current one
+                    // (Using fresh script definition instead of stale meta)
+                    if item.kind == .script,
+                       let script = scriptsByID[item.id],
+                       script.acceptsSelection
+                    {
+                        return !script.inputFilter.matches(selection)
+                    }
+                    
+                    return false
+                }
+
+                results = selectionItems + matching + recents
+            } else {
+                results = selectionItems + recents
+            }
         } else {
             var searchResults = appState.performSearch(query: trimmed, stdinValue: appState.currentSelection)
             // Boost selection-aware items to top when selection exists
