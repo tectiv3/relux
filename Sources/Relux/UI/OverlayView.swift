@@ -625,7 +625,7 @@ struct OverlayView: View {
                 // 1. Find all scripts that match the current selection
                 // We want these at the top, regardless of whether they are in recents or not
                 let matching = appState.scriptSearcher.scripts
-                    .filter { $0.acceptsSelection && $0.inputFilter.matches(selection) }
+                    .filter { $0.inputMode.acceptsInput && $0.inputFilter.matches(selection) }
                     .map { script in
                         SearchItem(
                             id: "script:\(script.id)",
@@ -635,8 +635,9 @@ struct OverlayView: View {
                             kind: .script,
                             meta: [
                                 "command": script.command,
-                                "acceptsSelection": "1",
-                                "outputMode": script.outputMode.rawValue,
+                                "acceptsInput": "1",
+                                "inputMode": script.inputMode.rawValue,
+                                "outputMode": script.outputMode.rawValue
                             ]
                         )
                     }
@@ -652,11 +653,11 @@ struct OverlayView: View {
                     // (Using fresh script definition instead of stale meta)
                     if item.kind == .script,
                        let script = scriptsByID[item.id],
-                       script.acceptsSelection
+                       script.inputMode.acceptsInput
                     {
                         return !script.inputFilter.matches(selection)
                     }
-                    
+
                     return false
                 }
 
@@ -669,10 +670,10 @@ struct OverlayView: View {
             // Boost selection-aware items to top when selection exists
             if appState.currentSelection != nil {
                 let selectionAware = searchResults.filter {
-                    $0.kind == .script && $0.meta["acceptsSelection"] == "1"
+                    $0.kind == .script && $0.meta["acceptsInput"] == "1"
                 }
                 let rest = searchResults.filter {
-                    !($0.kind == .script && $0.meta["acceptsSelection"] == "1")
+                    !($0.kind == .script && $0.meta["acceptsInput"] == "1")
                 }
                 searchResults = selectionAware + rest
             }
@@ -836,15 +837,29 @@ struct OverlayView: View {
         case .translate:
             appState.panelMode = .translate
         case .script:
-            if let command = item.meta["command"] {
-                let acceptsStdin = item.meta["acceptsSelection"] == "1"
-                let stdin: String? = acceptsStdin
+            if var command = item.meta["command"] {
+                let inputMode = InputMode(rawValue: item.meta["inputMode"] ?? "") ?? .none
+                let rawInput: String? = inputMode.acceptsInput
                     ? (query.isEmpty ? (appState.currentSelection ?? item.meta["lastInput"]) : query)
                     : nil
-                // Store input so recents can replay it
-                if let stdin {
-                    item.meta["lastInput"] = stdin
+                if let rawInput {
+                    item.meta["lastInput"] = rawInput
                 }
+
+                // Determine stdin vs argument delivery
+                var stdin: String?
+                if let rawInput {
+                    switch inputMode {
+                    case .stdin:
+                        stdin = rawInput
+                    case .argument:
+                        let escaped = rawInput.replacingOccurrences(of: "'", with: "'\\''")
+                        command += " '\(escaped)'"
+                    case .none:
+                        break
+                    }
+                }
+
                 appState.recordSelection(query: query, item: item)
                 let env = appState.scriptSearcher.buildEnvironment()
                 let outputMode = ScriptOutputMode(rawValue: item.meta["outputMode"] ?? "") ?? .none

@@ -59,12 +59,12 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 
 - On hotkey press, selected text is read from the focused app via Accessibility API (`AXUIElement`) BEFORE Relux takes focus
 - Stored in `AppState.currentSelection`, cleared on panel close
-- Scripts opt in via `acceptsSelection: Bool` — selection is piped as stdin
+- Scripts opt in via `inputMode: InputMode` (.none/.stdin/.argument) — stdin pipes to process, argument appends shell-escaped value to command
 - Web search uses selection as query when search bar is empty
 - Ask AI prepends selection as context to the LLM prompt
 - Bottom bar shows truncated selection preview when captured
 - Requires Accessibility permission (prompted on first launch)
-- Pattern for selection-aware features: any search result item that needs selected text appears only when `currentSelection != nil` (scripts with `acceptsSelection`, translate extension, etc.). The selected text is NOT placed in the search bar — only an indicator is shown. The text is passed to the feature when the user explicitly selects the item.
+- Pattern for selection-aware features: any search result item that needs selected text appears only when `currentSelection != nil` (scripts with `inputMode != .none`, translate extension, etc.). The selected text is NOT placed in the search bar — only an indicator is shown. The text is passed to the feature when the user explicitly selects the item.
 
 ## Capture Output Scripts
 

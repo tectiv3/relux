@@ -17,6 +17,24 @@ enum ScriptOutputMode: String, Codable, CaseIterable, Sendable {
     }
 }
 
+enum InputMode: String, Codable, CaseIterable, Sendable {
+    case none
+    case stdin
+    case argument
+
+    var label: String {
+        switch self {
+        case .none: "None"
+        case .stdin: "Stdin"
+        case .argument: "Argument"
+        }
+    }
+
+    var acceptsInput: Bool {
+        self != .none
+    }
+}
+
 enum InputFilter: Codable, Sendable, Equatable {
     case any
     case integer
@@ -47,7 +65,7 @@ enum InputFilter: Codable, Sendable, Equatable {
         var trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         // Also remove control characters which might break regex
         trimmed = trimmed.trimmingCharacters(in: .controlCharacters)
-        
+
         guard !trimmed.isEmpty else { return false }
         switch self {
         case .any:
@@ -106,27 +124,35 @@ struct ScriptItem: Codable, Identifiable, Sendable {
     let id: String
     var title: String
     var command: String
-    var acceptsSelection: Bool
+    var inputMode: InputMode
     var outputMode: ScriptOutputMode
     var inputFilter: InputFilter
 
-    init(title: String, command: String, acceptsSelection: Bool = false, outputMode: ScriptOutputMode = .none, inputFilter: InputFilter = .any) {
+    init(
+        title: String, command: String, inputMode: InputMode = .none,
+        outputMode: ScriptOutputMode = .none, inputFilter: InputFilter = .any
+    ) {
         id = UUID().uuidString
         self.title = title
         self.command = command
-        self.acceptsSelection = acceptsSelection
+        self.inputMode = inputMode
         self.outputMode = outputMode
         self.inputFilter = inputFilter
     }
 
-    /// Backward-compatible decoding for existing scripts.json lacking new fields
+    /// Backward-compatible decoding for existing scripts.json
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
         command = try container.decode(String.self, forKey: .command)
-        acceptsSelection = try container.decodeIfPresent(Bool.self, forKey: .acceptsSelection) ?? false
-        // Migrate old capturesOutput bool to new outputMode enum
+        // Migrate legacy acceptsSelection bool → inputMode enum
+        if let mode = try container.decodeIfPresent(InputMode.self, forKey: .inputMode) {
+            inputMode = mode
+        } else {
+            let legacy = try container.decodeIfPresent(Bool.self, forKey: .acceptsSelection) ?? false
+            inputMode = legacy ? .stdin : .none
+        }
         if let mode = try container.decodeIfPresent(ScriptOutputMode.self, forKey: .outputMode) {
             outputMode = mode
         } else {
@@ -137,7 +163,7 @@ struct ScriptItem: Codable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, command, acceptsSelection, outputMode, capturesOutput, inputFilter
+        case id, title, command, inputMode, acceptsSelection, outputMode, capturesOutput, inputFilter
     }
 
     func encode(to encoder: Encoder) throws {
@@ -145,7 +171,7 @@ struct ScriptItem: Codable, Identifiable, Sendable {
         try container.encode(id, forKey: .id)
         try container.encode(title, forKey: .title)
         try container.encode(command, forKey: .command)
-        try container.encode(acceptsSelection, forKey: .acceptsSelection)
+        try container.encode(inputMode, forKey: .inputMode)
         try container.encode(outputMode, forKey: .outputMode)
         try container.encode(inputFilter, forKey: .inputFilter)
     }
@@ -184,8 +210,8 @@ final class ScriptSearcher {
 
     // MARK: - Script Mutations
 
-    func add(title: String, command: String, acceptsSelection: Bool = false, outputMode: ScriptOutputMode = .none) {
-        scripts.append(ScriptItem(title: title, command: command, acceptsSelection: acceptsSelection, outputMode: outputMode))
+    func add(title: String, command: String, inputMode: InputMode = .none, outputMode: ScriptOutputMode = .none) {
+        scripts.append(ScriptItem(title: title, command: command, inputMode: inputMode, outputMode: outputMode))
         save()
     }
 
@@ -244,10 +270,9 @@ final class ScriptSearcher {
                 scored.append((script, 60))
             } else if fuzzyMatch(query: q, target: name) {
                 scored.append((script, 40))
-            } else if script.acceptsSelection {
+            } else if script.inputMode.acceptsInput {
                 let effective = stdinValue ?? query
                 if script.inputFilter.matches(effective) {
-                    // Format-matched input is a strong signal
                     let filterScore = script.inputFilter == .any ? 10 : 70
                     scored.append((script, filterScore))
                 }
@@ -256,8 +281,7 @@ final class ScriptSearcher {
 
         scored.sort { $0.score > $1.score }
         return scored.prefix(limit).map { item in
-            // Only advertise acceptsSelection when the filter actually matches
-            let effectivelyAccepts = item.script.acceptsSelection
+            let acceptsInput = item.script.inputMode.acceptsInput
                 && (stdinValue == nil || item.script.inputFilter.matches(stdinValue!))
             return SearchItem(
                 id: "script:\(item.script.id)",
@@ -267,8 +291,9 @@ final class ScriptSearcher {
                 kind: .script,
                 meta: [
                     "command": item.script.command,
-                    "acceptsSelection": effectivelyAccepts ? "1" : "0",
-                    "outputMode": item.script.outputMode.rawValue,
+                    "acceptsInput": acceptsInput ? "1" : "0",
+                    "inputMode": item.script.inputMode.rawValue,
+                    "outputMode": item.script.outputMode.rawValue
                 ]
             )
         }
@@ -285,7 +310,7 @@ final class ScriptSearcher {
         } catch {
             logger.error("Failed to load scripts: \(error)")
         }
-        
+
         do {
             if FileManager.default.fileExists(atPath: envPath.path) {
                 let data = try Data(contentsOf: envPath)

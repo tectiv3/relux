@@ -298,13 +298,13 @@ struct SettingsView: View {
 
     @ViewBuilder
     private func scriptBadges(_ script: ScriptItem) -> some View {
-        if script.acceptsSelection {
-            scriptBadge("stdin")
+        if script.inputMode != .none {
+            scriptBadge(script.inputMode.label.lowercased())
         }
         if script.outputMode != .none {
-            scriptBadge(script.outputMode.label)
+            scriptBadge(script.outputMode.label.lowercased())
         }
-        if script.inputFilter != .any, script.acceptsSelection {
+        if script.inputFilter != .any, script.inputMode.acceptsInput {
             scriptBadge(script.inputFilter.label)
         }
     }
@@ -321,83 +321,114 @@ struct SettingsView: View {
     @ViewBuilder
     private func scriptEditForm() -> some View {
         if editingScript != nil {
-            VStack(alignment: .leading, spacing: 8) {
-                LabeledContent("Title") {
-                    TextField("Script title", text: Binding(
+            VStack(alignment: .leading, spacing: 12) {
+                scriptFieldRow("Title") {
+                    TextField("", text: Binding(
                         get: { editingScript?.title ?? "" },
                         set: { editingScript?.title = $0 }
-                    ))
-                    .textFieldStyle(.roundedBorder)
+                    ), prompt: Text("Script title").foregroundStyle(.tertiary))
+                        .textFieldStyle(.roundedBorder)
                 }
 
-                LabeledContent("Command") {
-                    TextField("Shell command", text: Binding(
+                scriptFieldRow("Command") {
+                    TextField("", text: Binding(
                         get: { editingScript?.command ?? "" },
                         set: { editingScript?.command = $0 }
-                    ))
-                    .font(.system(size: 12, design: .monospaced))
-                    .textFieldStyle(.roundedBorder)
+                    ), prompt: Text("Shell command").foregroundStyle(.tertiary))
+                        .font(.system(size: 12, design: .monospaced))
+                        .textFieldStyle(.roundedBorder)
                 }
 
-                Toggle("Accepts stdin (pass selected text)", isOn: Binding(
-                    get: { editingScript?.acceptsSelection ?? false },
-                    set: { editingScript?.acceptsSelection = $0 }
-                ))
-                .toggleStyle(.checkbox)
+                Divider()
 
-                scriptEditPickers()
+                scriptInputSection()
+
+                Divider()
+
+                scriptOutputSection()
             }
             .padding(.leading, 24)
             .padding(.bottom, 4)
         }
     }
 
-    @ViewBuilder
-    private func scriptEditPickers() -> some View {
-        HStack(spacing: 16) {
-            LabeledContent("Output") {
-                Picker("", selection: Binding(
-                    get: { editingScript?.outputMode ?? .none },
-                    set: { editingScript?.outputMode = $0 }
-                )) {
-                    ForEach(ScriptOutputMode.allCases, id: \.self) { mode in
-                        Text(mode.label).tag(mode)
-                    }
-                }
-                .frame(width: 100)
-            }
+    private func scriptFieldRow(_ label: String, @ViewBuilder content: () -> some View) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .frame(width: 60, alignment: .trailing)
+            content()
+        }
+    }
 
-            if editingScript?.acceptsSelection == true {
-                LabeledContent("Filter") {
-                    Picker("", selection: Binding(
-                        get: { editingScript?.inputFilter.tag ?? "any" },
-                        set: { newValue in
-                            let pattern = editingScript?.inputFilter.regexPattern
-                            editingScript?.inputFilter = InputFilter.fromTag(newValue, existingPattern: pattern)
-                        }
-                    )) {
-                        Text("Any").tag("any")
-                        Text("Integer").tag("integer")
-                        Text("Number").tag("number")
-                        Text("URL").tag("url")
-                        Text("JSON").tag("json")
-                        Text("Date/Time").tag("datetime")
-                        Text("Regex").tag("regex")
+    private func scriptInputSection() -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Input")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+
+            Picker("", selection: Binding(
+                get: { editingScript?.inputMode ?? .none },
+                set: { editingScript?.inputMode = $0 }
+            )) {
+                ForEach(InputMode.allCases, id: \.self) { mode in
+                    Text(mode.label).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 220)
+
+            if editingScript?.inputMode.acceptsInput == true {
+                Picker("Filter", selection: Binding(
+                    get: { editingScript?.inputFilter.tag ?? "any" },
+                    set: { newValue in
+                        let pattern = editingScript?.inputFilter.regexPattern
+                        editingScript?.inputFilter = InputFilter.fromTag(newValue, existingPattern: pattern)
                     }
-                    .frame(width: 100)
+                )) {
+                    Text("Any").tag("any")
+                    Text("Integer").tag("integer")
+                    Text("Number").tag("number")
+                    Text("URL").tag("url")
+                    Text("JSON").tag("json")
+                    Text("Date/Time").tag("datetime")
+                    Text("Regex").tag("regex")
+                }
+                .frame(width: 220)
+
+                if editingScript?.inputFilter.regexPattern != nil {
+                    scriptFieldRow("Pattern") {
+                        TextField("", text: Binding(
+                            get: { editingScript?.inputFilter.regexPattern ?? "" },
+                            set: { editingScript?.inputFilter = .regex($0) }
+                        ), prompt: Text("Regular expression").foregroundStyle(.tertiary))
+                            .font(.system(size: 11, design: .monospaced))
+                            .textFieldStyle(.roundedBorder)
+                    }
                 }
             }
         }
+    }
 
-        if editingScript?.acceptsSelection == true, editingScript?.inputFilter.regexPattern != nil {
-            LabeledContent("Pattern") {
-                TextField("Regular expression", text: Binding(
-                    get: { editingScript?.inputFilter.regexPattern ?? "" },
-                    set: { editingScript?.inputFilter = .regex($0) }
-                ))
-                .font(.system(size: 11, design: .monospaced))
-                .textFieldStyle(.roundedBorder)
+    private func scriptOutputSection() -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Output")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+
+            Picker("", selection: Binding(
+                get: { editingScript?.outputMode ?? .none },
+                set: { editingScript?.outputMode = $0 }
+            )) {
+                ForEach(ScriptOutputMode.allCases, id: \.self) { mode in
+                    Text(mode.label).tag(mode)
+                }
             }
+            .pickerStyle(.segmented)
+            .frame(width: 220)
         }
     }
 
