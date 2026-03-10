@@ -200,12 +200,18 @@ struct SettingsView: View {
                     }
                 }
 
+                // Show draft row for unsaved new script
+                if let draft = editingScript,
+                   !appState.scriptSearcher.scripts.contains(where: { $0.id == draft.id })
+                {
+                    scriptRow(draft)
+                }
+
                 Button {
-                    appState.scriptSearcher.add(title: "", command: "")
-                    if let last = appState.scriptSearcher.scripts.last {
-                        expandedScriptId = last.id
-                        editingScript = last
-                    }
+                    commitEditing()
+                    let draft = ScriptItem(title: "", command: "")
+                    expandedScriptId = draft.id
+                    editingScript = draft
                 } label: {
                     Label("Add Script", systemImage: "plus")
                 }
@@ -263,7 +269,9 @@ struct SettingsView: View {
                 }
 
                 Button(role: .destructive) {
-                    appState.scriptSearcher.remove(id: script.id)
+                    if appState.scriptSearcher.scripts.contains(where: { $0.id == script.id }) {
+                        appState.scriptSearcher.remove(id: script.id)
+                    }
                     if expandedScriptId == script.id {
                         expandedScriptId = nil
                         editingScript = nil
@@ -434,11 +442,13 @@ struct SettingsView: View {
 
     private func commitEditing() {
         guard let editing = editingScript else { return }
-        // Only save if it has meaningful content
+        let exists = appState.scriptSearcher.scripts.contains { $0.id == editing.id }
         if editing.title.isEmpty, editing.command.isEmpty {
-            appState.scriptSearcher.remove(id: editing.id)
-        } else {
+            if exists { appState.scriptSearcher.remove(id: editing.id) }
+        } else if exists {
             appState.scriptSearcher.update(editing)
+        } else {
+            appState.scriptSearcher.insert(editing)
         }
     }
 

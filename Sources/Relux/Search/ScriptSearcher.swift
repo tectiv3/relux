@@ -62,9 +62,8 @@ enum InputFilter: Codable, Sendable, Equatable {
     }
 
     func matches(_ input: String) -> Bool {
-        var trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Also remove control characters which might break regex
-        trimmed = trimmed.trimmingCharacters(in: .controlCharacters)
+        var trimmed = input.trimmingCharacters(in: .controlCharacters)
+        trimmed = trimmed.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !trimmed.isEmpty else { return false }
         switch self {
@@ -90,7 +89,13 @@ enum InputFilter: Codable, Sendable, Equatable {
         case let .regex(pattern):
             guard !pattern.isEmpty,
                   let re = try? NSRegularExpression(pattern: pattern) else { return false }
-            return re.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)) != nil
+            // Limit to first 4 KB to guard against pathological patterns on large input
+            let safe = trimmed.count > 4096 ? String(trimmed.prefix(4096)) : trimmed
+            return re.firstMatch(
+                in: safe,
+                options: .withoutAnchoringBounds,
+                range: NSRange(safe.startIndex..., in: safe)
+            ) != nil
         }
     }
 
@@ -215,6 +220,11 @@ final class ScriptSearcher {
         save()
     }
 
+    func insert(_ item: ScriptItem) {
+        scripts.append(item)
+        save()
+    }
+
     func remove(id: String) {
         scripts.removeAll { $0.id == id }
         save()
@@ -282,7 +292,7 @@ final class ScriptSearcher {
         scored.sort { $0.score > $1.score }
         return scored.prefix(limit).map { item in
             let acceptsInput = item.script.inputMode.acceptsInput
-                && (stdinValue == nil || item.script.inputFilter.matches(stdinValue!))
+                && stdinValue.map { item.script.inputFilter.matches($0) } ?? true
             return SearchItem(
                 id: "script:\(item.script.id)",
                 title: item.script.title,
@@ -293,7 +303,7 @@ final class ScriptSearcher {
                     "command": item.script.command,
                     "acceptsInput": acceptsInput ? "1" : "0",
                     "inputMode": item.script.inputMode.rawValue,
-                    "outputMode": item.script.outputMode.rawValue
+                    "outputMode": item.script.outputMode.rawValue,
                 ]
             )
         }

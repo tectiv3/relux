@@ -4,6 +4,7 @@ import Foundation
 struct AppItem {
     let name: String
     let path: URL
+    let bundleID: String?
 }
 
 @MainActor
@@ -44,8 +45,8 @@ final class AppSearcher {
         startSpotlightQuery()
     }
 
-    // Only watch the two main install targets, not all searchPaths
-    // (system dirs rarely change, and /Applications/Utilities is flat inside /Applications)
+    /// Only watch the two main install targets, not all searchPaths
+    /// (system dirs rarely change, and /Applications/Utilities is flat inside /Applications)
     private func startDirectoryWatchers() {
         stopDirectoryWatchers()
 
@@ -87,13 +88,14 @@ final class AppSearcher {
             options: [.skipsHiddenFiles]
         ) else { return }
 
-        let knownPaths = Set(apps.map { $0.path.path })
+        let knownPaths = Set(apps.map(\.path.path))
         for url in contents where url.pathExtension == "app" {
             let path = url.path
             guard !knownPaths.contains(path) else { continue }
 
             let name = url.deletingPathExtension().lastPathComponent
-            apps.append(AppItem(name: name, path: url))
+            let bundleID = Bundle(url: url)?.bundleIdentifier
+            apps.append(AppItem(name: name, path: url, bundleID: bundleID))
             newlyDetected.insert(path)
         }
     }
@@ -141,14 +143,15 @@ final class AppSearcher {
             let name = item.value(forAttribute: kMDItemDisplayName as String) as? String
                 ?? url.deletingPathExtension().lastPathComponent
             if found[name] == nil {
-                found[name] = AppItem(name: name, path: url)
+                let bundleID = item.value(forAttribute: kMDItemCFBundleIdentifier as String) as? String
+                found[name] = AppItem(name: name, path: url, bundleID: bundleID)
             }
         }
 
         mdQuery.enableUpdates()
 
         // Drain: any app now in Spotlight is no longer "newly detected"
-        let spotlightPaths = Set(found.values.map { $0.path.path })
+        let spotlightPaths = Set(found.values.map(\.path.path))
         newlyDetected.subtract(spotlightPaths)
 
         // Merge: preserve FSEvents-detected apps that Spotlight hasn't indexed yet
@@ -156,7 +159,8 @@ final class AppSearcher {
             let url = URL(fileURLWithPath: path)
             let name = url.deletingPathExtension().lastPathComponent
             if found[name] == nil {
-                found[name] = AppItem(name: name, path: url)
+                let bundleID = Bundle(url: url)?.bundleIdentifier
+                found[name] = AppItem(name: name, path: url, bundleID: bundleID)
             }
         }
 
@@ -194,7 +198,7 @@ final class AppSearcher {
                 subtitle: item.app.path.deletingLastPathComponent().path,
                 icon: "app.dashed",
                 kind: .app,
-                meta: ["path": item.app.path.path],
+                meta: ["path": item.app.path.path, "bundleID": item.app.bundleID ?? ""],
                 isNew: item.isNew
             )
         }

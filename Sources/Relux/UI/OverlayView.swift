@@ -55,6 +55,7 @@ struct OverlayView: View {
     @State private var searchTrigger: UUID = .init()
 
     @State private var streamingTask: Task<Void, Never>?
+    @State private var runningBundleIDs: Set<String> = []
     @FocusState private var isSearchFocused: Bool
 
     private var answer: String {
@@ -353,10 +354,8 @@ struct OverlayView: View {
     private func itemIcon(for item: SearchItem) -> some View {
         if item.kind == .app, let path = item.meta["path"] {
             let nsImage = NSWorkspace.shared.icon(forFile: path)
-            let bundleID = Bundle(path: path)?.bundleIdentifier
-            let isRunning = bundleID.map { id in
-                NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == id }
-            } ?? false
+            let bundleID = item.meta["bundleID"] ?? ""
+            let isRunning = !bundleID.isEmpty && runningBundleIDs.contains(bundleID)
             Image(nsImage: nsImage)
                 .resizable()
                 .frame(width: 24, height: 24)
@@ -611,6 +610,9 @@ struct OverlayView: View {
     // MARK: - Actions
 
     private func performSearch(_ text: String) {
+        runningBundleIDs = Set(
+            NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
+        )
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty {
             let selectionItems = selectionQuickActions()
@@ -637,7 +639,7 @@ struct OverlayView: View {
                                 "command": script.command,
                                 "acceptsInput": "1",
                                 "inputMode": script.inputMode.rawValue,
-                                "outputMode": script.outputMode.rawValue
+                                "outputMode": script.outputMode.rawValue,
                             ]
                         )
                     }
@@ -849,11 +851,12 @@ struct OverlayView: View {
                 // Determine stdin vs argument delivery
                 var stdin: String?
                 if let rawInput {
+                    let sanitized = rawInput.replacingOccurrences(of: "\0", with: "")
                     switch inputMode {
                     case .stdin:
-                        stdin = rawInput
+                        stdin = sanitized
                     case .argument:
-                        let escaped = rawInput.replacingOccurrences(of: "'", with: "'\\''")
+                        let escaped = sanitized.replacingOccurrences(of: "'", with: "'\\''")
                         command += " '\(escaped)'"
                     case .none:
                         break
