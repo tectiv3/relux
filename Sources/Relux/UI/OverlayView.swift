@@ -710,6 +710,10 @@ struct OverlayView: View {
             } else {
                 results.append(webItem)
             }
+
+            // Deduplicate by id, preserving order
+            var seen = Set<String>()
+            results = results.filter { seen.insert($0.id).inserted }
         }
         selectedIndex = 0
         showActions = false
@@ -753,8 +757,9 @@ struct OverlayView: View {
 
     private func openSelectedItem() {
         guard selectedIndex < results.count else { return }
-        let item = results[selectedIndex]
-        if item.kind != .webSearch, item.kind != .calculator, item.kind != .jwt {
+        var item = results[selectedIndex]
+        // Record for frecency (scripts deferred until stdin is computed)
+        if item.kind != .webSearch, item.kind != .calculator, item.kind != .jwt, item.kind != .script {
             appState.recordSelection(query: query, item: item)
         }
         switch item.kind {
@@ -786,7 +791,14 @@ struct OverlayView: View {
         case .script:
             if let command = item.meta["command"] {
                 let acceptsStdin = item.meta["acceptsSelection"] == "1"
-                let stdin: String? = acceptsStdin ? (query.isEmpty ? appState.currentSelection : query) : nil
+                let stdin: String? = acceptsStdin
+                    ? (query.isEmpty ? (appState.currentSelection ?? item.meta["lastInput"]) : query)
+                    : nil
+                // Store input so recents can replay it
+                if let stdin {
+                    item.meta["lastInput"] = stdin
+                }
+                appState.recordSelection(query: query, item: item)
                 let env = appState.scriptSearcher.buildEnvironment()
                 let outputMode = ScriptOutputMode(rawValue: item.meta["outputMode"] ?? "") ?? .none
 

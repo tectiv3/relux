@@ -16,6 +16,6 @@ struct SearchItem: Identifiable, Sendable {
     let subtitle: String
     let icon: String
     let kind: SearchItemKind
-    let meta: [String: String]
+    var meta: [String: String]
     var isNew: Bool = false
 }
