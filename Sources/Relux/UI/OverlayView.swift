@@ -55,7 +55,7 @@ struct OverlayView: View {
     @State private var searchTrigger: UUID = .init()
 
     @State private var streamingTask: Task<Void, Never>?
-    @State private var runningBundleIDs: Set<String> = []
+    @State private var runningAppPaths: Set<String> = []
     @FocusState private var isSearchFocused: Bool
 
     private var answer: String {
@@ -354,17 +354,16 @@ struct OverlayView: View {
     private func itemIcon(for item: SearchItem) -> some View {
         if item.kind == .app, let path = item.meta["path"] {
             let nsImage = NSWorkspace.shared.icon(forFile: path)
-            let bundleID = item.meta["bundleID"] ?? ""
-            let isRunning = !bundleID.isEmpty && runningBundleIDs.contains(bundleID)
+            let isRunning = runningAppPaths.contains(path)
             Image(nsImage: nsImage)
                 .resizable()
                 .frame(width: 24, height: 24)
-                .overlay(alignment: .bottomLeading) {
+                .overlay(alignment: .bottom) {
                     if isRunning {
                         Circle()
-                            .fill(Color.accentColor)
+                            .fill(.white.opacity(0.5))
                             .frame(width: 6, height: 6)
-                            .offset(x: -2, y: 2)
+                            .offset(y: 4)
                     }
                 }
         } else {
@@ -610,8 +609,8 @@ struct OverlayView: View {
     // MARK: - Actions
 
     private func performSearch(_ text: String) {
-        runningBundleIDs = Set(
-            NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
+        runningAppPaths = Set(
+            NSWorkspace.shared.runningApplications.compactMap { $0.bundleURL?.path }
         )
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty {
