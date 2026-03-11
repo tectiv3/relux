@@ -272,11 +272,6 @@ struct OverlayView: View {
     // MARK: - Results Section
 
     private var groupedResults: [(label: String, items: [(index: Int, item: SearchItem)])] {
-        let isQueryEmpty = query.trimmingCharacters(in: .whitespaces).isEmpty
-        if isQueryEmpty {
-            return [("Recent", Array(results.enumerated().map { ($0.offset, $0.element) }))]
-        }
-
         var sectionOrder: [SearchItemKind] = []
         var sectionItems: [SearchItemKind: [(index: Int, item: SearchItem)]] = [:]
 
@@ -658,9 +653,9 @@ struct OverlayView: View {
                     return false
                 }
 
-                results = matching + selectionItems + recents
+                results = groupByKind(matching + selectionItems + recents)
             } else {
-                results = selectionItems + recents
+                results = groupByKind(selectionItems + recents)
             }
         } else {
             results = appState.performSearch(query: trimmed, stdinValue: appState.currentSelection)
@@ -668,9 +663,24 @@ struct OverlayView: View {
             // Deduplicate by id, preserving order
             var seen = Set<String>()
             results = results.filter { seen.insert($0.id).inserted }
+
+            // Group by kind so display order matches navigation order
+            results = groupByKind(results)
         }
         selectedIndex = 0
         showActions = false
+    }
+
+    private func groupByKind(_ items: [SearchItem]) -> [SearchItem] {
+        var kindOrder: [SearchItemKind] = []
+        var buckets: [SearchItemKind: [SearchItem]] = [:]
+        for item in items {
+            if buckets[item.kind] == nil {
+                kindOrder.append(item.kind)
+            }
+            buckets[item.kind, default: []].append(item)
+        }
+        return kindOrder.flatMap { buckets[$0] ?? [] }
     }
 
     private func kindLabel(for item: SearchItem) -> String {
