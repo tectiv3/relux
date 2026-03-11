@@ -15,11 +15,30 @@ A macOS menu-bar utility that puts app launching, clipboard history, translation
   </tr>
   <tr>
     <td><img src="docs/screenshots/clipboard_history.png" alt="Clipboard history" width="400"></td>
-    <td><img src="docs/screenshots/settings.png" alt="Settings" width="400"></td>
+    <td></td>
   </tr>
   <tr>
     <td align="center"><em>Clipboard history</em></td>
-    <td align="center"><em>Settings</em></td>
+    <td></td>
+  </tr>
+  <tr>
+    <th colspan="2">Settings</th>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/general.png" alt="General settings" width="400"></td>
+    <td><img src="docs/screenshots/scripts.png" alt="Scripts settings" width="400"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>General</em></td>
+    <td align="center"><em>Scripts</em></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/clipboard.png" alt="Clipboard settings" width="400"></td>
+    <td><img src="docs/screenshots/translate.png" alt="Translate settings" width="400"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Clipboard</em></td>
+    <td align="center"><em>Translate</em></td>
   </tr>
 </table>
 
