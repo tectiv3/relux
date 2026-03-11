@@ -173,20 +173,18 @@ final class AppSearcher {
         guard !query.isEmpty else { return [] }
         let lowercasedQuery = query.lowercased()
 
-        var scored: [(app: AppItem, score: Int, isNew: Bool)] = []
-        let boost = 20
+        var scored: [(app: AppItem, score: Double)] = []
         for app in apps {
             let name = app.name.lowercased()
-            let isNew = newlyDetected.contains(app.path.path)
-            let bonus = isNew ? boost : 0
+            let bonus: Double = newlyDetected.contains(app.path.path) ? 50 : 0
             if name == lowercasedQuery {
-                scored.append((app, 100 + bonus, isNew))
+                scored.append((app, 950 + bonus))
             } else if name.hasPrefix(lowercasedQuery) {
-                scored.append((app, 80 + bonus, isNew))
+                scored.append((app, 800 + bonus))
             } else if name.contains(lowercasedQuery) {
-                scored.append((app, 60 + bonus, isNew))
+                scored.append((app, 600 + bonus))
             } else if fuzzyMatch(query: lowercasedQuery, target: name) {
-                scored.append((app, 40 + bonus, isNew))
+                scored.append((app, 350 + bonus))
             }
         }
 
@@ -199,7 +197,8 @@ final class AppSearcher {
                 icon: "app.dashed",
                 kind: .app,
                 meta: ["path": item.app.path.path, "bundleID": item.app.bundleID ?? ""],
-                isNew: item.isNew
+                isNew: newlyDetected.contains(item.app.path.path),
+                score: item.score
             )
         }
     }

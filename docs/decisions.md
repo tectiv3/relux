@@ -158,3 +158,15 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - `Toast` enum in `Sources/Relux/UI/Toast.swift` provides app-wide floating toast notifications
 - Extracted from ScriptRunner's private implementation so other features (JWT validation, script errors) can reuse it
 - Static `show(_:icon:)` method creates a borderless `NSPanel` positioned at top-center of the active screen
+
+## Unified Score-Based Search Ranking
+
+- `SearchItem` carries a `score: Double` field populated by every searcher and synthetic item generator
+- All searchers (AppSearcher, ScriptSearcher, SystemSettingsSearcher) produce scores on a shared global scale (0-1050)
+- Synthetic items (calculator, JWT, translate, web search) are created in `AppState.syntheticItems()` with explicit scores
+- `AppState.performSearch` merges all sources, applies frecency boost additively to ALL item kinds, sorts by score descending, then truncates
+- No positional manipulation in OverlayView — the view receives a pre-ranked list and renders it
+- Frecency applies to apps, scripts, AND settings (previously settings were excluded)
+- Selection-aware script bonus: +200 to base score (replaces unconditional prepend)
+- Score bands: calculator 1050, JWT keyword 1000, apps exact 950, scripts exact 930, settings exact 850, web search fallback 200
+- See `docs/plans/2026-03-11-unified-search-scoring.md` for full scoring contract

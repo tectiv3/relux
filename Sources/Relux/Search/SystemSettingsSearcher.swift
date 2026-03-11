@@ -154,19 +154,19 @@ final class SystemSettingsSearcher {
         guard !query.isEmpty else { return [] }
         let lowercasedQuery = query.lowercased()
 
-        var scored: [(pane: SettingsPane, score: Int)] = []
+        var scored: [(pane: SettingsPane, score: Double)] = []
         for pane in Self.panes {
             let name = pane.name.lowercased()
             if name == lowercasedQuery {
-                scored.append((pane, 100))
+                scored.append((pane, 850))
             } else if name.hasPrefix(lowercasedQuery) {
-                scored.append((pane, 80))
+                scored.append((pane, 750))
             } else if name.contains(lowercasedQuery) {
-                scored.append((pane, 60))
+                scored.append((pane, 550))
             } else if pane.keywords.contains(where: { $0.hasPrefix(lowercasedQuery) }) {
-                scored.append((pane, 70))
+                scored.append((pane, 700))
             } else if pane.keywords.contains(where: { $0.contains(lowercasedQuery) }) {
-                scored.append((pane, 50))
+                scored.append((pane, 450))
             }
         }
 
@@ -178,7 +178,8 @@ final class SystemSettingsSearcher {
                 subtitle: "System Settings",
                 icon: "gear",
                 kind: .systemSettings,
-                meta: ["url": item.pane.url]
+                meta: ["url": item.pane.url],
+                score: item.score
             )
         }
     }

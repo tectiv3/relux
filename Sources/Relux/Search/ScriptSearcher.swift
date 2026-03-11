@@ -270,21 +270,21 @@ final class ScriptSearcher {
         guard !query.isEmpty else { return [] }
         let lowercasedQuery = query.lowercased()
 
-        var scored: [(script: ScriptItem, score: Int)] = []
+        var scored: [(script: ScriptItem, score: Double)] = []
         for script in scripts {
             let name = script.title.lowercased()
             if name == lowercasedQuery {
-                scored.append((script, 100))
+                scored.append((script, 930))
             } else if name.hasPrefix(lowercasedQuery) {
-                scored.append((script, 80))
+                scored.append((script, 780))
             } else if name.contains(lowercasedQuery) {
-                scored.append((script, 60))
+                scored.append((script, 580))
             } else if fuzzyMatch(query: lowercasedQuery, target: name) {
-                scored.append((script, 40))
+                scored.append((script, 330))
             } else if script.inputMode.acceptsInput {
                 let effective = stdinValue ?? query
                 if script.inputFilter.matches(effective) {
-                    let filterScore = script.inputFilter == .any ? 10 : 70
+                    let filterScore: Double = script.inputFilter == .any ? 100 : 700
                     scored.append((script, filterScore))
                 }
             }
@@ -305,7 +305,8 @@ final class ScriptSearcher {
                     "acceptsInput": acceptsInput ? "1" : "0",
                     "inputMode": item.script.inputMode.rawValue,
                     "outputMode": item.script.outputMode.rawValue,
-                ]
+                ],
+                score: item.score
             )
         }
     }
