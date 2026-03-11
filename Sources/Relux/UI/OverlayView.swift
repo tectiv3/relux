@@ -277,24 +277,20 @@ struct OverlayView: View {
             return [("Recent", Array(results.enumerated().map { ($0.offset, $0.element) }))]
         }
 
-        var sections: [(label: String, items: [(index: Int, item: SearchItem)])] = []
-        var currentKind: SearchItemKind?
-        var currentItems: [(index: Int, item: SearchItem)] = []
+        var sectionOrder: [SearchItemKind] = []
+        var sectionItems: [SearchItemKind: [(index: Int, item: SearchItem)]] = [:]
 
         for (index, item) in results.enumerated() {
-            if item.kind != currentKind {
-                if !currentItems.isEmpty, let kind = currentKind {
-                    sections.append((sectionLabel(for: kind), currentItems))
-                }
-                currentKind = item.kind
-                currentItems = []
+            if sectionItems[item.kind] == nil {
+                sectionOrder.append(item.kind)
             }
-            currentItems.append((index, item))
+            sectionItems[item.kind, default: []].append((index, item))
         }
-        if !currentItems.isEmpty, let kind = currentKind {
-            sections.append((sectionLabel(for: kind), currentItems))
+
+        return sectionOrder.compactMap { kind in
+            guard let items = sectionItems[kind] else { return nil }
+            return (sectionLabel(for: kind), items)
         }
-        return sections
     }
 
     private func sectionLabel(for kind: SearchItemKind) -> String {
