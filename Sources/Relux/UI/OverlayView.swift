@@ -272,29 +272,20 @@ struct OverlayView: View {
     // MARK: - Results Section
 
     private var groupedResults: [(label: String, items: [(index: Int, item: SearchItem)])] {
-        let isQueryEmpty = query.trimmingCharacters(in: .whitespaces).isEmpty
-        if isQueryEmpty {
-            return [("Recent", Array(results.enumerated().map { ($0.offset, $0.element) }))]
-        }
-
-        var sections: [(label: String, items: [(index: Int, item: SearchItem)])] = []
-        var currentKind: SearchItemKind?
-        var currentItems: [(index: Int, item: SearchItem)] = []
+        var sectionOrder: [SearchItemKind] = []
+        var sectionItems: [SearchItemKind: [(index: Int, item: SearchItem)]] = [:]
 
         for (index, item) in results.enumerated() {
-            if item.kind != currentKind {
-                if !currentItems.isEmpty, let kind = currentKind {
-                    sections.append((sectionLabel(for: kind), currentItems))
-                }
-                currentKind = item.kind
-                currentItems = []
+            if sectionItems[item.kind] == nil {
+                sectionOrder.append(item.kind)
             }
-            currentItems.append((index, item))
+            sectionItems[item.kind, default: []].append((index, item))
         }
-        if !currentItems.isEmpty, let kind = currentKind {
-            sections.append((sectionLabel(for: kind), currentItems))
+
+        return sectionOrder.compactMap { kind in
+            guard let items = sectionItems[kind] else { return nil }
+            return (sectionLabel(for: kind), items)
         }
-        return sections
     }
 
     private func sectionLabel(for kind: SearchItemKind) -> String {
@@ -662,9 +653,9 @@ struct OverlayView: View {
                     return false
                 }
 
-                results = matching + selectionItems + recents
+                results = groupByKind(matching + selectionItems + recents)
             } else {
-                results = selectionItems + recents
+                results = groupByKind(selectionItems + recents)
             }
         } else {
             results = appState.performSearch(query: trimmed, stdinValue: appState.currentSelection)
@@ -672,9 +663,24 @@ struct OverlayView: View {
             // Deduplicate by id, preserving order
             var seen = Set<String>()
             results = results.filter { seen.insert($0.id).inserted }
+
+            // Group by kind so display order matches navigation order
+            results = groupByKind(results)
         }
         selectedIndex = 0
         showActions = false
+    }
+
+    private func groupByKind(_ items: [SearchItem]) -> [SearchItem] {
+        var kindOrder: [SearchItemKind] = []
+        var buckets: [SearchItemKind: [SearchItem]] = [:]
+        for item in items {
+            if buckets[item.kind] == nil {
+                kindOrder.append(item.kind)
+            }
+            buckets[item.kind, default: []].append(item)
+        }
+        return kindOrder.flatMap { buckets[$0] ?? [] }
     }
 
     private func kindLabel(for item: SearchItem) -> String {
