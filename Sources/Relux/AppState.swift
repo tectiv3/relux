@@ -77,15 +77,106 @@ final class AppState {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
 
         let limit = maxSearchResults
-        var appResults = appSearcher.search(query, limit: limit)
-        var scriptResults = scriptSearcher.search(query, limit: limit, stdinValue: stdinValue)
-        let settingsResults = systemSettingsSearcher.search(query, limit: limit)
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
 
-        let term = query
-        appResults.sort { frecency.boost(query: term, itemId: $0.id) > frecency.boost(query: term, itemId: $1.id) }
-        scriptResults.sort { frecency.boost(query: term, itemId: $0.id) > frecency.boost(query: term, itemId: $1.id) }
+        var all: [SearchItem] = []
+        all += appSearcher.search(trimmed, limit: limit)
+        all += scriptSearcher.search(trimmed, limit: limit, stdinValue: stdinValue)
+        all += systemSettingsSearcher.search(trimmed, limit: limit)
+        all += syntheticItems(query: trimmed, selection: stdinValue)
 
-        return Array((appResults + settingsResults + scriptResults).prefix(limit))
+        // Selection-aware script bonus
+        if stdinValue != nil {
+            for idx in all.indices where all[idx].kind == .script && all[idx].meta["acceptsInput"] == "1" {
+                all[idx].score += 200
+            }
+        }
+
+        // Frecency boost applied to ALL items
+        for idx in all.indices {
+            all[idx].score += frecency.boost(query: trimmed, itemId: all[idx].id)
+        }
+
+        all.sort { $0.score > $1.score }
+        return Array(all.prefix(limit))
+    }
+
+    private func syntheticItems(query: String, selection: String?) -> [SearchItem] {
+        var items: [SearchItem] = []
+
+        if let calc = calculatorItem(query: query) { items.append(calc) }
+        if let jwt = jwtItem(query: query, selection: selection) { items.append(jwt) }
+        if let trans = translateItem(selection: selection) { items.append(trans) }
+        items.append(webSearchItem(query: query))
+
+        return items
+    }
+
+    private func calculatorItem(query: String) -> SearchItem? {
+        guard extensionRegistry.isReady("calculator"),
+              let calcResult = calculatorService.evaluate(query) else { return nil }
+        return SearchItem(
+            id: "calculator-result",
+            title: calcResult.expression,
+            subtitle: calcResult.answer,
+            icon: "equal.circle",
+            kind: .calculator,
+            meta: [
+                "expression": calcResult.expression,
+                "answer": calcResult.answer,
+                "isCurrency": calcResult.isCurrency ? "1" : "0",
+                "sourceCurrency": calcResult.sourceCurrency ?? "",
+                "targetCurrency": calcResult.targetCurrency ?? "",
+                "lastUpdated": calcResult.lastUpdated.map { String($0.timeIntervalSince1970) } ?? "",
+            ],
+            score: 1050
+        )
+    }
+
+    private func jwtItem(query: String, selection: String?) -> SearchItem? {
+        guard extensionRegistry.isReady("jwt") else { return nil }
+        let isJWTKeyword = query.lowercased().contains("jwt")
+        let isJWTContent = query.split(separator: ".").count >= 2 && query.count > 20
+        let selectionIsJWT = (selection?.split(separator: ".").count ?? 0) >= 2
+            && (selection?.count ?? 0) > 20
+        guard isJWTKeyword || isJWTContent || selectionIsJWT else { return nil }
+        return SearchItem(
+            id: "jwt-decoder",
+            title: "JWT Decoder",
+            subtitle: "Decode and inspect JSON Web Token",
+            icon: "key.viewfinder",
+            kind: .jwt,
+            meta: [:],
+            score: isJWTKeyword ? 1000 : 900
+        )
+    }
+
+    private func translateItem(selection: String?) -> SearchItem? {
+        guard extensionRegistry.isReady("translate"), let sel = selection else { return nil }
+        return SearchItem(
+            id: "translate-selection",
+            title: "Translate",
+            subtitle: String(sel.prefix(80)),
+            icon: "character.book.closed",
+            kind: .translate,
+            meta: [:],
+            score: 800
+        )
+    }
+
+    private func webSearchItem(query: String) -> SearchItem {
+        let isURL = query.hasPrefix("http://") || query.hasPrefix("https://")
+            || query.range(of: #"^[a-zA-Z0-9\-]+\.[a-zA-Z]{2,}"#, options: .regularExpression) != nil
+        if isURL {
+            return SearchItem(
+                id: "web-open-url", title: "Open URL", subtitle: query,
+                icon: "link", kind: .webSearch, meta: ["url": query], score: 500
+            )
+        }
+        return SearchItem(
+            id: "web-search-ddg", title: "Search DuckDuckGo", subtitle: query,
+            icon: "magnifyingglass", kind: .webSearch, meta: ["query": query], score: 200
+        )
     }
 
     func recordSelection(query: String, item: SearchItem) {

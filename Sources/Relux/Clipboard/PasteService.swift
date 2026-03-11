@@ -8,13 +8,13 @@ enum PasteService {
     /// Put text on clipboard and paste into the focused app
     @MainActor
     static func pasteText(_ text: String, asRichText rtfData: Data? = nil, monitor: ClipboardMonitor?) {
-        let pb = NSPasteboard.general
+        let pasteboard = NSPasteboard.general
         monitor?.suppressNextCapture = true
-        pb.clearContents()
+        pasteboard.clearContents()
         if let rtfData {
-            pb.setData(rtfData, forType: .rtf)
+            pasteboard.setData(rtfData, forType: .rtf)
         }
-        pb.setString(text, forType: .string)
+        pasteboard.setString(text, forType: .string)
         sendPaste()
     }
 
@@ -22,23 +22,23 @@ enum PasteService {
     @MainActor
     static func pasteImage(at path: URL, monitor: ClipboardMonitor?) {
         guard let image = NSImage(contentsOf: path) else { return }
-        let pb = NSPasteboard.general
+        let pasteboard = NSPasteboard.general
         monitor?.suppressNextCapture = true
-        pb.clearContents()
-        pb.writeObjects([image])
+        pasteboard.clearContents()
+        pasteboard.writeObjects([image])
         sendPaste()
     }
 
     /// Copy text to clipboard without pasting
     @MainActor
     static func copyToClipboard(_ text: String, asRichText rtfData: Data? = nil, monitor: ClipboardMonitor?) {
-        let pb = NSPasteboard.general
+        let pasteboard = NSPasteboard.general
         monitor?.suppressNextCapture = true
-        pb.clearContents()
+        pasteboard.clearContents()
         if let rtfData {
-            pb.setData(rtfData, forType: .rtf)
+            pasteboard.setData(rtfData, forType: .rtf)
         }
-        pb.setString(text, forType: .string)
+        pasteboard.setString(text, forType: .string)
     }
 
     @MainActor

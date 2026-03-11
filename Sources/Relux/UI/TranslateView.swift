@@ -484,7 +484,10 @@ struct TranslateView: View {
         let model = appState.anthropicService.model
 
         if let store = appState.translateStore,
-           let id = try? store.insert(sourceText: text, translatedText: "", sourceLang: nil, targetLang: lang, model: model)
+           let id = try? store.insert(
+               sourceText: text, translatedText: "",
+               sourceLang: nil, targetLang: lang, model: model
+           )
         {
             activeEntryId = id
         }
@@ -518,7 +521,10 @@ struct TranslateView: View {
 
         streamingTask = Task { @MainActor in
             var full = ""
-            for await chunk in appState.anthropicService.translate(text: entry.sourceText, targetLanguage: entry.targetLang) {
+            for await chunk in appState.anthropicService.translate(
+                text: entry.sourceText,
+                targetLanguage: entry.targetLang
+            ) {
                 full += chunk
                 streamedText = full
             }

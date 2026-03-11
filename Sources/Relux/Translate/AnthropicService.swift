@@ -91,7 +91,9 @@ final class AnthropicService {
                         return
                     }
 
-                    let resolvedPrompt = systemPrompt.replacingOccurrences(of: "{target_language}", with: targetLanguage)
+                    let resolvedPrompt = systemPrompt.replacingOccurrences(
+                        of: "{target_language}", with: targetLanguage
+                    )
 
                     let url = URL(string: "https://api.anthropic.com/v1/messages")!
                     var request = URLRequest(url: url)

@@ -18,4 +18,5 @@ struct SearchItem: Identifiable, Sendable {
     let kind: SearchItemKind
     var meta: [String: String]
     var isNew: Bool = false
+    var score: Double = 0
 }

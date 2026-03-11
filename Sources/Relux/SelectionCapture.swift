@@ -7,27 +7,39 @@ enum SelectionCapture {
         let systemWide = AXUIElementCreateSystemWide()
 
         var focusedApp: AnyObject?
-        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &focusedApp) == .success else {
-            return nil
-        }
+        let appResult = AXUIElementCopyAttributeValue(
+            systemWide,
+            kAXFocusedApplicationAttribute as CFString,
+            &focusedApp
+        )
+        guard appResult == .success else { return nil }
+
+        // swiftlint:disable:next force_cast
+        let appElement = focusedApp as! AXUIElement
 
         var focusedElement: AnyObject?
-        guard AXUIElementCopyAttributeValue(focusedApp as! AXUIElement, kAXFocusedUIElementAttribute as CFString, &focusedElement) == .success else {
-            return nil
-        }
+        let elemResult = AXUIElementCopyAttributeValue(
+            appElement,
+            kAXFocusedUIElementAttribute as CFString,
+            &focusedElement
+        )
+        guard elemResult == .success else { return nil }
+        // swiftlint:disable:next force_cast
         let element = focusedElement as! AXUIElement
 
         // Standard path — works for most native apps
         var selectedText: AnyObject?
         if AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selectedText) == .success,
            let text = selectedText as? String,
-           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
             return text
         }
 
         // Text marker path — WebKit views (Safari, Orion) use markers instead
         if let text = selectedTextViaMarkers(from: element),
-           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
             return text
         }
 
@@ -65,12 +77,18 @@ enum SelectionCapture {
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
 
         var focusedElement: AnyObject?
-        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElement) == .success else {
-            return false
-        }
+        let result = AXUIElementCopyAttributeValue(
+            appElement,
+            kAXFocusedUIElementAttribute as CFString,
+            &focusedElement
+        )
+        guard result == .success else { return false }
+
+        // swiftlint:disable:next force_cast
+        let element = focusedElement as! AXUIElement
 
         return AXUIElementSetAttributeValue(
-            focusedElement as! AXUIElement,
+            element,
             kAXSelectedTextAttribute as CFString,
             replacement as CFString
         ) == .success

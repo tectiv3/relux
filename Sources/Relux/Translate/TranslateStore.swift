@@ -17,16 +17,17 @@ struct TranslationEntry: Identifiable, Sendable {
 
     static func hash(source: String, target: String) -> String {
         let input = "\(source)\n\(target)"
-        var h: UInt64 = 5381
+        var hashValue: UInt64 = 5381
         for byte in input.utf8 {
-            h = 127 &* h &+ UInt64(byte)
+            hashValue = 127 &* hashValue &+ UInt64(byte)
         }
-        return String(h, radix: 36)
+        return String(hashValue, radix: 36)
     }
 }
 
 @MainActor
 final class TranslateStore {
+    // swiftlint:disable:next identifier_name
     private nonisolated(unsafe) var db: OpaquePointer?
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 

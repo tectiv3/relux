@@ -52,11 +52,11 @@ final class AppSearcher {
 
         let watchPaths = ["/Applications", NSHomeDirectory() + "/Applications"]
         for dirPath in watchPaths {
-            let fd = open(dirPath, O_EVTONLY)
-            guard fd >= 0 else { continue }
+            let fileDescriptor = open(dirPath, O_EVTONLY)
+            guard fileDescriptor >= 0 else { continue }
 
             let source = DispatchSource.makeFileSystemObjectSource(
-                fileDescriptor: fd,
+                fileDescriptor: fileDescriptor,
                 eventMask: .write,
                 queue: .main
             )
@@ -66,7 +66,7 @@ final class AppSearcher {
                 }
             }
             source.setCancelHandler {
-                close(fd)
+                close(fileDescriptor)
             }
             source.resume()
             watchSources.append(source)
@@ -134,8 +134,8 @@ final class AppSearcher {
         mdQuery.disableUpdates()
 
         var found: [String: AppItem] = [:]
-        for i in 0 ..< mdQuery.resultCount {
-            guard let item = mdQuery.result(at: i) as? NSMetadataItem,
+        for index in 0 ..< mdQuery.resultCount {
+            guard let item = mdQuery.result(at: index) as? NSMetadataItem,
                   let path = item.value(forAttribute: kMDItemPath as String) as? String
             else { continue }
 
@@ -171,22 +171,20 @@ final class AppSearcher {
 
     func search(_ query: String, limit: Int = 5) -> [SearchItem] {
         guard !query.isEmpty else { return [] }
-        let q = query.lowercased()
+        let lowercasedQuery = query.lowercased()
 
-        var scored: [(app: AppItem, score: Int, isNew: Bool)] = []
-        let boost = 20
+        var scored: [(app: AppItem, score: Double)] = []
         for app in apps {
             let name = app.name.lowercased()
-            let isNew = newlyDetected.contains(app.path.path)
-            let b = isNew ? boost : 0
-            if name == q {
-                scored.append((app, 100 + b, isNew))
-            } else if name.hasPrefix(q) {
-                scored.append((app, 80 + b, isNew))
-            } else if name.contains(q) {
-                scored.append((app, 60 + b, isNew))
-            } else if fuzzyMatch(query: q, target: name) {
-                scored.append((app, 40 + b, isNew))
+            let bonus: Double = newlyDetected.contains(app.path.path) ? 50 : 0
+            if name == lowercasedQuery {
+                scored.append((app, 950 + bonus))
+            } else if name.hasPrefix(lowercasedQuery) {
+                scored.append((app, 800 + bonus))
+            } else if name.contains(lowercasedQuery) {
+                scored.append((app, 600 + bonus))
+            } else if fuzzyMatch(query: lowercasedQuery, target: name) {
+                scored.append((app, 350 + bonus))
             }
         }
 
@@ -199,15 +197,16 @@ final class AppSearcher {
                 icon: "app.dashed",
                 kind: .app,
                 meta: ["path": item.app.path.path, "bundleID": item.app.bundleID ?? ""],
-                isNew: item.isNew
+                isNew: newlyDetected.contains(item.app.path.path),
+                score: item.score
             )
         }
     }
 
     private func fuzzyMatch(query: String, target: String) -> Bool {
         var targetIdx = target.startIndex
-        for ch in query {
-            guard let found = target[targetIdx...].firstIndex(of: ch) else { return false }
+        for char in query {
+            guard let found = target[targetIdx...].firstIndex(of: char) else { return false }
             targetIdx = target.index(after: found)
         }
         return true

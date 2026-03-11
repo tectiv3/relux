@@ -24,13 +24,14 @@ targets:
         INFOPLIST_FILE: Sources/Relux/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.relux.app
         PRODUCT_NAME: Relux
-        MARKETING_VERSION: "1.8.0"
+        MARKETING_VERSION: "1.11.0"
         CURRENT_PROJECT_VERSION: 1
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGN_STYLE: Manual
         SWIFT_VERSION: "6.0"
         SWIFT_INSTALL_OBJC_HEADER: "NO"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
     entitlements:
       path: Sources/Relux/Relux.entitlements
       properties:

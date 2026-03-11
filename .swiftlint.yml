@@ -1,0 +1,7 @@
+excluded:
+  - .build
+  - Package.swift
+
+disabled_rules:
+  - opening_brace
+  - trailing_comma

@@ -55,7 +55,7 @@ struct OverlayView: View {
     @State private var searchTrigger: UUID = .init()
 
     @State private var streamingTask: Task<Void, Never>?
-    @State private var runningBundleIDs: Set<String> = []
+    @State private var runningAppPaths: Set<String> = []
     @FocusState private var isSearchFocused: Bool
 
     private var answer: String {
@@ -354,17 +354,16 @@ struct OverlayView: View {
     private func itemIcon(for item: SearchItem) -> some View {
         if item.kind == .app, let path = item.meta["path"] {
             let nsImage = NSWorkspace.shared.icon(forFile: path)
-            let bundleID = item.meta["bundleID"] ?? ""
-            let isRunning = !bundleID.isEmpty && runningBundleIDs.contains(bundleID)
+            let isRunning = runningAppPaths.contains(path)
             Image(nsImage: nsImage)
                 .resizable()
                 .frame(width: 24, height: 24)
-                .overlay(alignment: .bottomLeading) {
+                .overlay(alignment: .bottom) {
                     if isRunning {
                         Circle()
-                            .fill(Color.accentColor)
+                            .fill(.white.opacity(0.5))
                             .frame(width: 6, height: 6)
-                            .offset(x: -2, y: 2)
+                            .offset(y: 4)
                     }
                 }
         } else {
@@ -610,8 +609,8 @@ struct OverlayView: View {
     // MARK: - Actions
 
     private func performSearch(_ text: String) {
-        runningBundleIDs = Set(
-            NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
+        runningAppPaths = Set(
+            NSWorkspace.shared.runningApplications.compactMap { $0.bundleURL?.path }
         )
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty {
@@ -668,98 +667,7 @@ struct OverlayView: View {
                 results = selectionItems + recents
             }
         } else {
-            var searchResults = appState.performSearch(query: trimmed, stdinValue: appState.currentSelection)
-            // Boost selection-aware items to top when selection exists
-            if appState.currentSelection != nil {
-                let selectionAware = searchResults.filter {
-                    $0.kind == .script && $0.meta["acceptsInput"] == "1"
-                }
-                let rest = searchResults.filter {
-                    !($0.kind == .script && $0.meta["acceptsInput"] == "1")
-                }
-                searchResults = selectionAware + rest
-            }
-            results = searchResults
-
-            // JWT Decoder
-            let lower = trimmed.lowercased()
-            let isJWTKeyword = lower.contains("jwt")
-            let isJWTContent = trimmed.split(separator: ".").count >= 2 && trimmed.count > 20
-            let selectionIsJWT = (appState.currentSelection?.split(separator: ".").count ?? 0) >= 2
-                && (appState.currentSelection?.count ?? 0) > 20
-
-            if appState.extensionRegistry.isReady("jwt"), isJWTKeyword || isJWTContent || selectionIsJWT {
-                results.insert(SearchItem(
-                    id: "jwt-decoder",
-                    title: "JWT Decoder",
-                    subtitle: "Decode and inspect JSON Web Token",
-                    icon: "key.viewfinder",
-                    kind: .jwt,
-                    meta: [:]
-                ), at: 0)
-            }
-
-            // Calculator: evaluate math or currency
-            if appState.extensionRegistry.isReady("calculator"),
-               let calcResult = appState.calculatorService.evaluate(trimmed)
-            {
-                let meta: [String: String] = [
-                    "expression": calcResult.expression,
-                    "answer": calcResult.answer,
-                    "isCurrency": calcResult.isCurrency ? "1" : "0",
-                    "sourceCurrency": calcResult.sourceCurrency ?? "",
-                    "targetCurrency": calcResult.targetCurrency ?? "",
-                    "lastUpdated": calcResult.lastUpdated.map { String($0.timeIntervalSince1970) } ?? "",
-                ]
-                results.insert(SearchItem(
-                    id: "calculator-result",
-                    title: calcResult.expression,
-                    subtitle: calcResult.answer,
-                    icon: "equal.circle",
-                    kind: .calculator,
-                    meta: meta
-                ), at: 0)
-            }
-
-            if appState.extensionRegistry.isReady("translate"), let selection = appState.currentSelection {
-                let preview = String(selection.prefix(80))
-                results.insert(SearchItem(
-                    id: "translate-selection",
-                    title: "Translate",
-                    subtitle: preview,
-                    icon: "character.book.closed",
-                    kind: .translate,
-                    meta: [:]
-                ), at: 0)
-            }
-
-            let isURL = trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://")
-                || trimmed.range(of: #"^[a-zA-Z0-9\-]+\.[a-zA-Z]{2,}"#, options: .regularExpression) != nil
-            let webItem = if isURL {
-                SearchItem(
-                    id: "web-open-url",
-                    title: "Open URL",
-                    subtitle: trimmed,
-                    icon: "link",
-                    kind: .webSearch,
-                    meta: ["url": trimmed]
-                )
-            } else {
-                SearchItem(
-                    id: "web-search-ddg",
-                    title: "Search DuckDuckGo",
-                    subtitle: trimmed,
-                    icon: "magnifyingglass",
-                    kind: .webSearch,
-                    meta: ["query": trimmed]
-                )
-            }
-            // Insert web search before scripts
-            if let firstScript = results.firstIndex(where: { $0.kind == .script }) {
-                results.insert(webItem, at: firstScript)
-            } else {
-                results.append(webItem)
-            }
+            results = appState.performSearch(query: trimmed, stdinValue: appState.currentSelection)
 
             // Deduplicate by id, preserving order
             var seen = Set<String>()
@@ -828,10 +736,10 @@ struct OverlayView: View {
                 if let url = URL(string: urlString) {
                     NSWorkspace.shared.open(url)
                 }
-            } else if let q = item.meta["query"],
+            } else if let query = item.meta["query"],
                       var components = URLComponents(string: "https://duckduckgo.com/")
             {
-                components.queryItems = [URLQueryItem(name: "q", value: q)]
+                components.queryItems = [URLQueryItem(name: "q", value: query)]
                 if let url = components.url {
                     NSWorkspace.shared.open(url)
                 }
@@ -863,10 +771,13 @@ struct OverlayView: View {
                     }
                 }
 
+                var recorded = item
                 if let rawInput {
-                    item.subtitle = String(rawInput.prefix(80)).replacingOccurrences(of: "\n", with: " ")
+                    let cleaned = String(rawInput.prefix(80))
+                        .unicodeScalars.filter { CharacterSet.controlCharacters.inverted.contains($0) }
+                    recorded.subtitle = String(cleaned)
                 }
-                appState.recordSelection(query: query, item: item)
+                appState.recordSelection(query: query, item: recorded)
                 let env = appState.scriptSearcher.buildEnvironment()
                 let outputMode = ScriptOutputMode(rawValue: item.meta["outputMode"] ?? "") ?? .none
 
