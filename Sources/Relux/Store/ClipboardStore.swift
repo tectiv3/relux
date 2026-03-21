@@ -23,6 +23,14 @@ struct ClipboardEntry: Identifiable, Sendable {
     let updatedAt: Date
 }
 
+enum ContentType {
+    static let text = "text"
+    static let image = "image"
+    static let rtf = "rtf"
+    static let html = "html"
+    static let color = "color"
+}
+
 @MainActor
 final class ClipboardStore {
     // swiftlint:disable:next identifier_name
@@ -79,8 +87,10 @@ final class ClipboardStore {
             }
         }
         if !hasUpdatedAt {
+            try execute("BEGIN")
             try execute("ALTER TABLE clipboard_history ADD COLUMN updated_at REAL")
             try execute("UPDATE clipboard_history SET updated_at = created_at")
+            try execute("COMMIT")
         }
     }
 
@@ -176,32 +186,9 @@ final class ClipboardStore {
         return entries
     }
 
-    func search(filter: String) -> [ClipboardEntry] {
-        let sql = """
-        SELECT id, content_type, text_content, NULL, image_path, \
-        image_width, image_height, image_size, source_app, \
-        source_name, char_count, word_count, created_at, updated_at \
-        FROM clipboard_history \
-        WHERE text_content LIKE ? \
-        ORDER BY updated_at DESC LIMIT 200
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        defer { sqlite3_finalize(stmt) }
-
-        let pattern = "%\(filter)%"
-        sqlite3_bind_text(stmt, 1, pattern, -1, Self.transient)
-
-        var entries: [ClipboardEntry] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            entries.append(readRow(stmt))
-        }
-        return entries
-    }
-
     /// Check if the most recent entry has the same text content (dedup)
     func isDuplicate(textContent: String) -> Bool {
-        let sql = "SELECT text_content FROM clipboard_history ORDER BY created_at DESC LIMIT 1"
+        let sql = "SELECT text_content FROM clipboard_history ORDER BY updated_at DESC LIMIT 1"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
         defer { sqlite3_finalize(stmt) }
@@ -214,11 +201,16 @@ final class ClipboardStore {
     func bumpTimestamp(id: Int64) {
         let sql = "UPDATE clipboard_history SET updated_at = ? WHERE id = ?"
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            log.warning("bumpTimestamp: failed to prepare statement")
+            return
+        }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970)
         sqlite3_bind_int64(stmt, 2, id)
-        sqlite3_step(stmt)
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            log.warning("bumpTimestamp: failed to update id \(id)")
+        }
     }
 
     // MARK: - Delete
@@ -326,7 +318,10 @@ final class ClipboardStore {
             charCount: sqlite3_column_type(stmt, 10) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 10)) : nil,
             wordCount: sqlite3_column_type(stmt, 11) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 11)) : nil,
             createdAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 12)),
-            updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 13))
+            updatedAt: Date(timeIntervalSince1970: {
+                let val = sqlite3_column_double(stmt, 13)
+                return val > 0 ? val : sqlite3_column_double(stmt, 12)
+            }())
         )
     }
 

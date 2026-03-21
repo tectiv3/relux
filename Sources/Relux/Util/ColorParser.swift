@@ -6,6 +6,7 @@ enum ColorParser {
     /// Supports: #RGB, #RRGGBB, #RRGGBBAA, rgb(), rgba(), hsl(), hsla()
     static func parse(_ input: String) -> NSColor? {
         let s = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty, !s.contains(where: \.isNewline), s.count <= 40 else { return nil }
         if s.hasPrefix("#") {
             return parseHex(s)
         }
@@ -51,7 +52,7 @@ enum ColorParser {
         // rgb(255, 128, 0) or rgba(255, 128, 0, 0.5)
         guard let open = s.firstIndex(of: "("),
               let close = s.lastIndex(of: ")") else { return nil }
-        let inner = s[s.index(after: open)..<close]
+        let inner = s[s.index(after: open) ..< close]
         let parts = inner.split(separator: ",").map {
             $0.trimmingCharacters(in: .whitespaces)
         }
@@ -73,7 +74,7 @@ enum ColorParser {
         // hsl(360, 100%, 50%) or hsla(360, 100%, 50%, 0.5)
         guard let open = input.firstIndex(of: "("),
               let close = input.lastIndex(of: ")") else { return nil }
-        let inner = input[input.index(after: open)..<close]
+        let inner = input[input.index(after: open) ..< close]
         let parts = inner.split(separator: ",").map {
             $0.trimmingCharacters(in: .whitespaces)
         }

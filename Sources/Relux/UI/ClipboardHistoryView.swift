@@ -26,10 +26,10 @@ private enum ClipboardContentType: String, CaseIterable {
 
     func matches(_ contentType: String) -> Bool {
         switch self {
-        case .text: contentType == "text"
-        case .image: contentType == "image"
-        case .richText: contentType == "rtf" || contentType == "html"
-        case .color: contentType == "color"
+        case .text: contentType == ContentType.text
+        case .image: contentType == ContentType.image
+        case .richText: contentType == ContentType.rtf || contentType == ContentType.html
+        case .color: contentType == ContentType.color
         }
     }
 }
@@ -80,7 +80,7 @@ struct ClipboardHistoryView: View {
                 copyEntry(entry)
             },
         ]
-        if entry.contentType == "rtf" || entry.contentType == "html" {
+        if entry.contentType == ContentType.rtf || entry.contentType == ContentType.html {
             actions.append(ClipAction(
                 label: "Paste Formatted to \(previousAppName)",
                 icon: "textformat", shortcut: "⌘⇧⏎"
@@ -240,17 +240,17 @@ struct ClipboardHistoryView: View {
         var currentLabel = ""
         var currentItems: [(index: Int, entry: ClipboardEntry)] = []
 
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateStyle = .medium
+        dateFormatter.timeStyle = .none
+
         for (index, entry) in items.enumerated() {
-            let label: String
-            if calendar.isDateInToday(entry.updatedAt) {
-                label = "Today"
+            let label: String = if calendar.isDateInToday(entry.updatedAt) {
+                "Today"
             } else if calendar.isDateInYesterday(entry.updatedAt) {
-                label = "Yesterday"
+                "Yesterday"
             } else {
-                let formatter = DateFormatter()
-                formatter.dateStyle = .medium
-                formatter.timeStyle = .none
-                label = formatter.string(from: entry.updatedAt)
+                dateFormatter.string(from: entry.updatedAt)
             }
 
             if label != currentLabel {
@@ -310,7 +310,10 @@ struct ClipboardHistoryView: View {
 
     private func entryRow(entry: ClipboardEntry, isSelected: Bool) -> some View {
         HStack(spacing: 8) {
-            if let text = entry.textContent, let nsColor = ColorParser.parse(text) {
+            if entry.contentType == ContentType.color,
+               let text = entry.textContent,
+               let nsColor = ColorParser.parse(text)
+            {
                 Circle()
                     .fill(Color(nsColor: nsColor))
                     .frame(width: 16, height: 16)
@@ -341,15 +344,15 @@ struct ClipboardHistoryView: View {
 
     private func entryIcon(for entry: ClipboardEntry) -> String {
         switch entry.contentType {
-        case "image": "photo"
-        case "rtf", "html": "doc.richtext"
+        case ContentType.image: "photo"
+        case ContentType.rtf, ContentType.html: "doc.richtext"
         default: "doc.text"
         }
     }
 
     private func entryTitle(for entry: ClipboardEntry) -> String {
         switch entry.contentType {
-        case "image":
+        case ContentType.image:
             if let width = entry.imageWidth, let height = entry.imageHeight {
                 return "Image (\(width)×\(height))"
             }
@@ -428,7 +431,10 @@ struct ClipboardHistoryView: View {
     private var previewPanel: some View {
         VStack(spacing: 0) {
             if let entry = selectedEntry {
-                if let text = entry.textContent, let nsColor = ColorParser.parse(text) {
+                if entry.contentType == ContentType.color,
+                   let text = entry.textContent,
+                   let nsColor = ColorParser.parse(text)
+                {
                     let color = Color(nsColor: nsColor)
                     VStack(spacing: 16) {
                         Circle()
@@ -444,7 +450,7 @@ struct ClipboardHistoryView: View {
                 } else {
                     ScrollView {
                         VStack(alignment: .leading) {
-                            if entry.contentType == "image", let imagePath = entry.imagePath {
+                            if entry.contentType == ContentType.image, let imagePath = entry.imagePath {
                                 let url = appState.clipboardStore!.imageDir.appendingPathComponent(imagePath)
                                 if let nsImage = NSImage(contentsOf: url) {
                                     Image(nsImage: nsImage)
@@ -488,14 +494,14 @@ struct ClipboardHistoryView: View {
             }
 
             infoRow(label: "Content type") {
-                if let text = entry.textContent, ColorParser.parse(text) != nil {
+                if entry.contentType == ContentType.color {
                     Text("Color")
                 } else {
                     Text(entry.contentType.capitalized)
                 }
             }
 
-            if entry.contentType == "image" {
+            if entry.contentType == ContentType.image {
                 if let width = entry.imageWidth, let height = entry.imageHeight {
                     infoRow(label: "Dimensions") { Text("\(width)×\(height)") }
                 }
@@ -708,7 +714,7 @@ struct ClipboardHistoryView: View {
 
     private func pasteEntry(_ entry: ClipboardEntry, formatted: Bool) {
         appState.clipboardStore?.bumpTimestamp(id: entry.id)
-        if entry.contentType == "image", let imagePath = entry.imagePath {
+        if entry.contentType == ContentType.image, let imagePath = entry.imagePath {
             let url = appState.clipboardStore!.imageDir.appendingPathComponent(imagePath)
             PasteService.pasteImage(at: url, monitor: appState.clipboardMonitor)
         } else if let text = entry.textContent {
@@ -781,15 +787,25 @@ struct ClipboardHistoryView: View {
         return String(format: "%.1f MB", kilobytes / 1024)
     }
 
+    private static let todayTimeFormatter: DateFormatter = {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "'Today at' HH:mm:ss"
+        return fmt
+    }()
+
+    private static let dateTimeFormatter: DateFormatter = {
+        let fmt = DateFormatter()
+        fmt.dateStyle = .medium
+        fmt.timeStyle = .short
+        return fmt
+    }()
+
     private func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
         if Calendar.current.isDateInToday(date) {
-            formatter.dateFormat = "'Today at' HH:mm:ss"
+            Self.todayTimeFormatter.string(from: date)
         } else {
-            formatter.dateStyle = .medium
-            formatter.timeStyle = .short
+            Self.dateTimeFormatter.string(from: date)
         }
-        return formatter.string(from: date)
     }
 }
 
