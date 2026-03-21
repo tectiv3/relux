@@ -235,10 +235,18 @@ struct ClipboardHistoryView: View {
 
     private func entryRow(entry: ClipboardEntry, isSelected: Bool) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: entryIcon(for: entry))
-                .foregroundColor(isSelected ? .white.opacity(0.8) : .secondary)
-                .font(.system(size: 13))
-                .frame(width: 20)
+            if let text = entry.textContent, let nsColor = ColorParser.parse(text) {
+                Circle()
+                    .fill(Color(nsColor: nsColor))
+                    .frame(width: 16, height: 16)
+                    .overlay(Circle().stroke(Color.primary.opacity(0.2), lineWidth: 0.5))
+                    .frame(width: 20)
+            } else {
+                Image(systemName: entryIcon(for: entry))
+                    .foregroundColor(isSelected ? .white.opacity(0.8) : .secondary)
+                    .font(.system(size: 13))
+                    .frame(width: 20)
+            }
 
             Text(highlightedTitle(for: entry, isSelected: isSelected))
                 .font(.system(size: 13))
@@ -345,25 +353,40 @@ struct ClipboardHistoryView: View {
     private var previewPanel: some View {
         VStack(spacing: 0) {
             if let entry = selectedEntry {
-                ScrollView {
-                    VStack(alignment: .leading) {
-                        if entry.contentType == "image", let imagePath = entry.imagePath {
-                            let url = appState.clipboardStore!.imageDir.appendingPathComponent(imagePath)
-                            if let nsImage = NSImage(contentsOf: url) {
-                                Image(nsImage: nsImage)
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(maxHeight: 250)
-                                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                            }
-                        } else if let text = entry.textContent {
-                            Text(text.count > 10000 ? String(text.prefix(10000)) + "\n…" : text)
-                                .font(.system(size: 13, design: .monospaced))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                if let text = entry.textContent, let nsColor = ColorParser.parse(text) {
+                    let color = Color(nsColor: nsColor)
+                    VStack(spacing: 16) {
+                        Circle()
+                            .fill(color)
+                            .frame(width: 120, height: 120)
+                            .overlay(Circle().stroke(Color.primary.opacity(0.2), lineWidth: 1))
+                            .shadow(color: color.opacity(0.4), radius: 12)
+                        Text(text.trimmingCharacters(in: .whitespacesAndNewlines))
+                            .font(.system(size: 15, design: .monospaced))
+                            .foregroundColor(.secondary)
                     }
-                    .padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading) {
+                            if entry.contentType == "image", let imagePath = entry.imagePath {
+                                let url = appState.clipboardStore!.imageDir.appendingPathComponent(imagePath)
+                                if let nsImage = NSImage(contentsOf: url) {
+                                    Image(nsImage: nsImage)
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(maxHeight: 250)
+                                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                                }
+                            } else if let text = entry.textContent {
+                                Text(text.count > 10000 ? String(text.prefix(10000)) + "\n…" : text)
+                                    .font(.system(size: 13, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .padding(12)
+                    }
                 }
 
                 Divider()
@@ -390,7 +413,11 @@ struct ClipboardHistoryView: View {
             }
 
             infoRow(label: "Content type") {
-                Text(entry.contentType.capitalized)
+                if let text = entry.textContent, ColorParser.parse(text) != nil {
+                    Text("Color")
+                } else {
+                    Text(entry.contentType.capitalized)
+                }
             }
 
             if entry.contentType == "image" {
