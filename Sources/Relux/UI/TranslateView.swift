@@ -174,7 +174,7 @@ struct TranslateView: View {
                     ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
                         let adjustedIndex = isTranslating ? index + 1 : index
                         entryRow(entry: entry, isSelected: adjustedIndex == selectedIndex)
-                            .id(adjustedIndex)
+                            .id(entry.id)
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 selectedIndex = adjustedIndex
@@ -183,8 +183,19 @@ struct TranslateView: View {
                 }
             }
             .onChange(of: selectedIndex) { _, newIndex in
-                withAnimation {
-                    proxy.scrollTo(newIndex, anchor: .center)
+                let targetId: Int64? = if isTranslating {
+                    newIndex == 0 ? nil : (newIndex - 1 < entries.count ? entries[newIndex - 1].id : nil)
+                } else {
+                    newIndex < entries.count ? entries[newIndex].id : nil
+                }
+                if let targetId {
+                    withAnimation {
+                        proxy.scrollTo(targetId, anchor: .center)
+                    }
+                } else if isTranslating, newIndex == 0 {
+                    withAnimation {
+                        proxy.scrollTo(-1, anchor: .center)
+                    }
                 }
             }
         }
@@ -547,7 +558,7 @@ struct TranslateView: View {
 
     private func deleteEntry(_ entry: TranslationEntry) {
         try? appState.translateStore?.delete(id: entry.id)
-        loadEntries()
+        entries.removeAll { $0.id == entry.id }
         if selectedIndex >= entries.count {
             selectedIndex = max(0, entries.count - 1)
         }

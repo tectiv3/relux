@@ -5,6 +5,7 @@ import SQLite3
 
 private let log = Logger(subsystem: "com.relux.app", category: "clipboardstore")
 
+// swiftformat:disable:next redundantSendable
 struct ClipboardEntry: Identifiable, Sendable {
     let id: Int64
     let contentType: String
@@ -19,6 +20,15 @@ struct ClipboardEntry: Identifiable, Sendable {
     let charCount: Int?
     let wordCount: Int?
     let createdAt: Date
+    let updatedAt: Date
+}
+
+enum ContentType {
+    static let text = "text"
+    static let image = "image"
+    static let rtf = "rtf"
+    static let html = "html"
+    static let color = "color"
 }
 
 @MainActor
@@ -59,6 +69,29 @@ final class ClipboardStore {
                 created_at    REAL NOT NULL
             )
         """)
+
+        // Migrate: add updated_at column if missing
+        let pragmaSql = "PRAGMA table_info(clipboard_history)"
+        var pragmaStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, pragmaSql, -1, &pragmaStmt, nil) == SQLITE_OK else {
+            throw StoreError.query
+        }
+        defer { sqlite3_finalize(pragmaStmt) }
+        var hasUpdatedAt = false
+        while sqlite3_step(pragmaStmt) == SQLITE_ROW {
+            if let name = sqlite3_column_text(pragmaStmt, 1) {
+                if String(cString: name) == "updated_at" {
+                    hasUpdatedAt = true
+                    break
+                }
+            }
+        }
+        if !hasUpdatedAt {
+            try execute("BEGIN")
+            try execute("ALTER TABLE clipboard_history ADD COLUMN updated_at REAL")
+            try execute("UPDATE clipboard_history SET updated_at = created_at")
+            try execute("COMMIT")
+        }
     }
 
     deinit {
@@ -84,8 +117,8 @@ final class ClipboardStore {
         let sql = """
             INSERT INTO clipboard_history
                 (content_type, text_content, raw_data, image_path, image_width, image_height, image_size,
-                 source_app, source_name, char_count, word_count, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 source_app, source_name, char_count, word_count, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -110,7 +143,9 @@ final class ClipboardStore {
         bindOptionalText(stmt, 9, sourceName)
         bindOptionalInt(stmt, 10, charCount)
         bindOptionalInt(stmt, 11, wordCount)
-        sqlite3_bind_double(stmt, 12, Date().timeIntervalSince1970)
+        let now = Date().timeIntervalSince1970
+        sqlite3_bind_double(stmt, 12, now)
+        sqlite3_bind_double(stmt, 13, now)
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw StoreError.query
@@ -135,8 +170,8 @@ final class ClipboardStore {
         let sql = """
         SELECT id, content_type, text_content, NULL, image_path, \
         image_width, image_height, image_size, source_app, \
-        source_name, char_count, word_count, created_at \
-        FROM clipboard_history ORDER BY created_at DESC LIMIT ?
+        source_name, char_count, word_count, created_at, updated_at \
+        FROM clipboard_history ORDER BY updated_at DESC LIMIT ?
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
@@ -151,32 +186,9 @@ final class ClipboardStore {
         return entries
     }
 
-    func search(filter: String) -> [ClipboardEntry] {
-        let sql = """
-        SELECT id, content_type, text_content, NULL, image_path, \
-        image_width, image_height, image_size, source_app, \
-        source_name, char_count, word_count, created_at \
-        FROM clipboard_history \
-        WHERE text_content LIKE ? \
-        ORDER BY created_at DESC LIMIT 200
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        defer { sqlite3_finalize(stmt) }
-
-        let pattern = "%\(filter)%"
-        sqlite3_bind_text(stmt, 1, pattern, -1, Self.transient)
-
-        var entries: [ClipboardEntry] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            entries.append(readRow(stmt))
-        }
-        return entries
-    }
-
     /// Check if the most recent entry has the same text content (dedup)
     func isDuplicate(textContent: String) -> Bool {
-        let sql = "SELECT text_content FROM clipboard_history ORDER BY created_at DESC LIMIT 1"
+        let sql = "SELECT text_content FROM clipboard_history ORDER BY updated_at DESC LIMIT 1"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
         defer { sqlite3_finalize(stmt) }
@@ -184,6 +196,21 @@ final class ClipboardStore {
         guard sqlite3_step(stmt) == SQLITE_ROW else { return false }
         guard let ptr = sqlite3_column_text(stmt, 0) else { return false }
         return String(cString: ptr) == textContent
+    }
+
+    func bumpTimestamp(id: Int64) {
+        let sql = "UPDATE clipboard_history SET updated_at = ? WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            log.warning("bumpTimestamp: failed to prepare statement")
+            return
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970)
+        sqlite3_bind_int64(stmt, 2, id)
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            log.warning("bumpTimestamp: failed to update id \(id)")
+        }
     }
 
     // MARK: - Delete
@@ -261,7 +288,7 @@ final class ClipboardStore {
         let sql = """
         SELECT id, content_type, text_content, raw_data, image_path, \
         image_width, image_height, image_size, source_app, \
-        source_name, char_count, word_count, created_at \
+        source_name, char_count, word_count, created_at, updated_at \
         FROM clipboard_history WHERE id = ?
         """
         var stmt: OpaquePointer?
@@ -290,7 +317,11 @@ final class ClipboardStore {
             sourceName: sqlite3_column_text(stmt, 9).map { String(cString: $0) },
             charCount: sqlite3_column_type(stmt, 10) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 10)) : nil,
             wordCount: sqlite3_column_type(stmt, 11) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 11)) : nil,
-            createdAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 12))
+            createdAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 12)),
+            updatedAt: Date(timeIntervalSince1970: {
+                let val = sqlite3_column_double(stmt, 13)
+                return val > 0 ? val : sqlite3_column_double(stmt, 12)
+            }())
         )
     }
 

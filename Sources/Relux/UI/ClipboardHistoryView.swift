@@ -1,5 +1,39 @@
 import SwiftUI
 
+private enum ClipboardContentType: String, CaseIterable {
+    case text
+    case image
+    case richText
+    case color
+
+    var label: String {
+        switch self {
+        case .text: "Text"
+        case .image: "Images"
+        case .richText: "Rich Text"
+        case .color: "Colors"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .text: "doc.plaintext"
+        case .image: "photo"
+        case .richText: "doc.richtext"
+        case .color: "paintpalette"
+        }
+    }
+
+    func matches(_ contentType: String) -> Bool {
+        switch self {
+        case .text: contentType == ContentType.text
+        case .image: contentType == ContentType.image
+        case .richText: contentType == ContentType.rtf || contentType == ContentType.html
+        case .color: contentType == ContentType.color
+        }
+    }
+}
+
 struct ClipboardHistoryView: View {
     @Environment(AppState.self) private var appState
     @State private var filter: String = ""
@@ -7,17 +41,19 @@ struct ClipboardHistoryView: View {
     @State private var selectedIndex: Int = 0
     @State private var showActions: Bool = false
     @State private var actionIndex: Int = 0
+    @State private var typeFilter: ClipboardContentType?
     @FocusState private var isFilterFocused: Bool
 
     private var filteredEntries: [ClipboardEntry] {
-        if filter.trimmingCharacters(in: .whitespaces).isEmpty {
-            return entries
+        var result = entries
+        if let typeFilter {
+            result = result.filter { typeFilter.matches($0.contentType) }
         }
-        let query = filter.lowercased()
-        return entries.filter { entry in
+        let query = filter.trimmingCharacters(in: .whitespaces).lowercased()
+        if query.isEmpty { return result }
+        return result.filter { entry in
             let text = entry.textContent ?? ""
             let firstLine = String(text.split(separator: "\n", maxSplits: 1).first ?? "")
-            // Exact substring on full text, fuzzy only on first line
             return text.lowercased().contains(query)
                 || fuzzyMatch(query: query, target: firstLine)
                 || fuzzyMatch(query: query, target: entry.sourceName ?? "")
@@ -44,7 +80,7 @@ struct ClipboardHistoryView: View {
                 copyEntry(entry)
             },
         ]
-        if entry.contentType == "rtf" || entry.contentType == "html" {
+        if entry.contentType == ContentType.rtf || entry.contentType == ContentType.html {
             actions.append(ClipAction(
                 label: "Paste Formatted to \(previousAppName)",
                 icon: "textformat", shortcut: "⌘⇧⏎"
@@ -55,6 +91,16 @@ struct ClipboardHistoryView: View {
         actions.append(ClipAction(label: "Delete", icon: "trash", shortcut: "⌫") {
             deleteEntry(entry)
         })
+        for filterType in ClipboardContentType.allCases {
+            actions.append(ClipAction(
+                label: typeFilter == filterType ? "Clear Filter" : "Show \(filterType.label) Only",
+                icon: filterType.icon, shortcut: nil
+            ) {
+                typeFilter = typeFilter == filterType ? nil : filterType
+                selectedIndex = 0
+                showActions = false
+            })
+        }
         return actions
     }
 
@@ -64,8 +110,37 @@ struct ClipboardHistoryView: View {
             topBar
             Divider()
 
+            if let typeFilter {
+                HStack(spacing: 4) {
+                    Image(systemName: typeFilter.icon)
+                        .font(.system(size: 11))
+                    Text(typeFilter.label)
+                        .font(.system(size: 12, weight: .medium))
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.15)))
+                .onTapGesture {
+                    self.typeFilter = nil
+                    selectedIndex = 0
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+            }
+
             if filteredEntries.isEmpty {
-                Text(entries.isEmpty ? "No clipboard history" : "No matches")
+                let message = if entries.isEmpty {
+                    "No clipboard history"
+                } else if let typeFilter {
+                    "No \(typeFilter.label.lowercased()) in history"
+                } else {
+                    "No matches"
+                }
+                Text(message)
                     .font(.system(size: 13))
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -165,17 +240,17 @@ struct ClipboardHistoryView: View {
         var currentLabel = ""
         var currentItems: [(index: Int, entry: ClipboardEntry)] = []
 
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateStyle = .medium
+        dateFormatter.timeStyle = .none
+
         for (index, entry) in items.enumerated() {
-            let label: String
-            if calendar.isDateInToday(entry.createdAt) {
-                label = "Today"
-            } else if calendar.isDateInYesterday(entry.createdAt) {
-                label = "Yesterday"
+            let label: String = if calendar.isDateInToday(entry.updatedAt) {
+                "Today"
+            } else if calendar.isDateInYesterday(entry.updatedAt) {
+                "Yesterday"
             } else {
-                let formatter = DateFormatter()
-                formatter.dateStyle = .medium
-                formatter.timeStyle = .none
-                label = formatter.string(from: entry.createdAt)
+                dateFormatter.string(from: entry.updatedAt)
             }
 
             if label != currentLabel {
@@ -235,10 +310,21 @@ struct ClipboardHistoryView: View {
 
     private func entryRow(entry: ClipboardEntry, isSelected: Bool) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: entryIcon(for: entry))
-                .foregroundColor(isSelected ? .white.opacity(0.8) : .secondary)
-                .font(.system(size: 13))
-                .frame(width: 20)
+            if entry.contentType == ContentType.color,
+               let text = entry.textContent,
+               let nsColor = ColorParser.parse(text)
+            {
+                Circle()
+                    .fill(Color(nsColor: nsColor))
+                    .frame(width: 16, height: 16)
+                    .overlay(Circle().stroke(Color.primary.opacity(0.2), lineWidth: 0.5))
+                    .frame(width: 20)
+            } else {
+                Image(systemName: entryIcon(for: entry))
+                    .foregroundColor(isSelected ? .white.opacity(0.8) : .secondary)
+                    .font(.system(size: 13))
+                    .frame(width: 20)
+            }
 
             Text(highlightedTitle(for: entry, isSelected: isSelected))
                 .font(.system(size: 13))
@@ -258,15 +344,15 @@ struct ClipboardHistoryView: View {
 
     private func entryIcon(for entry: ClipboardEntry) -> String {
         switch entry.contentType {
-        case "image": "photo"
-        case "rtf", "html": "doc.richtext"
+        case ContentType.image: "photo"
+        case ContentType.rtf, ContentType.html: "doc.richtext"
         default: "doc.text"
         }
     }
 
     private func entryTitle(for entry: ClipboardEntry) -> String {
         switch entry.contentType {
-        case "image":
+        case ContentType.image:
             if let width = entry.imageWidth, let height = entry.imageHeight {
                 return "Image (\(width)×\(height))"
             }
@@ -345,25 +431,43 @@ struct ClipboardHistoryView: View {
     private var previewPanel: some View {
         VStack(spacing: 0) {
             if let entry = selectedEntry {
-                ScrollView {
-                    VStack(alignment: .leading) {
-                        if entry.contentType == "image", let imagePath = entry.imagePath {
-                            let url = appState.clipboardStore!.imageDir.appendingPathComponent(imagePath)
-                            if let nsImage = NSImage(contentsOf: url) {
-                                Image(nsImage: nsImage)
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(maxHeight: 250)
-                                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                            }
-                        } else if let text = entry.textContent {
-                            Text(text.count > 10000 ? String(text.prefix(10000)) + "\n…" : text)
-                                .font(.system(size: 13, design: .monospaced))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                if entry.contentType == ContentType.color,
+                   let text = entry.textContent,
+                   let nsColor = ColorParser.parse(text)
+                {
+                    let color = Color(nsColor: nsColor)
+                    VStack(spacing: 16) {
+                        Circle()
+                            .fill(color)
+                            .frame(width: 120, height: 120)
+                            .overlay(Circle().stroke(Color.primary.opacity(0.2), lineWidth: 1))
+                            .shadow(color: color.opacity(0.4), radius: 12)
+                        Text(text.trimmingCharacters(in: .whitespacesAndNewlines))
+                            .font(.system(size: 15, design: .monospaced))
+                            .foregroundColor(.secondary)
                     }
-                    .padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading) {
+                            if entry.contentType == ContentType.image, let imagePath = entry.imagePath {
+                                let url = appState.clipboardStore!.imageDir.appendingPathComponent(imagePath)
+                                if let nsImage = NSImage(contentsOf: url) {
+                                    Image(nsImage: nsImage)
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(maxHeight: 250)
+                                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                                }
+                            } else if let text = entry.textContent {
+                                Text(text.count > 10000 ? String(text.prefix(10000)) + "\n…" : text)
+                                    .font(.system(size: 13, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .padding(12)
+                    }
                 }
 
                 Divider()
@@ -390,10 +494,14 @@ struct ClipboardHistoryView: View {
             }
 
             infoRow(label: "Content type") {
-                Text(entry.contentType.capitalized)
+                if entry.contentType == ContentType.color {
+                    Text("Color")
+                } else {
+                    Text(entry.contentType.capitalized)
+                }
             }
 
-            if entry.contentType == "image" {
+            if entry.contentType == ContentType.image {
                 if let width = entry.imageWidth, let height = entry.imageHeight {
                     infoRow(label: "Dimensions") { Text("\(width)×\(height)") }
                 }
@@ -542,6 +650,11 @@ struct ClipboardHistoryView: View {
                 showActions = false
                 return .handled
             }
+            if typeFilter != nil {
+                typeFilter = nil
+                selectedIndex = 0
+                return .handled
+            }
             if !filter.isEmpty {
                 filter = ""
                 selectedIndex = 0
@@ -600,7 +713,8 @@ struct ClipboardHistoryView: View {
     // MARK: - Actions
 
     private func pasteEntry(_ entry: ClipboardEntry, formatted: Bool) {
-        if entry.contentType == "image", let imagePath = entry.imagePath {
+        appState.clipboardStore?.bumpTimestamp(id: entry.id)
+        if entry.contentType == ContentType.image, let imagePath = entry.imagePath {
             let url = appState.clipboardStore!.imageDir.appendingPathComponent(imagePath)
             PasteService.pasteImage(at: url, monitor: appState.clipboardMonitor)
         } else if let text = entry.textContent {
@@ -610,6 +724,7 @@ struct ClipboardHistoryView: View {
     }
 
     private func copyEntry(_ entry: ClipboardEntry) {
+        appState.clipboardStore?.bumpTimestamp(id: entry.id)
         if let text = entry.textContent {
             let rtfData = appState.clipboardStore?.fetchRawData(id: entry.id)
             PasteService.copyToClipboard(text, asRichText: rtfData, monitor: appState.clipboardMonitor)
@@ -629,6 +744,7 @@ struct ClipboardHistoryView: View {
         entries = appState.clipboardStore?.fetchAll() ?? []
         selectedIndex = 0
         filter = ""
+        typeFilter = nil
     }
 
     // MARK: - Helpers
@@ -671,15 +787,25 @@ struct ClipboardHistoryView: View {
         return String(format: "%.1f MB", kilobytes / 1024)
     }
 
+    private static let todayTimeFormatter: DateFormatter = {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "'Today at' HH:mm:ss"
+        return fmt
+    }()
+
+    private static let dateTimeFormatter: DateFormatter = {
+        let fmt = DateFormatter()
+        fmt.dateStyle = .medium
+        fmt.timeStyle = .short
+        return fmt
+    }()
+
     private func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
         if Calendar.current.isDateInToday(date) {
-            formatter.dateFormat = "'Today at' HH:mm:ss"
+            Self.todayTimeFormatter.string(from: date)
         } else {
-            formatter.dateStyle = .medium
-            formatter.timeStyle = .short
+            Self.dateTimeFormatter.string(from: date)
         }
-        return formatter.string(from: date)
     }
 }
 

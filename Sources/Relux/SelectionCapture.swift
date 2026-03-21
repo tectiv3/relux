@@ -1,9 +1,31 @@
 import AppKit
+import os
+
+private let log = Logger(subsystem: "com.relux.app", category: "selection")
+
+private let chromiumBundleIDs: Set<String> = [
+    "com.google.Chrome",
+    "com.google.Chrome.canary",
+    "com.brave.Browser",
+    "com.microsoft.edgemac",
+    "company.thebrowser.Browser", // Arc
+    "com.vivaldi.Vivaldi",
+    "com.operasoftware.Opera",
+    "com.nickvision.nicegab", // Nicegab
+    "org.chromium.Chromium",
+]
 
 enum SelectionCapture {
-    /// Reads the selected text from the currently focused app.
     /// Must be called BEFORE Relux's panel takes focus.
     static func captureSelectedText() -> String? {
+        let frontApp = NSWorkspace.shared.frontmostApplication
+
+        // Chromium browsers don't expose selection via AX — use clipboard hack
+        if let bundleID = frontApp?.bundleIdentifier, chromiumBundleIDs.contains(bundleID) {
+            log.debug("Chromium app detected (\(bundleID)), using clipboard fallback")
+            return captureViaClipboard()
+        }
+
         let systemWide = AXUIElementCreateSystemWide()
 
         var focusedApp: AnyObject?
@@ -46,7 +68,6 @@ enum SelectionCapture {
         return nil
     }
 
-    /// Extracts selected text using AX text markers (used by Safari/WebKit).
     private static func selectedTextViaMarkers(from element: AXUIElement) -> String? {
         var markerRange: AnyObject?
         let mrResult = AXUIElementCopyAttributeValue(
@@ -71,8 +92,6 @@ enum SelectionCapture {
         return text as? String
     }
 
-    /// Replaces the selected text in the given app via the Accessibility API.
-    /// Does not touch the pasteboard.
     static func replaceSelectedText(with replacement: String, in app: NSRunningApplication) -> Bool {
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
 
@@ -94,7 +113,62 @@ enum SelectionCapture {
         ) == .success
     }
 
-    /// Prompts for Accessibility permission if not already granted.
+    // MARK: - Chromium clipboard fallback
+
+    private static func captureViaClipboard() -> String? {
+        let pasteboard = NSPasteboard.general
+        let oldChangeCount = pasteboard.changeCount
+
+        let savedItems = pasteboard.pasteboardItems?.compactMap { item -> [String: Data]? in
+            var dict = [String: Data]()
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    dict[type.rawValue] = data
+                }
+            }
+            return dict.isEmpty ? nil : dict
+        } ?? []
+
+        let source = CGEventSource(stateID: CGEventSourceStateID.combinedSessionState)
+        let cKeyCode: CGKeyCode = 0x08
+        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: cKeyCode, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: cKeyCode, keyDown: false)
+        else {
+            log.error("Failed to create CGEvents for Cmd+C")
+            return nil
+        }
+        keyDown.flags = CGEventFlags.maskCommand
+        keyUp.flags = CGEventFlags.maskCommand
+        keyDown.post(tap: CGEventTapLocation.cghidEventTap)
+        keyUp.post(tap: CGEventTapLocation.cghidEventTap)
+
+        var captured: String?
+        for _ in 0 ..< 20 {
+            usleep(10000) // 10ms per tick, up to 200ms total
+            if pasteboard.changeCount != oldChangeCount {
+                captured = pasteboard.string(forType: .string)
+                break
+            }
+        }
+
+        pasteboard.clearContents()
+        for itemDict in savedItems {
+            let newItem = NSPasteboardItem()
+            for (typeRaw, data) in itemDict {
+                newItem.setData(data, forType: NSPasteboard.PasteboardType(typeRaw))
+            }
+            pasteboard.writeObjects([newItem])
+        }
+
+        if let text = captured?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+            log.debug("Clipboard fallback captured \(text.prefix(50))…")
+            return captured
+        }
+
+        log.debug("Clipboard fallback: no text captured")
+        return nil
+    }
+
     static func ensureAccessibilityPermission() {
         let prompt = "AXTrustedCheckOptionPrompt" as CFString
         let options = [prompt: true] as CFDictionary

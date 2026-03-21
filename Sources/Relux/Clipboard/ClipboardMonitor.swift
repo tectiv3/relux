@@ -110,7 +110,7 @@ final class ClipboardMonitor {
                   let plainText = pasteboard.string(forType: .string)
         {
             captureRichText(
-                contentType: "rtf", rawData: rtfData,
+                contentType: ContentType.rtf, rawData: rtfData,
                 plainText: plainText,
                 sourceApp: sourceBundle, sourceName: sourceName
             )
@@ -118,7 +118,7 @@ final class ClipboardMonitor {
                   let plainText = pasteboard.string(forType: .string)
         {
             captureRichText(
-                contentType: "html", rawData: htmlData,
+                contentType: ContentType.html, rawData: htmlData,
                 plainText: plainText,
                 sourceApp: sourceBundle, sourceName: sourceName
             )
@@ -133,9 +133,10 @@ final class ClipboardMonitor {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         guard !store.isDuplicate(textContent: text) else { return }
 
+        let type = ColorParser.parse(text) != nil ? ContentType.color : ContentType.text
         do {
             try store.insert(
-                contentType: "text",
+                contentType: type,
                 textContent: text,
                 rawData: nil,
                 imagePath: nil,
@@ -191,7 +192,7 @@ final class ClipboardMonitor {
         do {
             try pngData.write(to: filePath)
             try store.insert(
-                contentType: "image",
+                contentType: ContentType.image,
                 textContent: nil,
                 rawData: nil,
                 imagePath: filename,
