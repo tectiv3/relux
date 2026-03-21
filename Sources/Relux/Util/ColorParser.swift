@@ -1,5 +1,6 @@
 import AppKit
 
+// swiftlint:disable identifier_name
 enum ColorParser {
     /// Attempts to parse a trimmed string as a color value.
     /// Supports: #RGB, #RRGGBB, #RRGGBBAA, rgb(), rgba(), hsl(), hsla()
@@ -102,3 +103,5 @@ enum ColorParser {
         return b > 0 ? 2 * (1 - l / b) : 0
     }
 }
+
+// swiftlint:enable identifier_name

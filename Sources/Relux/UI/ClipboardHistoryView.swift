@@ -1,5 +1,39 @@
 import SwiftUI
 
+private enum ClipboardContentType: String, CaseIterable {
+    case text
+    case image
+    case richText
+    case color
+
+    var label: String {
+        switch self {
+        case .text: "Text"
+        case .image: "Images"
+        case .richText: "Rich Text"
+        case .color: "Colors"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .text: "doc.plaintext"
+        case .image: "photo"
+        case .richText: "doc.richtext"
+        case .color: "paintpalette"
+        }
+    }
+
+    func matches(_ contentType: String) -> Bool {
+        switch self {
+        case .text: contentType == "text"
+        case .image: contentType == "image"
+        case .richText: contentType == "rtf" || contentType == "html"
+        case .color: contentType == "color"
+        }
+    }
+}
+
 struct ClipboardHistoryView: View {
     @Environment(AppState.self) private var appState
     @State private var filter: String = ""
@@ -7,17 +41,19 @@ struct ClipboardHistoryView: View {
     @State private var selectedIndex: Int = 0
     @State private var showActions: Bool = false
     @State private var actionIndex: Int = 0
+    @State private var typeFilter: ClipboardContentType?
     @FocusState private var isFilterFocused: Bool
 
     private var filteredEntries: [ClipboardEntry] {
-        if filter.trimmingCharacters(in: .whitespaces).isEmpty {
-            return entries
+        var result = entries
+        if let typeFilter {
+            result = result.filter { typeFilter.matches($0.contentType) }
         }
-        let query = filter.lowercased()
-        return entries.filter { entry in
+        let query = filter.trimmingCharacters(in: .whitespaces).lowercased()
+        if query.isEmpty { return result }
+        return result.filter { entry in
             let text = entry.textContent ?? ""
             let firstLine = String(text.split(separator: "\n", maxSplits: 1).first ?? "")
-            // Exact substring on full text, fuzzy only on first line
             return text.lowercased().contains(query)
                 || fuzzyMatch(query: query, target: firstLine)
                 || fuzzyMatch(query: query, target: entry.sourceName ?? "")
@@ -55,6 +91,16 @@ struct ClipboardHistoryView: View {
         actions.append(ClipAction(label: "Delete", icon: "trash", shortcut: "⌫") {
             deleteEntry(entry)
         })
+        for filterType in ClipboardContentType.allCases {
+            actions.append(ClipAction(
+                label: typeFilter == filterType ? "Clear Filter" : "Show \(filterType.label) Only",
+                icon: filterType.icon, shortcut: nil
+            ) {
+                typeFilter = typeFilter == filterType ? nil : filterType
+                selectedIndex = 0
+                showActions = false
+            })
+        }
         return actions
     }
 
@@ -64,8 +110,37 @@ struct ClipboardHistoryView: View {
             topBar
             Divider()
 
+            if let typeFilter {
+                HStack(spacing: 4) {
+                    Image(systemName: typeFilter.icon)
+                        .font(.system(size: 11))
+                    Text(typeFilter.label)
+                        .font(.system(size: 12, weight: .medium))
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.15)))
+                .onTapGesture {
+                    self.typeFilter = nil
+                    selectedIndex = 0
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+            }
+
             if filteredEntries.isEmpty {
-                Text(entries.isEmpty ? "No clipboard history" : "No matches")
+                let message = if entries.isEmpty {
+                    "No clipboard history"
+                } else if let typeFilter {
+                    "No \(typeFilter.label.lowercased()) in history"
+                } else {
+                    "No matches"
+                }
+                Text(message)
                     .font(.system(size: 13))
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -167,15 +242,15 @@ struct ClipboardHistoryView: View {
 
         for (index, entry) in items.enumerated() {
             let label: String
-            if calendar.isDateInToday(entry.createdAt) {
+            if calendar.isDateInToday(entry.updatedAt) {
                 label = "Today"
-            } else if calendar.isDateInYesterday(entry.createdAt) {
+            } else if calendar.isDateInYesterday(entry.updatedAt) {
                 label = "Yesterday"
             } else {
                 let formatter = DateFormatter()
                 formatter.dateStyle = .medium
                 formatter.timeStyle = .none
-                label = formatter.string(from: entry.createdAt)
+                label = formatter.string(from: entry.updatedAt)
             }
 
             if label != currentLabel {
@@ -569,6 +644,11 @@ struct ClipboardHistoryView: View {
                 showActions = false
                 return .handled
             }
+            if typeFilter != nil {
+                typeFilter = nil
+                selectedIndex = 0
+                return .handled
+            }
             if !filter.isEmpty {
                 filter = ""
                 selectedIndex = 0
@@ -627,6 +707,7 @@ struct ClipboardHistoryView: View {
     // MARK: - Actions
 
     private func pasteEntry(_ entry: ClipboardEntry, formatted: Bool) {
+        appState.clipboardStore?.bumpTimestamp(id: entry.id)
         if entry.contentType == "image", let imagePath = entry.imagePath {
             let url = appState.clipboardStore!.imageDir.appendingPathComponent(imagePath)
             PasteService.pasteImage(at: url, monitor: appState.clipboardMonitor)
@@ -637,6 +718,7 @@ struct ClipboardHistoryView: View {
     }
 
     private func copyEntry(_ entry: ClipboardEntry) {
+        appState.clipboardStore?.bumpTimestamp(id: entry.id)
         if let text = entry.textContent {
             let rtfData = appState.clipboardStore?.fetchRawData(id: entry.id)
             PasteService.copyToClipboard(text, asRichText: rtfData, monitor: appState.clipboardMonitor)
@@ -656,6 +738,7 @@ struct ClipboardHistoryView: View {
         entries = appState.clipboardStore?.fetchAll() ?? []
         selectedIndex = 0
         filter = ""
+        typeFilter = nil
     }
 
     // MARK: - Helpers
