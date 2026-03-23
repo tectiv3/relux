@@ -7,8 +7,11 @@ private let log = Logger(subsystem: "com.relux.app", category: "gesture-bindings
 @Observable
 final class GestureBindingManager {
     private(set) var bindings: [GestureBinding]
+    private(set) var shortcutBindings: [ShortcutBinding]
     private let engine = GestureEngine()
+    private let hotkeyListener = HotkeyListener()
     private let storageKey = "gesture.bindings"
+    private let shortcutStorageKey = "gesture.shortcutBindings"
 
     init() {
         if let data = UserDefaults.standard.data(forKey: storageKey),
@@ -19,9 +22,39 @@ final class GestureBindingManager {
             bindings = GestureType.allCases.map { GestureBinding(gesture: $0, action: .none) }
         }
 
+        if let data = UserDefaults.standard.data(forKey: shortcutStorageKey),
+           let decoded = try? JSONDecoder().decode([ShortcutBinding].self, from: data)
+        {
+            shortcutBindings = decoded
+        } else {
+            shortcutBindings = []
+        }
+
         engine.onGesture = { [weak self] gesture in
             self?.handleGesture(gesture)
         }
+        hotkeyListener.onHotkey = { [weak self] combo in
+            self?.handleHotkey(combo)
+        }
+    }
+
+    func addShortcutBinding(trigger: KeyCombo, action: GestureActionType) {
+        shortcutBindings.append(ShortcutBinding(trigger: trigger, action: action))
+        saveShortcuts()
+        syncHotkeyRegistrations()
+    }
+
+    func updateShortcutBinding(id: String, action: GestureActionType) {
+        if let index = shortcutBindings.firstIndex(where: { $0.id == id }) {
+            shortcutBindings[index].action = action
+            saveShortcuts()
+        }
+    }
+
+    func removeShortcutBinding(id: String) {
+        shortcutBindings.removeAll { $0.id == id }
+        saveShortcuts()
+        syncHotkeyRegistrations()
     }
 
     func updateBinding(for gesture: GestureType, action: GestureActionType) {
@@ -38,15 +71,25 @@ final class GestureBindingManager {
     func startIfEnabled(registry: ExtensionRegistry) {
         if registry.isEnabled("gestures") {
             engine.start()
+            hotkeyListener.start()
+            syncHotkeyRegistrations()
         }
     }
 
     func syncWithExtension(enabled: Bool) {
         if enabled {
             engine.start()
+            hotkeyListener.start()
+            syncHotkeyRegistrations()
         } else {
             engine.stop()
+            hotkeyListener.stop()
         }
+    }
+
+    private func syncHotkeyRegistrations() {
+        let keys = Set(shortcutBindings.map(\.trigger.storageKey))
+        hotkeyListener.updateRegisteredKeys(keys)
     }
 
     private func save() {
@@ -54,16 +97,29 @@ final class GestureBindingManager {
         UserDefaults.standard.set(data, forKey: storageKey)
     }
 
+    private func saveShortcuts() {
+        guard let data = try? JSONEncoder().encode(shortcutBindings) else { return }
+        UserDefaults.standard.set(data, forKey: shortcutStorageKey)
+    }
+
+    private func handleHotkey(_ combo: KeyCombo) {
+        guard let binding = shortcutBindings.first(where: { $0.trigger == combo }) else { return }
+        executeAction(binding.action)
+    }
+
     private func handleGesture(_ gesture: GestureType) {
         guard let binding = bindings.first(where: { $0.gesture == gesture }) else { return }
+        executeAction(binding.action)
+    }
 
-        switch binding.action {
+    private func executeAction(_ action: GestureActionType) {
+        switch action {
         case .keyCombo(let combo):
             postKeyCombo(combo)
-        case .system(let action):
-            executeSystemAction(action)
-        case .relux(let action):
-            executeReluxAction(action)
+        case .system(let sysAction):
+            executeSystemAction(sysAction)
+        case .relux(let reluxAction):
+            executeReluxAction(reluxAction)
         case .none:
             break
         }
@@ -92,16 +148,12 @@ final class GestureBindingManager {
     private func executeSystemAction(_ action: SystemAction) {
         switch action {
         case .lockScreen:
-            // Ctrl+Cmd+Q
             postKeyCombo(KeyCombo(keyCode: 12, modifierRawValue: NSEvent.ModifierFlags([.control, .command]).rawValue))
         case .missionControl:
-            // Ctrl+Up
             postKeyCombo(KeyCombo(keyCode: 126, modifierRawValue: NSEvent.ModifierFlags([.control]).rawValue))
         case .appExpose:
-            // Ctrl+Down
             postKeyCombo(KeyCombo(keyCode: 125, modifierRawValue: NSEvent.ModifierFlags([.control]).rawValue))
         case .showDesktop:
-            // F11
             postKeyCombo(KeyCombo(keyCode: 103, modifierRawValue: 0))
         }
     }

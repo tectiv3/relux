@@ -165,3 +165,13 @@ struct GestureBinding: Codable, Sendable {
     var gesture: GestureType
     var action: GestureActionType
 }
+
+struct ShortcutBinding: Codable, Sendable, Identifiable {
+    var id: String { trigger.storageKey }
+    var trigger: KeyCombo
+    var action: GestureActionType
+}
+
+extension KeyCombo {
+    var storageKey: String { "\(keyCode)-\(modifierRawValue)" }
+}

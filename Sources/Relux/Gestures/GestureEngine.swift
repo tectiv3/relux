@@ -12,10 +12,16 @@ final class GestureEngine {
     private var clickMonitor: Any?
     private var isRunning = false
 
+    // Tracking state
     private var trackingTouches = false
+    private var threeFingersTouching = false
     private var initialPositions: [Int32: (x: Float, y: Float)] = [:]
     private var latestPositions: [Int32: (x: Float, y: Float)] = [:]
-    private var threeFingersTouching = false
+    private var trackedFingerIDs: Set<Int32> = []
+
+    // Stability: require N consecutive frames with exactly 3 fingers before tracking
+    private var consecutiveThreeFingerFrames = 0
+    private let requiredStableFrames = 4
 
     private let swipeThreshold: Float = 0.15
 
@@ -65,24 +71,35 @@ final class GestureEngine {
     private func processTouchFrame(_ touches: [OMSTouchData]) {
         let activeTouches = touches.filter { $0.state == .touching }
         let activeCount = activeTouches.count
+        let currentIDs = Set(activeTouches.map(\.id))
 
         if activeCount == 3 {
-            threeFingersTouching = true
+            consecutiveThreeFingerFrames += 1
 
             if !trackingTouches {
-                trackingTouches = true
-                initialPositions = [:]
-                latestPositions = [:]
+                if consecutiveThreeFingerFrames >= requiredStableFrames {
+                    // Stable 3-finger contact — start tracking
+                    trackingTouches = true
+                    threeFingersTouching = true
+                    trackedFingerIDs = currentIDs
+                    initialPositions = [:]
+                    latestPositions = [:]
+                    for touch in activeTouches {
+                        initialPositions[touch.id] = (x: touch.position.x, y: touch.position.y)
+                        latestPositions[touch.id] = (x: touch.position.x, y: touch.position.y)
+                    }
+                }
+            } else if currentIDs == trackedFingerIDs {
+                // Same 3 fingers still touching — update positions
                 for touch in activeTouches {
-                    initialPositions[touch.id] = (x: touch.position.x, y: touch.position.y)
                     latestPositions[touch.id] = (x: touch.position.x, y: touch.position.y)
                 }
             } else {
-                for touch in activeTouches {
-                    latestPositions[touch.id] = (x: touch.position.x, y: touch.position.y)
-                }
+                // Different finger IDs — abort tracking
+                resetTracking()
             }
         } else {
+            consecutiveThreeFingerFrames = 0
             threeFingersTouching = false
 
             if trackingTouches {
@@ -127,8 +144,10 @@ final class GestureEngine {
 
     private func resetTracking() {
         trackingTouches = false
+        consecutiveThreeFingerFrames = 0
         initialPositions = [:]
         latestPositions = [:]
+        trackedFingerIDs = []
     }
 
     private func fireGesture(_ gesture: GestureType) {
