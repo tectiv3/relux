@@ -12,12 +12,6 @@ struct GestureSettingsView: View {
                         appState.extensionRegistry.setEnabled("gestures", enabled: enabled)
                         appState.gestureBindingManager.syncWithExtension(enabled: enabled)
                     }
-
-                Text(
-                    "Configure System Settings: set \"Swipe between pages\" and \"Mission Control\" to 4 fingers. Disable \"Three finger drag\" in Accessibility > Pointer Control > Trackpad Options. Set \"Look up & data detectors\" to Off or Force Click."
-                )
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
             }
 
             Section("Gesture Bindings") {

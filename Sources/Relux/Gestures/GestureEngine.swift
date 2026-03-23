@@ -68,8 +68,13 @@ final class GestureEngine {
         }
     }
 
+    private func isLikelyPalm(_ touch: OMSTouchData) -> Bool {
+        // Palm touches have large contact area and low density
+        touch.axis.major > 10.0 || touch.density < 0.1
+    }
+
     private func processTouchFrame(_ touches: [OMSTouchData]) {
-        let activeTouches = touches.filter { $0.state == .touching }
+        let activeTouches = touches.filter { $0.state == .touching && !isLikelyPalm($0) }
         let activeCount = activeTouches.count
         let currentIDs = Set(activeTouches.map(\.id))
 
