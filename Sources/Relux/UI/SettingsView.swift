@@ -36,6 +36,8 @@ struct SettingsView: View {
             clipboardTab.tabItem { Label("Clipboard", systemImage: "clipboard") }
             translateTab
                 .tabItem { Label("Translate", systemImage: "character.book.closed") }
+            GestureSettingsView()
+                .tabItem { Label("Gestures", systemImage: "hand.draw") }
         }
         .frame(width: 450, height: 500)
         .onAppear {

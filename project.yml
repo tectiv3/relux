@@ -10,6 +10,9 @@ packages:
   KeyboardShortcuts:
     url: https://github.com/sindresorhus/KeyboardShortcuts
     from: 2.0.0
+  OpenMultitouchSupport:
+    url: https://github.com/Kyome22/OpenMultitouchSupport
+    from: 3.0.3
 
 targets:
   Relux:
@@ -19,6 +22,7 @@ targets:
       - Sources/Relux
     dependencies:
       - package: KeyboardShortcuts
+      - package: OpenMultitouchSupport
     settings:
       base:
         INFOPLIST_FILE: Sources/Relux/Info.plist

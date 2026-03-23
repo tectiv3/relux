@@ -1,4 +1,4 @@
-.PHONY: build open run clean generate
+.PHONY: build open run clean generate release
 
 XCODEPROJ := Relux.xcodeproj
 
@@ -18,3 +18,6 @@ clean:
 
 generate:
 	xcodegen generate
+
+release:
+	@bash scripts/deploy.sh
