@@ -21,6 +21,8 @@ final class AppState {
     let calculatorService = CalculatorService()
     let systemSettingsSearcher = SystemSettingsSearcher()
 
+    let gestureBindingManager = GestureBindingManager()
+
     var clipboardStore: ClipboardStore?
     var clipboardMonitor: ClipboardMonitor?
     var translateStore: TranslateStore?
@@ -63,6 +65,10 @@ final class AppState {
         extensionRegistry.register(
             id: "jwt", name: "JWT Decoder", icon: "key.viewfinder", defaultEnabled: true
         )
+        extensionRegistry.register(
+            id: "gestures", name: "Gesture Shortcuts", icon: "hand.draw", defaultEnabled: true
+        )
+        gestureBindingManager.startIfEnabled(registry: extensionRegistry)
     }
 
     func markSetupComplete() {
