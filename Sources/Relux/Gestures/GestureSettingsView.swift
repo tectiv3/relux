@@ -78,22 +78,24 @@ private struct GestureBindingRow: View {
     }
 
     var body: some View {
-        HStack {
+        HStack(spacing: 8) {
             Text(gesture.displayName)
-                .frame(width: 150, alignment: .leading)
+                .frame(minWidth: 130, alignment: .leading)
 
-            Picker("", selection: $actionTag) {
+            Picker("Type", selection: $actionTag) {
                 Text("None").tag("none")
                 Text("Key Combo").tag("keyCombo")
                 Text("System").tag("system")
                 Text("Relux").tag("relux")
             }
-            .frame(width: 120)
+            .labelsHidden()
             .onChange(of: actionTag) { _, newValue in
                 updateAction(tag: newValue)
             }
 
             actionDetail
+
+            Spacer()
         }
     }
 
@@ -108,22 +110,18 @@ private struct GestureBindingRow: View {
                     }
                 }
         case "system":
-            Picker("", selection: $selectedSystemAction) {
-                ForEach(SystemAction.allCases, id: \.rawValue) { action in
-                    Text(action.displayName).tag(action)
-                }
+            Picker("Action", selection: $selectedSystemAction) {
+                ForEach(SystemAction.allCases, id: \.rawValue) { Text($0.displayName).tag($0) }
             }
-            .frame(width: 140)
+            .labelsHidden()
             .onChange(of: selectedSystemAction) { _, newAction in
                 manager.updateBinding(for: gesture, action: .system(newAction))
             }
         case "relux":
-            Picker("", selection: $selectedReluxAction) {
-                ForEach(ReluxAction.allCases, id: \.rawValue) { action in
-                    Text(action.displayName).tag(action)
-                }
+            Picker("Action", selection: $selectedReluxAction) {
+                ForEach(ReluxAction.allCases, id: \.rawValue) { Text($0.displayName).tag($0) }
             }
-            .frame(width: 140)
+            .labelsHidden()
             .onChange(of: selectedReluxAction) { _, newAction in
                 manager.updateBinding(for: gesture, action: .relux(newAction))
             }
@@ -180,16 +178,16 @@ private struct ShortcutBindingRow: View {
     }
 
     var body: some View {
-        HStack {
+        HStack(spacing: 8) {
             Text(binding.trigger.displayString)
-                .frame(width: 80, alignment: .leading)
                 .font(.system(.body, design: .monospaced))
+                .frame(minWidth: 50, alignment: .leading)
 
-            Picker("", selection: $actionTag) {
+            Picker("Type", selection: $actionTag) {
                 Text("System").tag("system")
                 Text("Relux").tag("relux")
             }
-            .frame(width: 90)
+            .labelsHidden()
             .onChange(of: actionTag) { _, newValue in
                 let action: GestureActionType = newValue == "relux"
                     ? .relux(selectedReluxAction)
@@ -198,6 +196,8 @@ private struct ShortcutBindingRow: View {
             }
 
             actionDetail
+
+            Spacer()
 
             Button(role: .destructive) {
                 manager.removeShortcutBinding(id: binding.id)
@@ -212,18 +212,18 @@ private struct ShortcutBindingRow: View {
     private var actionDetail: some View {
         switch actionTag {
         case "system":
-            Picker("", selection: $selectedSystemAction) {
+            Picker("Action", selection: $selectedSystemAction) {
                 ForEach(SystemAction.allCases, id: \.rawValue) { Text($0.displayName).tag($0) }
             }
-            .frame(width: 120)
+            .labelsHidden()
             .onChange(of: selectedSystemAction) { _, v in
                 manager.updateShortcutBinding(id: binding.id, action: .system(v))
             }
         case "relux":
-            Picker("", selection: $selectedReluxAction) {
+            Picker("Action", selection: $selectedReluxAction) {
                 ForEach(ReluxAction.allCases, id: \.rawValue) { Text($0.displayName).tag($0) }
             }
-            .frame(width: 120)
+            .labelsHidden()
             .onChange(of: selectedReluxAction) { _, v in
                 manager.updateShortcutBinding(id: binding.id, action: .relux(v))
             }
