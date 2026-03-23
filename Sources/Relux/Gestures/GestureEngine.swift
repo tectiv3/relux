@@ -15,15 +15,18 @@ final class GestureEngine {
     // Tracking state
     private var trackingTouches = false
     private var threeFingersTouching = false
+    private var postingCmdClick = false
     private var initialPositions: [Int32: (x: Float, y: Float)] = [:]
     private var latestPositions: [Int32: (x: Float, y: Float)] = [:]
     private var trackedFingerIDs: Set<Int32> = []
 
     // Stability: require N consecutive frames with exactly 3 fingers before tracking
     private var consecutiveThreeFingerFrames = 0
-    private let requiredStableFrames = 4
 
-    private let swipeThreshold: Float = 0.15
+    // Tunable via UserDefaults (gesture.stableFrames, gesture.swipeThreshold, gesture.edgeMargin)
+    var requiredStableFrames: Int { max(1, UserDefaults.standard.object(forKey: "gesture.stableFrames") as? Int ?? 2) }
+    var swipeThreshold: Float { UserDefaults.standard.object(forKey: "gesture.swipeThreshold") as? Float ?? 0.15 }
+    var edgeMargin: Float { UserDefaults.standard.object(forKey: "gesture.edgeMargin") as? Float ?? 0.05 }
 
     func start() {
         guard !isRunning else { return }
@@ -62,15 +65,47 @@ final class GestureEngine {
     private func installClickMonitor() {
         clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
             DispatchQueue.main.async {
-                guard let self, self.threeFingersTouching else { return }
-                self.fireGesture(.threeFingerClick)
+                guard let self, self.threeFingersTouching, !self.postingCmdClick else { return }
+                log.info("3-finger click detected, posting Cmd+Click")
+                self.postCmdClick()
             }
         }
     }
 
+    private func postCmdClick() {
+        postingCmdClick = true
+        threeFingersTouching = false
+
+        guard let event = CGEvent(source: nil) else {
+            log.error("Failed to get cursor position — check Accessibility permission")
+            postingCmdClick = false
+            return
+        }
+        let pos = event.location
+
+        guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: pos, mouseButton: .left),
+              let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: pos, mouseButton: .left)
+        else {
+            log.error("Failed to create CGEvent for Cmd+Click")
+            postingCmdClick = false
+            return
+        }
+
+        down.flags = .maskCommand
+        up.flags = .maskCommand
+        down.post(tap: .cghidEventTap)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) { [weak self] in
+            up.post(tap: .cghidEventTap)
+            self?.postingCmdClick = false
+            log.debug("Cmd+Click posted at (\(pos.x), \(pos.y))")
+        }
+    }
+
     private func isLikelyPalm(_ touch: OMSTouchData) -> Bool {
-        // Palm touches have large contact area and low density
-        touch.axis.major > 10.0 || touch.density < 0.1
+        let m = edgeMargin
+        return touch.position.y < m || touch.position.y > (1 - m)
+            || touch.position.x < m || touch.position.x > (1 - m)
     }
 
     private func processTouchFrame(_ touches: [OMSTouchData]) {
@@ -149,6 +184,8 @@ final class GestureEngine {
 
     private func resetTracking() {
         trackingTouches = false
+        threeFingersTouching = false
+        postingCmdClick = false
         consecutiveThreeFingerFrames = 0
         initialPositions = [:]
         latestPositions = [:]

@@ -3,6 +3,9 @@ import SwiftUI
 struct GestureSettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var gesturesEnabled: Bool = false
+    @State private var stableFrames: Double = Double(UserDefaults.standard.object(forKey: "gesture.stableFrames") as? Int ?? 2)
+    @State private var swipeThreshold: Double = Double(UserDefaults.standard.object(forKey: "gesture.swipeThreshold") as? Float ?? 0.15)
+    @State private var edgeMargin: Double = Double(UserDefaults.standard.object(forKey: "gesture.edgeMargin") as? Float ?? 0.05)
 
     var body: some View {
         Form {
@@ -16,7 +19,17 @@ struct GestureSettingsView: View {
 
             Section("Gesture Bindings") {
                 ForEach(GestureType.allCases, id: \.rawValue) { gesture in
-                    GestureBindingRow(gesture: gesture, manager: appState.gestureBindingManager)
+                    if gesture == .threeFingerClick {
+                        HStack(spacing: 8) {
+                            Text(gesture.displayName)
+                                .frame(minWidth: 130, alignment: .leading)
+                            Text("\u{2318}+Click")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                    } else {
+                        GestureBindingRow(gesture: gesture, manager: appState.gestureBindingManager)
+                    }
                 }
             }
             .disabled(!gesturesEnabled)
@@ -26,6 +39,63 @@ struct GestureSettingsView: View {
                     ShortcutBindingRow(binding: binding, manager: appState.gestureBindingManager)
                 }
                 AddShortcutButton(manager: appState.gestureBindingManager)
+            }
+            .disabled(!gesturesEnabled)
+
+            DisclosureGroup("Advanced") {
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text("Stable frames")
+                            Spacer()
+                            Text("\(Int(stableFrames))")
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        Slider(value: $stableFrames, in: 1...8, step: 1)
+                            .onChange(of: stableFrames) { _, v in
+                                UserDefaults.standard.set(Int(v), forKey: "gesture.stableFrames")
+                            }
+                        Text("Frames with 3 fingers before tracking starts. Lower = faster but more false positives.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text("Swipe threshold")
+                            Spacer()
+                            Text(String(format: "%.2f", swipeThreshold))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        Slider(value: $swipeThreshold, in: 0.05...0.40, step: 0.01)
+                            .onChange(of: swipeThreshold) { _, v in
+                                UserDefaults.standard.set(Float(v), forKey: "gesture.swipeThreshold")
+                            }
+                        Text("Minimum finger travel to register a swipe. Lower = easier to trigger.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text("Edge margin")
+                            Spacer()
+                            Text(String(format: "%.2f", edgeMargin))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        Slider(value: $edgeMargin, in: 0.0...0.15, step: 0.01)
+                            .onChange(of: edgeMargin) { _, v in
+                                UserDefaults.standard.set(Float(v), forKey: "gesture.edgeMargin")
+                            }
+                        Text("Trackpad edge zone for palm rejection. Higher = more aggressive filtering.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(.vertical, 4)
             }
             .disabled(!gesturesEnabled)
         }
@@ -89,6 +159,7 @@ private struct GestureBindingRow: View {
                 Text("Relux").tag("relux")
             }
             .labelsHidden()
+            .fixedSize()
             .onChange(of: actionTag) { _, newValue in
                 updateAction(tag: newValue)
             }
