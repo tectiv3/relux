@@ -1,4 +1,5 @@
 import AppKit
+import KeyboardShortcuts
 import os
 
 private let log = Logger(subsystem: "com.relux.app", category: "gesture-bindings")
@@ -9,7 +10,6 @@ final class GestureBindingManager {
     private(set) var bindings: [GestureBinding]
     private(set) var shortcutBindings: [ShortcutBinding]
     private let engine = GestureEngine()
-    private let hotkeyListener = HotkeyListener()
     private let storageKey = "gesture.bindings"
     private let shortcutStorageKey = "gesture.shortcutBindings"
 
@@ -33,15 +33,13 @@ final class GestureBindingManager {
         engine.onGesture = { [weak self] gesture in
             self?.handleGesture(gesture)
         }
-        hotkeyListener.onHotkey = { [weak self] combo in
-            self?.handleHotkey(combo)
-        }
     }
 
     func addShortcutBinding(trigger: KeyCombo, action: GestureActionType) {
-        shortcutBindings.append(ShortcutBinding(trigger: trigger, action: action))
+        let binding = ShortcutBinding(trigger: trigger, action: action)
+        shortcutBindings.append(binding)
         saveShortcuts()
-        syncHotkeyRegistrations()
+        registerShortcut(for: binding)
     }
 
     func updateShortcutBinding(id: String, action: GestureActionType) {
@@ -52,9 +50,9 @@ final class GestureBindingManager {
     }
 
     func removeShortcutBinding(id: String) {
+        unregisterShortcut(storageKey: id)
         shortcutBindings.removeAll { $0.id == id }
         saveShortcuts()
-        syncHotkeyRegistrations()
     }
 
     func updateBinding(for gesture: GestureType, action: GestureActionType) {
@@ -69,9 +67,7 @@ final class GestureBindingManager {
     }
 
     func startIfEnabled(registry: ExtensionRegistry) {
-        // Hotkey listener always runs (independent of gestures toggle)
-        hotkeyListener.start()
-        syncHotkeyRegistrations()
+        registerAllShortcuts()
 
         if registry.isEnabled("gestures") {
             engine.start()
@@ -86,10 +82,35 @@ final class GestureBindingManager {
         }
     }
 
-    private func syncHotkeyRegistrations() {
-        let keys = Set(shortcutBindings.map(\.trigger.storageKey))
-        hotkeyListener.updateRegisteredKeys(keys)
+    // MARK: - KeyboardShortcuts Registration
+
+    private static func shortcutName(for storageKey: String) -> KeyboardShortcuts.Name {
+        KeyboardShortcuts.Name("gesture.shortcut.\(storageKey)")
     }
+
+    private func registerShortcut(for binding: ShortcutBinding) {
+        let name = Self.shortcutName(for: binding.trigger.storageKey)
+        let key = KeyboardShortcuts.Key(rawValue: Int(binding.trigger.keyCode))
+        KeyboardShortcuts.setShortcut(.init(key, modifiers: binding.trigger.modifiers), for: name)
+        let trigger = binding.trigger
+        KeyboardShortcuts.onKeyUp(for: name) { [weak self] in
+            self?.handleHotkey(trigger)
+        }
+    }
+
+    private func unregisterShortcut(storageKey: String) {
+        let name = Self.shortcutName(for: storageKey)
+        KeyboardShortcuts.removeHandler(for: name)
+        KeyboardShortcuts.setShortcut(nil, for: name)
+    }
+
+    private func registerAllShortcuts() {
+        for binding in shortcutBindings {
+            registerShortcut(for: binding)
+        }
+    }
+
+    // MARK: - Persistence
 
     private func save() {
         guard let data = try? JSONEncoder().encode(bindings) else { return }
@@ -100,6 +121,8 @@ final class GestureBindingManager {
         guard let data = try? JSONEncoder().encode(shortcutBindings) else { return }
         UserDefaults.standard.set(data, forKey: shortcutStorageKey)
     }
+
+    // MARK: - Action Handling
 
     private func handleHotkey(_ combo: KeyCombo) {
         guard let binding = shortcutBindings.first(where: { $0.trigger == combo }) else { return }
