@@ -310,10 +310,7 @@ struct ClipboardHistoryView: View {
 
     private func entryRow(entry: ClipboardEntry, isSelected: Bool) -> some View {
         HStack(spacing: 8) {
-            if entry.contentType == ContentType.color,
-               let text = entry.textContent,
-               let nsColor = ColorParser.parse(text)
-            {
+            if let text = entry.textContent, let nsColor = ColorParser.parse(text) {
                 Circle()
                     .fill(Color(nsColor: nsColor))
                     .frame(width: 16, height: 16)
@@ -431,10 +428,7 @@ struct ClipboardHistoryView: View {
     private var previewPanel: some View {
         VStack(spacing: 0) {
             if let entry = selectedEntry {
-                if entry.contentType == ContentType.color,
-                   let text = entry.textContent,
-                   let nsColor = ColorParser.parse(text)
-                {
+                if let text = entry.textContent, let nsColor = ColorParser.parse(text) {
                     let color = Color(nsColor: nsColor)
                     VStack(spacing: 16) {
                         Circle()
@@ -494,7 +488,7 @@ struct ClipboardHistoryView: View {
             }
 
             infoRow(label: "Content type") {
-                if entry.contentType == ContentType.color {
+                if let text = entry.textContent, ColorParser.parse(text) != nil {
                     Text("Color")
                 } else {
                     Text(entry.contentType.capitalized)

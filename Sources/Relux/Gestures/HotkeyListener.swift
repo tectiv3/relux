@@ -64,8 +64,13 @@ final class HotkeyListener {
             callback: callback,
             userInfo: ptr
         ) else {
-            log.error("Failed to create CGEvent tap for hotkey listener")
+            log.warning("CGEvent tap creation failed, retrying in 2s (accessibility permission may not be granted yet)")
             isRunning = false
+            Unmanaged.passUnretained(ctx).release()
+            self.context = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.start()
+            }
             return
         }
 
