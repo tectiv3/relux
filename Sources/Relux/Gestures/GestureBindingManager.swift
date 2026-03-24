@@ -69,21 +69,20 @@ final class GestureBindingManager {
     }
 
     func startIfEnabled(registry: ExtensionRegistry) {
+        // Hotkey listener always runs (independent of gestures toggle)
+        hotkeyListener.start()
+        syncHotkeyRegistrations()
+
         if registry.isEnabled("gestures") {
             engine.start()
-            hotkeyListener.start()
-            syncHotkeyRegistrations()
         }
     }
 
     func syncWithExtension(enabled: Bool) {
         if enabled {
             engine.start()
-            hotkeyListener.start()
-            syncHotkeyRegistrations()
         } else {
             engine.stop()
-            hotkeyListener.stop()
         }
     }
 

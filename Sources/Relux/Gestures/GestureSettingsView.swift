@@ -40,7 +40,6 @@ struct GestureSettingsView: View {
                 }
                 AddShortcutButton(manager: appState.gestureBindingManager)
             }
-            .disabled(!gesturesEnabled)
 
             DisclosureGroup("Advanced") {
                 VStack(alignment: .leading, spacing: 12) {
