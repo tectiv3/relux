@@ -139,13 +139,26 @@ struct TranslateView: View {
             .buttonStyle(.plain)
             .focusable(false)
 
-            TextField("Enter text to translate...", text: $inputText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 16))
-                .focused($isInputFocused)
-                .onSubmit {
-                    translateCurrent()
+            ZStack(alignment: .topLeading) {
+                if inputText.isEmpty {
+                    Text("Enter text to translate...")
+                        .font(.system(size: 16))
+                        .foregroundColor(.secondary.opacity(0.5))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 8)
+                        .allowsHitTesting(false)
                 }
+                TextEditor(text: $inputText)
+                    .font(.system(size: 16))
+                    .scrollContentBackground(.hidden)
+                    .focused($isInputFocused)
+                    .frame(minHeight: 28, maxHeight: 80)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .onKeyPress(.return) {
+                        translateCurrent()
+                        return .handled
+                    }
+            }
 
             Picker("", selection: $selectedLanguage) {
                 ForEach(languages, id: \.self) { lang in

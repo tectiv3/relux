@@ -4,7 +4,7 @@ import SwiftUI
 
 private let log = Logger(subsystem: "com.relux.app", category: "appstate")
 
-enum PanelMode: Sendable {
+enum PanelMode {
     case search
     case clipboard
     case translate
@@ -112,7 +112,7 @@ final class AppState {
 
         if let calc = calculatorItem(query: query) { items.append(calc) }
         if let jwt = jwtItem(query: query, selection: selection) { items.append(jwt) }
-        if let trans = translateItem(selection: selection) { items.append(trans) }
+        if let trans = translateItem(query: query, selection: selection) { items.append(trans) }
         items.append(webSearchItem(query: query))
 
         return items
@@ -157,12 +157,14 @@ final class AppState {
         )
     }
 
-    private func translateItem(selection: String?) -> SearchItem? {
-        guard extensionRegistry.isReady("translate"), let sel = selection else { return nil }
+    private func translateItem(query: String, selection: String?) -> SearchItem? {
+        guard extensionRegistry.isReady("translate") else { return nil }
+        let text = selection ?? query
+        guard !text.isEmpty else { return nil }
         return SearchItem(
             id: "translate-selection",
             title: "Translate",
-            subtitle: String(sel.prefix(80)),
+            subtitle: String(text.prefix(80)),
             icon: "character.book.closed",
             kind: .translate,
             meta: [:],
