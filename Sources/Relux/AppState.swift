@@ -168,7 +168,7 @@ final class AppState {
             icon: "character.book.closed",
             kind: .translate,
             meta: [:],
-            score: 800
+            score: 100
         )
     }
 
