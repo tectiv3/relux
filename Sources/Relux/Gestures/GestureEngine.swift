@@ -28,23 +28,34 @@ final class GestureEngine {
     private var fourFingerTrackedIDs: Set<Int32> = []
     private var consecutiveFourFingerFrames = 0
 
-    /// Tunable via UserDefaults (gesture.stableFrames, gesture.swipeThreshold, gesture.edgeMargin)
-    var requiredStableFrames: Int {
-        max(1, UserDefaults.standard.object(forKey: "gesture.stableFrames") as? Int ?? 2)
-    }
+    /// Tunable via UserDefaults (gesture.stableFrames, gesture.swipeThreshold, gesture.edgeMargin).
+    /// Cached to avoid hitting UserDefaults on every touch frame; refreshed via NSUserDefaultsDidChange.
+    private(set) var requiredStableFrames: Int = 2
+    private(set) var swipeThreshold: Float = 0.15
+    private(set) var edgeMargin: Float = 0.05
 
-    var swipeThreshold: Float {
-        UserDefaults.standard.object(forKey: "gesture.swipeThreshold") as? Float ?? 0.15
-    }
+    private var defaultsObserver: NSObjectProtocol?
 
-    var edgeMargin: Float {
-        UserDefaults.standard.object(forKey: "gesture.edgeMargin") as? Float ?? 0.05
+    private func reloadTunables() {
+        let defaults = UserDefaults.standard
+        requiredStableFrames = max(1, defaults.object(forKey: "gesture.stableFrames") as? Int ?? 2)
+        swipeThreshold = defaults.object(forKey: "gesture.swipeThreshold") as? Float ?? 0.15
+        edgeMargin = defaults.object(forKey: "gesture.edgeMargin") as? Float ?? 0.05
     }
 
     func start() {
         guard !isRunning else { return }
         isRunning = true
         log.info("Gesture engine starting")
+
+        reloadTunables()
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.reloadTunables()
+        }
 
         OMSManager.shared.startListening()
         installClickMonitor()
@@ -65,6 +76,11 @@ final class GestureEngine {
 
         touchTask?.cancel()
         touchTask = nil
+
+        if let observer = defaultsObserver {
+            NotificationCenter.default.removeObserver(observer)
+            defaultsObserver = nil
+        }
 
         if let monitor = clickMonitor {
             NSEvent.removeMonitor(monitor)
@@ -96,8 +112,15 @@ final class GestureEngine {
         }
         let pos = event.location
 
-        guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: pos, mouseButton: .left),
-              let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: pos, mouseButton: .left)
+        guard
+            let down = CGEvent(
+                mouseEventSource: nil, mouseType: .leftMouseDown,
+                mouseCursorPosition: pos, mouseButton: .left
+            ),
+            let mouseUp = CGEvent(
+                mouseEventSource: nil, mouseType: .leftMouseUp,
+                mouseCursorPosition: pos, mouseButton: .left
+            )
         else {
             log.error("Failed to create CGEvent for Cmd+Click")
             postingCmdClick = false
@@ -105,20 +128,20 @@ final class GestureEngine {
         }
 
         down.flags = .maskCommand
-        up.flags = .maskCommand
+        mouseUp.flags = .maskCommand
         down.post(tap: .cghidEventTap)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) { [weak self] in
-            up.post(tap: .cghidEventTap)
+            mouseUp.post(tap: .cghidEventTap)
             self?.postingCmdClick = false
             log.debug("Cmd+Click posted at (\(pos.x), \(pos.y))")
         }
     }
 
     private func isLikelyPalm(_ touch: OMSTouchData) -> Bool {
-        let m = edgeMargin
-        return touch.position.y < m || touch.position.y > (1 - m)
-            || touch.position.x < m || touch.position.x > (1 - m)
+        let margin = edgeMargin
+        return touch.position.y < margin || touch.position.y > (1 - margin)
+            || touch.position.x < margin || touch.position.x > (1 - margin)
     }
 
     private func processTouchFrame(_ touches: [OMSTouchData]) {
