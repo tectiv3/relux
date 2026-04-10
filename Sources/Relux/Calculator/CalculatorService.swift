@@ -3,7 +3,7 @@ import os
 
 private let log = Logger(subsystem: "com.relux.app", category: "CalculatorService")
 
-struct CalculatorResult: Sendable {
+struct CalculatorResult {
     let expression: String
     let answer: String
     let isCurrency: Bool
@@ -62,15 +62,21 @@ final class CalculatorService {
         }
         guard !expr.isEmpty else { return nil }
 
-        // NSExpression(format:) raises ObjC exceptions on bad input (uncatchable in Swift)
-        // Validation in isMathExpression should prevent this, but guard with NSExpression.init(expressionType:)
+        // Force floating-point arithmetic: integer division by zero throws an
+        // uncatchable ObjC exception that kills the SwiftUI task context,
+        // and integer division gives wrong results (800/500 = 1 instead of 1.6).
+        expr = Self.intToDouble(expr)
+
         let nsExpr = NSExpression(format: expr)
 
         guard let result = nsExpr.expressionValue(with: nil, context: nil) as? NSNumber else {
             return nil
         }
 
-        let answer = formatNumber(result.doubleValue)
+        let value = result.doubleValue
+        guard value.isFinite else { return nil }
+
+        let answer = formatNumber(value)
         return CalculatorResult(
             expression: query,
             answer: answer,
@@ -79,6 +85,15 @@ final class CalculatorService {
             targetCurrency: nil,
             lastUpdated: nil
         )
+    }
+
+    /// Append `.0` to bare integer literals so NSExpression uses floating-point arithmetic.
+    private static func intToDouble(_ expr: String) -> String {
+        // Match sequences of digits that are NOT already followed by a decimal point
+        let pattern = #"(\d+)(?![\d.])"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return expr }
+        let range = NSRange(expr.startIndex..., in: expr)
+        return regex.stringByReplacingMatches(in: expr, range: range, withTemplate: "$1.0")
     }
 
     private func isMathExpression(_ query: String) -> Bool {

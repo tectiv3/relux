@@ -751,6 +751,9 @@ struct OverlayView: View {
                 }
             }
         case .translate:
+            if appState.currentSelection == nil, !query.isEmpty {
+                appState.currentSelection = query
+            }
             appState.panelMode = .translate
         case .script:
             if var command = item.meta["command"] {
