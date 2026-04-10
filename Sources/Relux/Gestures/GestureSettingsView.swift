@@ -3,9 +3,9 @@ import SwiftUI
 struct GestureSettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var gesturesEnabled: Bool = false
-    @State private var stableFrames: Double = Double(UserDefaults.standard.object(forKey: "gesture.stableFrames") as? Int ?? 2)
-    @State private var swipeThreshold: Double = Double(UserDefaults.standard.object(forKey: "gesture.swipeThreshold") as? Float ?? 0.15)
-    @State private var edgeMargin: Double = Double(UserDefaults.standard.object(forKey: "gesture.edgeMargin") as? Float ?? 0.05)
+    @State private var stableFrames: Double = .init(UserDefaults.standard.object(forKey: "gesture.stableFrames") as? Int ?? 2)
+    @State private var swipeThreshold: Double = .init(UserDefaults.standard.object(forKey: "gesture.swipeThreshold") as? Float ?? 0.15)
+    @State private var edgeMargin: Double = .init(UserDefaults.standard.object(forKey: "gesture.edgeMargin") as? Float ?? 0.05)
 
     var body: some View {
         Form {
@@ -51,7 +51,7 @@ struct GestureSettingsView: View {
                                 .foregroundStyle(.secondary)
                                 .monospacedDigit()
                         }
-                        Slider(value: $stableFrames, in: 1...8, step: 1)
+                        Slider(value: $stableFrames, in: 1 ... 8, step: 1)
                             .onChange(of: stableFrames) { _, v in
                                 UserDefaults.standard.set(Int(v), forKey: "gesture.stableFrames")
                             }
@@ -68,7 +68,7 @@ struct GestureSettingsView: View {
                                 .foregroundStyle(.secondary)
                                 .monospacedDigit()
                         }
-                        Slider(value: $swipeThreshold, in: 0.05...0.40, step: 0.01)
+                        Slider(value: $swipeThreshold, in: 0.05 ... 0.40, step: 0.01)
                             .onChange(of: swipeThreshold) { _, v in
                                 UserDefaults.standard.set(Float(v), forKey: "gesture.swipeThreshold")
                             }
@@ -85,7 +85,7 @@ struct GestureSettingsView: View {
                                 .foregroundStyle(.secondary)
                                 .monospacedDigit()
                         }
-                        Slider(value: $edgeMargin, in: 0.0...0.15, step: 0.01)
+                        Slider(value: $edgeMargin, in: 0.0 ... 0.15, step: 0.01)
                             .onChange(of: edgeMargin) { _, v in
                                 UserDefaults.standard.set(Float(v), forKey: "gesture.edgeMargin")
                             }
@@ -118,22 +118,22 @@ private struct GestureBindingRow: View {
 
     init(gesture: GestureType, manager: GestureBindingManager) {
         self.gesture = gesture
-        self._manager = State(initialValue: manager)
+        _manager = State(initialValue: manager)
 
         let action = manager.binding(for: gesture)?.action ?? .none
 
         switch action {
-        case .keyCombo(let combo):
+        case let .keyCombo(combo):
             _actionTag = State(initialValue: "keyCombo")
             _selectedKeyCombo = State(initialValue: combo)
             _selectedSystemAction = State(initialValue: .missionControl)
             _selectedReluxAction = State(initialValue: .toggleRelux)
-        case .system(let sys):
+        case let .system(sys):
             _actionTag = State(initialValue: "system")
             _selectedKeyCombo = State(initialValue: nil)
             _selectedSystemAction = State(initialValue: sys)
             _selectedReluxAction = State(initialValue: .toggleRelux)
-        case .relux(let rel):
+        case let .relux(rel):
             _actionTag = State(initialValue: "relux")
             _selectedKeyCombo = State(initialValue: nil)
             _selectedSystemAction = State(initialValue: .missionControl)
@@ -229,14 +229,14 @@ private struct ShortcutBindingRow: View {
 
     init(binding: ShortcutBinding, manager: GestureBindingManager) {
         self.binding = binding
-        self._manager = State(initialValue: manager)
+        _manager = State(initialValue: manager)
 
         switch binding.action {
-        case .system(let sys):
+        case let .system(sys):
             _actionTag = State(initialValue: "system")
             _selectedSystemAction = State(initialValue: sys)
             _selectedReluxAction = State(initialValue: .toggleRelux)
-        case .relux(let rel):
+        case let .relux(rel):
             _actionTag = State(initialValue: "relux")
             _selectedSystemAction = State(initialValue: .lockScreen)
             _selectedReluxAction = State(initialValue: rel)
@@ -363,4 +363,3 @@ private struct AddShortcutButton: View {
         }
     }
 }
-

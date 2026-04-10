@@ -168,5 +168,21 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - No positional manipulation in OverlayView — the view receives a pre-ranked list and renders it
 - Frecency applies to apps, scripts, AND settings (previously settings were excluded)
 - Selection-aware script bonus: +200 to base score (replaces unconditional prepend)
-- Score bands: calculator 1050, JWT keyword 1000, apps exact 950, scripts exact 930, settings exact 850, web search fallback 200
+- Score bands: calculator 1050, JWT keyword 1000, apps exact 950, scripts exact 930, settings exact 850, web search fallback 200, translate 100
 - See `docs/plans/2026-03-11-unified-search-scoring.md` for full scoring contract
+
+## Instant Space Switching (4-Finger Swipes)
+
+- Vendored `Sources/ISS/ISS.c` and `ISS.h` from github.com/jurplel/InstantSpaceSwitcher (MIT) unmodified
+- Swift mixed-language support via `Relux-Bridging-Header.h` and `SWIFT_OBJC_BRIDGING_HEADER` setting in project.yml
+- `iss_switch(ISSDirection)` posts synthetic dock-swipe CGEvents with high velocity to skip the macOS space-switch animation
+- Uses private CGS symbols (`CGSMainConnectionID`, `CGSGetActiveSpace`, `CGSCopyManagedDisplaySpaces`) via weak_import for bounds checking
+- 4-finger horizontal swipes added to `GestureEngine` alongside existing 3-finger tracking, with separate state machines
+- Default bindings: 4-finger swipe left → `switchSpaceLeft`, right → `switchSpaceRight` (via `SystemAction` enum)
+
+## Calculator Integer Division Crash
+
+- `NSExpression(format:)` integer division by zero throws an uncatchable ObjC exception that kills the SwiftUI `.task` context, breaking all subsequent reactive updates (typing, clipboard, results)
+- Fix: `intToDouble()` regex converts bare integer literals to `N.0` before NSExpression evaluation, forcing floating-point arithmetic
+- Float division by zero returns `inf` which is caught by `.isFinite` guard
+- Also fixes the correctness bug where `800/500` evaluated to `1` instead of `1.6`

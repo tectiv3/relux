@@ -17,9 +17,16 @@ final class GestureBindingManager {
         if let data = UserDefaults.standard.data(forKey: storageKey),
            let decoded = try? JSONDecoder().decode([GestureBinding].self, from: data)
         {
-            bindings = decoded
+            // Merge in any new gesture types that didn't exist in saved data
+            let saved = Dictionary(uniqueKeysWithValues: decoded.map { ($0.gesture, $0.action) })
+            bindings = GestureType.allCases.map { gesture in
+                if let action = saved[gesture] {
+                    return GestureBinding(gesture: gesture, action: action)
+                }
+                return GestureBinding(gesture: gesture, action: Self.defaultAction(for: gesture))
+            }
         } else {
-            bindings = GestureType.allCases.map { GestureBinding(gesture: $0, action: .none) }
+            bindings = GestureType.allCases.map { GestureBinding(gesture: $0, action: Self.defaultAction(for: $0)) }
         }
 
         if let data = UserDefaults.standard.data(forKey: shortcutStorageKey),
@@ -122,6 +129,14 @@ final class GestureBindingManager {
         UserDefaults.standard.set(data, forKey: shortcutStorageKey)
     }
 
+    private static func defaultAction(for gesture: GestureType) -> GestureActionType {
+        switch gesture {
+        case .fourFingerSwipeLeft: .system(.switchSpaceLeft)
+        case .fourFingerSwipeRight: .system(.switchSpaceRight)
+        default: .none
+        }
+    }
+
     // MARK: - Action Handling
 
     private func handleHotkey(_ combo: KeyCombo) {
@@ -136,11 +151,11 @@ final class GestureBindingManager {
 
     private func executeAction(_ action: GestureActionType) {
         switch action {
-        case .keyCombo(let combo):
+        case let .keyCombo(combo):
             postKeyCombo(combo)
-        case .system(let sysAction):
+        case let .system(sysAction):
             executeSystemAction(sysAction)
-        case .relux(let reluxAction):
+        case let .relux(reluxAction):
             executeReluxAction(reluxAction)
         case .none:
             break
@@ -177,6 +192,10 @@ final class GestureBindingManager {
             postKeyCombo(KeyCombo(keyCode: 125, modifierRawValue: NSEvent.ModifierFlags([.control]).rawValue))
         case .showDesktop:
             postKeyCombo(KeyCombo(keyCode: 103, modifierRawValue: 0))
+        case .switchSpaceLeft:
+            _ = iss_switch(ISSDirectionLeft)
+        case .switchSpaceRight:
+            _ = iss_switch(ISSDirectionRight)
         }
     }
 

@@ -1,11 +1,13 @@
 import AppKit
 
-enum GestureType: String, Codable, CaseIterable, Sendable {
+enum GestureType: String, Codable, CaseIterable {
     case threeFingerSwipeUp
     case threeFingerSwipeDown
     case threeFingerSwipeLeft
     case threeFingerSwipeRight
     case threeFingerClick
+    case fourFingerSwipeLeft
+    case fourFingerSwipeRight
 
     var displayName: String {
         switch self {
@@ -14,11 +16,13 @@ enum GestureType: String, Codable, CaseIterable, Sendable {
         case .threeFingerSwipeLeft: "3-Finger Swipe Left"
         case .threeFingerSwipeRight: "3-Finger Swipe Right"
         case .threeFingerClick: "3-Finger Click"
+        case .fourFingerSwipeLeft: "4-Finger Swipe Left"
+        case .fourFingerSwipeRight: "4-Finger Swipe Right"
         }
     }
 }
 
-struct KeyCombo: Codable, Equatable, Sendable {
+struct KeyCombo: Codable, Equatable {
     var keyCode: UInt16
     var modifierRawValue: UInt
 
@@ -115,11 +119,13 @@ struct KeyCombo: Codable, Equatable, Sendable {
     }
 }
 
-enum SystemAction: String, Codable, CaseIterable, Sendable {
+enum SystemAction: String, Codable, CaseIterable {
     case lockScreen
     case missionControl
     case appExpose
     case showDesktop
+    case switchSpaceLeft
+    case switchSpaceRight
 
     var displayName: String {
         switch self {
@@ -127,11 +133,13 @@ enum SystemAction: String, Codable, CaseIterable, Sendable {
         case .missionControl: "Mission Control"
         case .appExpose: "App Expose"
         case .showDesktop: "Show Desktop"
+        case .switchSpaceLeft: "Switch Space Left"
+        case .switchSpaceRight: "Switch Space Right"
         }
     }
 }
 
-enum ReluxAction: String, Codable, CaseIterable, Sendable {
+enum ReluxAction: String, Codable, CaseIterable {
     case toggleRelux
     case clipboardHistory
     case translate
@@ -145,7 +153,7 @@ enum ReluxAction: String, Codable, CaseIterable, Sendable {
     }
 }
 
-enum GestureActionType: Codable, Sendable {
+enum GestureActionType: Codable {
     case keyCombo(KeyCombo)
     case system(SystemAction)
     case relux(ReluxAction)
@@ -161,17 +169,22 @@ enum GestureActionType: Codable, Sendable {
     }
 }
 
-struct GestureBinding: Codable, Sendable {
+struct GestureBinding: Codable {
     var gesture: GestureType
     var action: GestureActionType
 }
 
-struct ShortcutBinding: Codable, Sendable, Identifiable {
-    var id: String { trigger.storageKey }
+struct ShortcutBinding: Codable, Identifiable {
+    var id: String {
+        trigger.storageKey
+    }
+
     var trigger: KeyCombo
     var action: GestureActionType
 }
 
 extension KeyCombo {
-    var storageKey: String { "\(keyCode)-\(modifierRawValue)" }
+    var storageKey: String {
+        "\(keyCode)-\(modifierRawValue)"
+    }
 }

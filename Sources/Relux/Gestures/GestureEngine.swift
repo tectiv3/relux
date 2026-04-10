@@ -12,21 +12,34 @@ final class GestureEngine {
     private var clickMonitor: Any?
     private var isRunning = false
 
-    // Tracking state
+    // 3-finger tracking state
     private var trackingTouches = false
     private var threeFingersTouching = false
     private var postingCmdClick = false
     private var initialPositions: [Int32: (x: Float, y: Float)] = [:]
     private var latestPositions: [Int32: (x: Float, y: Float)] = [:]
     private var trackedFingerIDs: Set<Int32> = []
-
-    // Stability: require N consecutive frames with exactly 3 fingers before tracking
     private var consecutiveThreeFingerFrames = 0
 
-    // Tunable via UserDefaults (gesture.stableFrames, gesture.swipeThreshold, gesture.edgeMargin)
-    var requiredStableFrames: Int { max(1, UserDefaults.standard.object(forKey: "gesture.stableFrames") as? Int ?? 2) }
-    var swipeThreshold: Float { UserDefaults.standard.object(forKey: "gesture.swipeThreshold") as? Float ?? 0.15 }
-    var edgeMargin: Float { UserDefaults.standard.object(forKey: "gesture.edgeMargin") as? Float ?? 0.05 }
+    // 4-finger tracking state
+    private var trackingFourFingers = false
+    private var fourFingerInitialPositions: [Int32: (x: Float, y: Float)] = [:]
+    private var fourFingerLatestPositions: [Int32: (x: Float, y: Float)] = [:]
+    private var fourFingerTrackedIDs: Set<Int32> = []
+    private var consecutiveFourFingerFrames = 0
+
+    /// Tunable via UserDefaults (gesture.stableFrames, gesture.swipeThreshold, gesture.edgeMargin)
+    var requiredStableFrames: Int {
+        max(1, UserDefaults.standard.object(forKey: "gesture.stableFrames") as? Int ?? 2)
+    }
+
+    var swipeThreshold: Float {
+        UserDefaults.standard.object(forKey: "gesture.swipeThreshold") as? Float ?? 0.15
+    }
+
+    var edgeMargin: Float {
+        UserDefaults.standard.object(forKey: "gesture.edgeMargin") as? Float ?? 0.05
+    }
 
     func start() {
         guard !isRunning else { return }
@@ -113,12 +126,40 @@ final class GestureEngine {
         let activeCount = activeTouches.count
         let currentIDs = Set(activeTouches.map(\.id))
 
-        if activeCount == 3 {
+        if activeCount == 4 {
+            consecutiveFourFingerFrames += 1
+            consecutiveThreeFingerFrames = 0
+            threeFingersTouching = false
+            if trackingTouches { resetThreeFingerTracking() }
+
+            if !trackingFourFingers {
+                if consecutiveFourFingerFrames >= requiredStableFrames {
+                    trackingFourFingers = true
+                    fourFingerTrackedIDs = currentIDs
+                    fourFingerInitialPositions = [:]
+                    fourFingerLatestPositions = [:]
+                    for touch in activeTouches {
+                        fourFingerInitialPositions[touch.id] = (x: touch.position.x, y: touch.position.y)
+                        fourFingerLatestPositions[touch.id] = (x: touch.position.x, y: touch.position.y)
+                    }
+                }
+            } else if currentIDs == fourFingerTrackedIDs {
+                for touch in activeTouches {
+                    fourFingerLatestPositions[touch.id] = (x: touch.position.x, y: touch.position.y)
+                }
+            } else {
+                resetFourFingerTracking()
+            }
+        } else if activeCount == 3 {
             consecutiveThreeFingerFrames += 1
+            consecutiveFourFingerFrames = 0
+            if trackingFourFingers {
+                evaluateFourFingerSwipe()
+                resetFourFingerTracking()
+            }
 
             if !trackingTouches {
                 if consecutiveThreeFingerFrames >= requiredStableFrames {
-                    // Stable 3-finger contact — start tracking
                     trackingTouches = true
                     threeFingersTouching = true
                     trackedFingerIDs = currentIDs
@@ -130,21 +171,24 @@ final class GestureEngine {
                     }
                 }
             } else if currentIDs == trackedFingerIDs {
-                // Same 3 fingers still touching — update positions
                 for touch in activeTouches {
                     latestPositions[touch.id] = (x: touch.position.x, y: touch.position.y)
                 }
             } else {
-                // Different finger IDs — abort tracking
-                resetTracking()
+                resetThreeFingerTracking()
             }
         } else {
             consecutiveThreeFingerFrames = 0
+            consecutiveFourFingerFrames = 0
             threeFingersTouching = false
 
             if trackingTouches {
                 evaluateSwipe()
-                resetTracking()
+                resetThreeFingerTracking()
+            }
+            if trackingFourFingers {
+                evaluateFourFingerSwipe()
+                resetFourFingerTracking()
             }
         }
     }
@@ -172,17 +216,38 @@ final class GestureEngine {
 
         guard max(absX, absY) >= swipeThreshold else { return }
 
-        let gesture: GestureType
-        if absX > absY {
-            gesture = avgDX > 0 ? .threeFingerSwipeRight : .threeFingerSwipeLeft
+        let gesture: GestureType = if absX > absY {
+            avgDX > 0 ? .threeFingerSwipeRight : .threeFingerSwipeLeft
         } else {
-            gesture = avgDY > 0 ? .threeFingerSwipeUp : .threeFingerSwipeDown
+            avgDY > 0 ? .threeFingerSwipeUp : .threeFingerSwipeDown
         }
 
         fireGesture(gesture)
     }
 
-    private func resetTracking() {
+    private func evaluateFourFingerSwipe() {
+        guard !fourFingerInitialPositions.isEmpty else { return }
+
+        var totalDX: Float = 0
+        var count: Float = 0
+
+        for (id, initial) in fourFingerInitialPositions {
+            guard let latest = fourFingerLatestPositions[id] else { continue }
+            totalDX += latest.x - initial.x
+            count += 1
+        }
+
+        guard count > 0 else { return }
+        let avgDX = totalDX / count
+
+        // Only horizontal swipes for space switching
+        guard abs(avgDX) >= swipeThreshold else { return }
+
+        let gesture: GestureType = avgDX > 0 ? .fourFingerSwipeRight : .fourFingerSwipeLeft
+        fireGesture(gesture)
+    }
+
+    private func resetThreeFingerTracking() {
         trackingTouches = false
         threeFingersTouching = false
         postingCmdClick = false
@@ -190,6 +255,19 @@ final class GestureEngine {
         initialPositions = [:]
         latestPositions = [:]
         trackedFingerIDs = []
+    }
+
+    private func resetFourFingerTracking() {
+        trackingFourFingers = false
+        consecutiveFourFingerFrames = 0
+        fourFingerInitialPositions = [:]
+        fourFingerLatestPositions = [:]
+        fourFingerTrackedIDs = []
+    }
+
+    private func resetTracking() {
+        resetThreeFingerTracking()
+        resetFourFingerTracking()
     }
 
     private func fireGesture(_ gesture: GestureType) {
