@@ -4,22 +4,38 @@ import os
 
 private let log = Logger(subsystem: "com.relux.app", category: "gesture-engine")
 
+/// State shared between the main actor (where touch frames are processed) and the
+/// CGEventTap callback thread (where clicks are intercepted). Guarded by an unfair lock.
+private struct TapState {
+    var threeFingersTouching = false
+    var postingCmdClick = false
+    var clickEnabled = true
+}
+
+private enum TapDecision {
+    case passthrough
+    case consume
+    case consumeAndTriggerClick
+}
+
 @MainActor
 final class GestureEngine {
     var onGesture: ((GestureType) -> Void)?
 
     private var touchTask: Task<Void, Never>?
-    private var clickMonitor: Any?
+    private nonisolated(unsafe) var eventTap: CFMachPort?
+    private nonisolated(unsafe) var runLoopSource: CFRunLoopSource?
     private var isRunning = false
 
     // 3-finger tracking state
     private var trackingTouches = false
-    private var threeFingersTouching = false
-    private var postingCmdClick = false
     private var initialPositions: [Int32: (x: Float, y: Float)] = [:]
     private var latestPositions: [Int32: (x: Float, y: Float)] = [:]
     private var trackedFingerIDs: Set<Int32> = []
     private var consecutiveThreeFingerFrames = 0
+
+    /// Shared with the CGEventTap callback thread.
+    private nonisolated let tapState = OSAllocatedUnfairLock<TapState>(initialState: TapState())
 
     // 4-finger tracking state
     private var trackingFourFingers = false
@@ -41,6 +57,9 @@ final class GestureEngine {
         requiredStableFrames = max(1, defaults.object(forKey: "gesture.stableFrames") as? Int ?? 2)
         swipeThreshold = defaults.object(forKey: "gesture.swipeThreshold") as? Float ?? 0.15
         edgeMargin = defaults.object(forKey: "gesture.edgeMargin") as? Float ?? 0.05
+
+        let clickEnabled = defaults.object(forKey: "gesture.threeFingerClickEnabled") as? Bool ?? true
+        tapState.withLock { $0.clickEnabled = clickEnabled }
     }
 
     func start() {
@@ -58,7 +77,7 @@ final class GestureEngine {
         }
 
         OMSManager.shared.startListening()
-        installClickMonitor()
+        installClickTap()
 
         touchTask = Task { [weak self] in
             let stream = OMSManager.shared.touchDataStream
@@ -82,32 +101,104 @@ final class GestureEngine {
             defaultsObserver = nil
         }
 
-        if let monitor = clickMonitor {
-            NSEvent.removeMonitor(monitor)
-            clickMonitor = nil
-        }
+        uninstallClickTap()
 
         OMSManager.shared.stopListening()
         resetTracking()
     }
 
-    private func installClickMonitor() {
-        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
-            DispatchQueue.main.async {
-                guard let self, self.threeFingersTouching, !self.postingCmdClick else { return }
-                log.info("3-finger click detected, posting Cmd+Click")
-                self.postCmdClick()
+    private func installClickTap() {
+        let eventMask = (1 << CGEventType.leftMouseDown.rawValue) | (1 << CGEventType.leftMouseUp.rawValue)
+        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
+
+        let callback: CGEventTapCallBack = { _, type, event, refcon in
+            guard let refcon else { return Unmanaged.passUnretained(event) }
+            let engine = Unmanaged<GestureEngine>.fromOpaque(refcon).takeUnretainedValue()
+            return engine.handleTappedEvent(type: type, event: event)
+        }
+
+        guard let tap = CGEvent.tapCreate(
+            tap: .cghidEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: CGEventMask(eventMask),
+            callback: callback,
+            userInfo: selfPtr
+        ) else {
+            log.error("Failed to create CGEventTap — check Accessibility permission")
+            return
+        }
+
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+
+        eventTap = tap
+        runLoopSource = source
+    }
+
+    private func uninstallClickTap() {
+        if let tap = eventTap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+        }
+        if let source = runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+        }
+        eventTap = nil
+        runLoopSource = nil
+    }
+
+    /// Called from the event tap's run-loop source, which we attach to the main run loop.
+    /// Nonisolated because CGEventTapCallBack is a plain C function — touches only thread-safe state.
+    private nonisolated func handleTappedEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        // Re-enable the tap if the system disabled it (e.g. due to timeout).
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            if let tap = eventTap {
+                CGEvent.tapEnable(tap: tap, enable: true)
             }
+            return Unmanaged.passUnretained(event)
+        }
+
+        let hasCmd = event.flags.contains(.maskCommand)
+
+        let decision: TapDecision = tapState.withLock { state in
+            // While posting our synthesized Cmd+Click, pass our own events through but
+            // swallow any residual real click events (they have no .maskCommand).
+            if state.postingCmdClick {
+                return hasCmd ? .passthrough : .consume
+            }
+            guard state.clickEnabled, state.threeFingersTouching else {
+                return .passthrough
+            }
+            // Ignore clicks that already carry Cmd (user holding Cmd themselves).
+            if hasCmd {
+                return .passthrough
+            }
+            if type == .leftMouseDown {
+                state.postingCmdClick = true
+                state.threeFingersTouching = false
+                return .consumeAndTriggerClick
+            }
+            return .passthrough
+        }
+
+        switch decision {
+        case .passthrough:
+            return Unmanaged.passUnretained(event)
+        case .consume:
+            return nil
+        case .consumeAndTriggerClick:
+            Task { @MainActor [weak self] in
+                self?.postCmdClick()
+            }
+            return nil
         }
     }
 
     private func postCmdClick() {
-        postingCmdClick = true
-        threeFingersTouching = false
-
         guard let event = CGEvent(source: nil) else {
             log.error("Failed to get cursor position — check Accessibility permission")
-            postingCmdClick = false
+            tapState.withLock { $0.postingCmdClick = false }
             return
         }
         let pos = event.location
@@ -123,7 +214,7 @@ final class GestureEngine {
             )
         else {
             log.error("Failed to create CGEvent for Cmd+Click")
-            postingCmdClick = false
+            tapState.withLock { $0.postingCmdClick = false }
             return
         }
 
@@ -133,7 +224,7 @@ final class GestureEngine {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) { [weak self] in
             mouseUp.post(tap: .cghidEventTap)
-            self?.postingCmdClick = false
+            self?.tapState.withLock { $0.postingCmdClick = false }
             log.debug("Cmd+Click posted at (\(pos.x), \(pos.y))")
         }
     }
@@ -152,7 +243,7 @@ final class GestureEngine {
         if activeCount == 4 {
             consecutiveFourFingerFrames += 1
             consecutiveThreeFingerFrames = 0
-            threeFingersTouching = false
+            tapState.withLock { $0.threeFingersTouching = false }
             if trackingTouches { resetThreeFingerTracking() }
 
             if !trackingFourFingers {
@@ -184,7 +275,7 @@ final class GestureEngine {
             if !trackingTouches {
                 if consecutiveThreeFingerFrames >= requiredStableFrames {
                     trackingTouches = true
-                    threeFingersTouching = true
+                    tapState.withLock { $0.threeFingersTouching = true }
                     trackedFingerIDs = currentIDs
                     initialPositions = [:]
                     latestPositions = [:]
@@ -203,7 +294,7 @@ final class GestureEngine {
         } else {
             consecutiveThreeFingerFrames = 0
             consecutiveFourFingerFrames = 0
-            threeFingersTouching = false
+            tapState.withLock { $0.threeFingersTouching = false }
 
             if trackingTouches {
                 evaluateSwipe()
@@ -272,8 +363,10 @@ final class GestureEngine {
 
     private func resetThreeFingerTracking() {
         trackingTouches = false
-        threeFingersTouching = false
-        postingCmdClick = false
+        tapState.withLock {
+            $0.threeFingersTouching = false
+            // Don't clear postingCmdClick — it's owned by the posting cycle lifecycle.
+        }
         consecutiveThreeFingerFrames = 0
         initialPositions = [:]
         latestPositions = [:]

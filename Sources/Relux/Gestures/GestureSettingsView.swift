@@ -3,6 +3,7 @@ import SwiftUI
 struct GestureSettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var gesturesEnabled: Bool = false
+    @State private var threeFingerClickEnabled: Bool = UserDefaults.standard.object(forKey: "gesture.threeFingerClickEnabled") as? Bool ?? true
     @State private var stableFrames: Double = .init(UserDefaults.standard.object(forKey: "gesture.stableFrames") as? Int ?? 2)
     @State private var swipeThreshold: Double = .init(UserDefaults.standard.object(forKey: "gesture.swipeThreshold") as? Float ?? 0.15)
     @State private var edgeMargin: Double = .init(UserDefaults.standard.object(forKey: "gesture.edgeMargin") as? Float ?? 0.05)
@@ -23,8 +24,15 @@ struct GestureSettingsView: View {
                         HStack(spacing: 8) {
                             Text(gesture.displayName)
                                 .frame(minWidth: 130, alignment: .leading)
-                            Text("\u{2318}+Click")
-                                .foregroundStyle(.secondary)
+                            Toggle(isOn: $threeFingerClickEnabled) {
+                                Text("\u{2318}+Click")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                            .onChange(of: threeFingerClickEnabled) { _, enabled in
+                                UserDefaults.standard.set(enabled, forKey: "gesture.threeFingerClickEnabled")
+                            }
                             Spacer()
                         }
                     } else {
@@ -52,8 +60,8 @@ struct GestureSettingsView: View {
                                 .monospacedDigit()
                         }
                         Slider(value: $stableFrames, in: 1 ... 8, step: 1)
-                            .onChange(of: stableFrames) { _, v in
-                                UserDefaults.standard.set(Int(v), forKey: "gesture.stableFrames")
+                            .onChange(of: stableFrames) { _, newValue in
+                                UserDefaults.standard.set(Int(newValue), forKey: "gesture.stableFrames")
                             }
                         Text("Frames with 3 fingers before tracking starts. Lower = faster but more false positives.")
                             .font(.system(size: 10))
@@ -69,8 +77,8 @@ struct GestureSettingsView: View {
                                 .monospacedDigit()
                         }
                         Slider(value: $swipeThreshold, in: 0.05 ... 0.40, step: 0.01)
-                            .onChange(of: swipeThreshold) { _, v in
-                                UserDefaults.standard.set(Float(v), forKey: "gesture.swipeThreshold")
+                            .onChange(of: swipeThreshold) { _, newValue in
+                                UserDefaults.standard.set(Float(newValue), forKey: "gesture.swipeThreshold")
                             }
                         Text("Minimum finger travel to register a swipe. Lower = easier to trigger.")
                             .font(.system(size: 10))
@@ -86,8 +94,8 @@ struct GestureSettingsView: View {
                                 .monospacedDigit()
                         }
                         Slider(value: $edgeMargin, in: 0.0 ... 0.15, step: 0.01)
-                            .onChange(of: edgeMargin) { _, v in
-                                UserDefaults.standard.set(Float(v), forKey: "gesture.edgeMargin")
+                            .onChange(of: edgeMargin) { _, newValue in
+                                UserDefaults.standard.set(Float(newValue), forKey: "gesture.edgeMargin")
                             }
                         Text("Trackpad edge zone for palm rejection. Higher = more aggressive filtering.")
                             .font(.system(size: 10))
@@ -286,16 +294,16 @@ private struct ShortcutBindingRow: View {
                 ForEach(SystemAction.allCases, id: \.rawValue) { Text($0.displayName).tag($0) }
             }
             .labelsHidden()
-            .onChange(of: selectedSystemAction) { _, v in
-                manager.updateShortcutBinding(id: binding.id, action: .system(v))
+            .onChange(of: selectedSystemAction) { _, newAction in
+                manager.updateShortcutBinding(id: binding.id, action: .system(newAction))
             }
         case "relux":
             Picker("Action", selection: $selectedReluxAction) {
                 ForEach(ReluxAction.allCases, id: \.rawValue) { Text($0.displayName).tag($0) }
             }
             .labelsHidden()
-            .onChange(of: selectedReluxAction) { _, v in
-                manager.updateShortcutBinding(id: binding.id, action: .relux(v))
+            .onChange(of: selectedReluxAction) { _, newAction in
+                manager.updateShortcutBinding(id: binding.id, action: .relux(newAction))
             }
         default:
             EmptyView()
@@ -357,8 +365,8 @@ private struct AddShortcutButton: View {
     }
 
     private func removeMonitor() {
-        if let m = monitor {
-            NSEvent.removeMonitor(m)
+        if let existing = monitor {
+            NSEvent.removeMonitor(existing)
             monitor = nil
         }
     }
