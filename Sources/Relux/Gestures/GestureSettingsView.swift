@@ -7,6 +7,10 @@ struct GestureSettingsView: View {
     @State private var stableFrames: Double = .init(UserDefaults.standard.object(forKey: "gesture.stableFrames") as? Int ?? 2)
     @State private var swipeThreshold: Double = .init(UserDefaults.standard.object(forKey: "gesture.swipeThreshold") as? Float ?? 0.15)
     @State private var edgeMargin: Double = .init(UserDefaults.standard.object(forKey: "gesture.edgeMargin") as? Float ?? 0.05)
+    @State private var keystrokeWindowMs: Double = .init(UserDefaults.standard.object(forKey: "gesture.keystrokeWindowMs") as? Int ?? 180)
+    @State private var touchQualityMin: Double = .init(UserDefaults.standard.object(forKey: "gesture.touchQualityMin") as? Float ?? 0.125)
+    @State private var fingerSpreadMin: Double = .init(UserDefaults.standard.object(forKey: "gesture.fingerSpreadMin") as? Float ?? 0.15)
+    @State private var aspectRatioMax: Double = .init(UserDefaults.standard.object(forKey: "gesture.aspectRatioMax") as? Float ?? 2.5)
 
     var body: some View {
         Form {
@@ -98,6 +102,74 @@ struct GestureSettingsView: View {
                                 UserDefaults.standard.set(Float(newValue), forKey: "gesture.edgeMargin")
                             }
                         Text("Trackpad edge zone for palm rejection. Higher = more aggressive filtering.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text("Keystroke suppression")
+                            Spacer()
+                            Text("\(Int(keystrokeWindowMs)) ms")
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        Slider(value: $keystrokeWindowMs, in: 0 ... 500, step: 10)
+                            .onChange(of: keystrokeWindowMs) { _, newValue in
+                                UserDefaults.standard.set(Int(newValue), forKey: "gesture.keystrokeWindowMs")
+                            }
+                        Text("Ignore gestures for N ms after a keystroke. 0 = disabled.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text("Touch quality")
+                            Spacer()
+                            Text(String(format: "%.2f", touchQualityMin))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        Slider(value: $touchQualityMin, in: 0.0 ... 0.5, step: 0.01)
+                            .onChange(of: touchQualityMin) { _, newValue in
+                                UserDefaults.standard.set(Float(newValue), forKey: "gesture.touchQualityMin")
+                            }
+                        Text("Minimum touch capacitance to count. Higher = reject more noise.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text("Finger spread")
+                            Spacer()
+                            Text(String(format: "%.2f", fingerSpreadMin))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        Slider(value: $fingerSpreadMin, in: 0.0 ... 0.4, step: 0.01)
+                            .onChange(of: fingerSpreadMin) { _, newValue in
+                                UserDefaults.standard.set(Float(newValue), forKey: "gesture.fingerSpreadMin")
+                            }
+                        Text("Minimum X-axis spread across fingers when arming. 0 = disabled.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text("Aspect ratio max")
+                            Spacer()
+                            Text(String(format: "%.1f", aspectRatioMax))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        Slider(value: $aspectRatioMax, in: 1.5 ... 5.0, step: 0.1)
+                            .onChange(of: aspectRatioMax) { _, newValue in
+                                UserDefaults.standard.set(Float(newValue), forKey: "gesture.aspectRatioMax")
+                            }
+                        Text("Reject elongated touches (palms). Lower = stricter. 5.0 = disabled.")
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
                     }

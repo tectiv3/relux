@@ -44,19 +44,31 @@ final class GestureEngine {
     private var fourFingerTrackedIDs: Set<Int32> = []
     private var consecutiveFourFingerFrames = 0
 
-    /// Tunable via UserDefaults (gesture.stableFrames, gesture.swipeThreshold, gesture.edgeMargin).
+    /// Tunable via UserDefaults (gesture.stableFrames, gesture.swipeThreshold, gesture.edgeMargin,
+    /// gesture.keystrokeWindowMs, gesture.touchQualityMin, gesture.fingerSpreadMin, gesture.aspectRatioMax).
     /// Cached to avoid hitting UserDefaults on every touch frame; refreshed via NSUserDefaultsDidChange.
     private(set) var requiredStableFrames: Int = 2
     private(set) var swipeThreshold: Float = 0.15
     private(set) var edgeMargin: Float = 0.05
+    private(set) var keystrokeWindow: TimeInterval = 0.180
+    private(set) var touchQualityMin: Float = 0.125
+    private(set) var fingerSpreadMin: Float = 0.15
+    private(set) var aspectRatioMax: Float = 2.5
 
     private var defaultsObserver: NSObjectProtocol?
+
+    private var lastKeystrokeAt: Date = .distantPast
+    private var keystrokeMonitor: Any?
 
     private func reloadTunables() {
         let defaults = UserDefaults.standard
         requiredStableFrames = max(1, defaults.object(forKey: "gesture.stableFrames") as? Int ?? 2)
         swipeThreshold = defaults.object(forKey: "gesture.swipeThreshold") as? Float ?? 0.15
         edgeMargin = defaults.object(forKey: "gesture.edgeMargin") as? Float ?? 0.05
+        keystrokeWindow = TimeInterval(max(0, defaults.object(forKey: "gesture.keystrokeWindowMs") as? Int ?? 180)) / 1000.0
+        touchQualityMin = defaults.object(forKey: "gesture.touchQualityMin") as? Float ?? 0.125
+        fingerSpreadMin = defaults.object(forKey: "gesture.fingerSpreadMin") as? Float ?? 0.15
+        aspectRatioMax = defaults.object(forKey: "gesture.aspectRatioMax") as? Float ?? 2.5
 
         let clickEnabled = defaults.object(forKey: "gesture.threeFingerClickEnabled") as? Bool ?? true
         tapState.withLock { $0.clickEnabled = clickEnabled }
@@ -74,6 +86,12 @@ final class GestureEngine {
             queue: .main
         ) { [weak self] _ in
             self?.reloadTunables()
+        }
+
+        keystrokeMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] _ in
+            Task { @MainActor in
+                self?.lastKeystrokeAt = Date()
+            }
         }
 
         OMSManager.shared.startListening()
@@ -99,6 +117,11 @@ final class GestureEngine {
         if let observer = defaultsObserver {
             NotificationCenter.default.removeObserver(observer)
             defaultsObserver = nil
+        }
+
+        if let monitor = keystrokeMonitor {
+            NSEvent.removeMonitor(monitor)
+            keystrokeMonitor = nil
         }
 
         uninstallClickTap()
@@ -236,7 +259,21 @@ final class GestureEngine {
     }
 
     private func processTouchFrame(_ touches: [OMSTouchData]) {
-        let activeTouches = touches.filter { $0.state == .touching && !isLikelyPalm($0) }
+        // Don't try to interpret gestures while the user is actively typing;
+        // palms land on the trackpad between keystrokes and look like multi-finger contacts.
+        if keystrokeWindow > 0, Date().timeIntervalSince(lastKeystrokeAt) < keystrokeWindow {
+            if trackingTouches { resetThreeFingerTracking() }
+            if trackingFourFingers { resetFourFingerTracking() }
+            return
+        }
+
+        let activeTouches = touches.filter { touch in
+            guard touch.state == .touching else { return false }
+            guard touch.total >= touchQualityMin else { return false }
+            guard touch.axis.minor > 0.001 else { return false }
+            guard (touch.axis.major / touch.axis.minor) <= aspectRatioMax else { return false }
+            return !isLikelyPalm(touch)
+        }
         let activeCount = activeTouches.count
         let currentIDs = Set(activeTouches.map(\.id))
 
@@ -248,6 +285,15 @@ final class GestureEngine {
 
             if !trackingFourFingers {
                 if consecutiveFourFingerFrames >= requiredStableFrames {
+                    // Palms plus an adjacent finger cluster tightly; genuine 4-finger gestures spread across X.
+                    if fingerSpreadMin > 0 {
+                        let xs = activeTouches.map(\.position.x)
+                        let spread = (xs.max() ?? 0) - (xs.min() ?? 0)
+                        if spread < fingerSpreadMin {
+                            consecutiveFourFingerFrames = 0
+                            return
+                        }
+                    }
                     trackingFourFingers = true
                     fourFingerTrackedIDs = currentIDs
                     fourFingerInitialPositions = [:]
@@ -274,6 +320,15 @@ final class GestureEngine {
 
             if !trackingTouches {
                 if consecutiveThreeFingerFrames >= requiredStableFrames {
+                    // Palms plus an adjacent finger cluster tightly; genuine 3-finger gestures spread across X.
+                    if fingerSpreadMin > 0 {
+                        let xs = activeTouches.map(\.position.x)
+                        let spread = (xs.max() ?? 0) - (xs.min() ?? 0)
+                        if spread < fingerSpreadMin {
+                            consecutiveThreeFingerFrames = 0
+                            return
+                        }
+                    }
                     trackingTouches = true
                     tapState.withLock { $0.threeFingersTouching = true }
                     trackedFingerIDs = currentIDs
