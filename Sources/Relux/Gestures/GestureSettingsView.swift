@@ -152,7 +152,7 @@ struct GestureSettingsView: View {
                             .onChange(of: fingerSpreadMin) { _, newValue in
                                 UserDefaults.standard.set(Float(newValue), forKey: "gesture.fingerSpreadMin")
                             }
-                        Text("Minimum X-axis spread across fingers when arming. 0 = disabled.")
+                        Text("Minimum X-axis spread at arming. Higher rejects more palms but swipes that start with clustered fingers (fanning out mid-swipe) may lose travel distance. 0 = disabled.")
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
                     }
@@ -169,7 +169,7 @@ struct GestureSettingsView: View {
                             .onChange(of: aspectRatioMax) { _, newValue in
                                 UserDefaults.standard.set(Float(newValue), forKey: "gesture.aspectRatioMax")
                             }
-                        Text("Reject elongated touches (palms). Lower = stricter. 5.0 = disabled.")
+                        Text("Reject elongated touches (palms). Lower = stricter. Raise if real gestures are being rejected.")
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
                     }

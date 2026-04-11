@@ -85,7 +85,9 @@ final class GestureEngine {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.reloadTunables()
+            Task { @MainActor in
+                self?.reloadTunables()
+            }
         }
 
         keystrokeMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] _ in
@@ -128,6 +130,7 @@ final class GestureEngine {
 
         OMSManager.shared.stopListening()
         resetTracking()
+        tapState.withLock { $0.threeFingersTouching = false }
     }
 
     private func installClickTap() {
@@ -262,10 +265,17 @@ final class GestureEngine {
         // Don't try to interpret gestures while the user is actively typing;
         // palms land on the trackpad between keystrokes and look like multi-finger contacts.
         if keystrokeWindow > 0, Date().timeIntervalSince(lastKeystrokeAt) < keystrokeWindow {
+            tapState.withLock { $0.threeFingersTouching = false }
             if trackingTouches { resetThreeFingerTracking() }
             if trackingFourFingers { resetFourFingerTracking() }
             return
         }
+
+        // Click arming runs on a looser predicate than swipe tracking: we want "3 fingers physically
+        // down right now" for the 3-finger-click feature, independent of quality/aspect/spread gates
+        // that exist to reject noisy swipes. Otherwise tuning swipe filters silently disables clicks.
+        let looseClickCount = touches.count(where: { $0.state == .touching && !isLikelyPalm($0) })
+        tapState.withLock { $0.threeFingersTouching = (looseClickCount == 3) }
 
         let activeTouches = touches.filter { touch in
             guard touch.state == .touching else { return false }
@@ -280,7 +290,6 @@ final class GestureEngine {
         if activeCount == 4 {
             consecutiveFourFingerFrames += 1
             consecutiveThreeFingerFrames = 0
-            tapState.withLock { $0.threeFingersTouching = false }
             if trackingTouches { resetThreeFingerTracking() }
 
             if !trackingFourFingers {
@@ -302,6 +311,7 @@ final class GestureEngine {
                         fourFingerInitialPositions[touch.id] = (x: touch.position.x, y: touch.position.y)
                         fourFingerLatestPositions[touch.id] = (x: touch.position.x, y: touch.position.y)
                     }
+                    logArmingCharacteristics("4-finger", touches: activeTouches)
                 }
             } else if currentIDs == fourFingerTrackedIDs {
                 for touch in activeTouches {
@@ -330,7 +340,6 @@ final class GestureEngine {
                         }
                     }
                     trackingTouches = true
-                    tapState.withLock { $0.threeFingersTouching = true }
                     trackedFingerIDs = currentIDs
                     initialPositions = [:]
                     latestPositions = [:]
@@ -338,6 +347,7 @@ final class GestureEngine {
                         initialPositions[touch.id] = (x: touch.position.x, y: touch.position.y)
                         latestPositions[touch.id] = (x: touch.position.x, y: touch.position.y)
                     }
+                    logArmingCharacteristics("3-finger", touches: activeTouches)
                 }
             } else if currentIDs == trackedFingerIDs {
                 for touch in activeTouches {
@@ -349,7 +359,6 @@ final class GestureEngine {
         } else {
             consecutiveThreeFingerFrames = 0
             consecutiveFourFingerFrames = 0
-            tapState.withLock { $0.threeFingersTouching = false }
 
             if trackingTouches {
                 evaluateSwipe()
@@ -360,6 +369,17 @@ final class GestureEngine {
                 resetFourFingerTracking()
             }
         }
+    }
+
+    /// Emits one log line per swipe arming with per-touch `total` and aspect ratio.
+    /// Use this to calibrate `touchQualityMin` / `aspectRatioMax` against real hardware —
+    /// the OMS `total` field has no documented scale so defaults are provisional.
+    private func logArmingCharacteristics(_ label: String, touches: [OMSTouchData]) {
+        let details = touches.map { touch -> String in
+            let aspect = touch.axis.major / max(touch.axis.minor, 0.001)
+            return String(format: "total=%.3f aspect=%.2f", touch.total, aspect)
+        }.joined(separator: " | ")
+        log.info("\(label) armed: \(details)")
     }
 
     private func evaluateSwipe() {
@@ -417,11 +437,9 @@ final class GestureEngine {
     }
 
     private func resetThreeFingerTracking() {
+        // Resets swipe tracking only. Click-arming state lives in tapState and is driven by
+        // the per-frame loose predicate at the top of processTouchFrame, not by this reset.
         trackingTouches = false
-        tapState.withLock {
-            $0.threeFingersTouching = false
-            // Don't clear postingCmdClick — it's owned by the posting cycle lifecycle.
-        }
         consecutiveThreeFingerFrames = 0
         initialPositions = [:]
         latestPositions = [:]
