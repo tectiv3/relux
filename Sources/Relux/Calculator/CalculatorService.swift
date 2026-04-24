@@ -12,11 +12,21 @@ struct CalculatorResult {
     let lastUpdated: Date?
 }
 
-@MainActor @Observable
-final class CalculatorService {
+final class CalculatorService: @unchecked Sendable {
     private let cache = ExchangeRateCache()
-    private var cachedRates: CachedRates?
-    private var isFetching = false
+    private let stateLock = NSLock()
+    private var _cachedRates: CachedRates?
+    private var _isFetching = false
+
+    private var cachedRates: CachedRates? {
+        get { stateLock.withLock { _cachedRates } }
+        set { stateLock.withLock { _cachedRates = newValue } }
+    }
+
+    private var isFetching: Bool {
+        get { stateLock.withLock { _isFetching } }
+        set { stateLock.withLock { _isFetching = newValue } }
+    }
 
     /// Default target currency for each source
     private let defaultPairs: [String: String] = [
@@ -37,12 +47,49 @@ final class CalculatorService {
         }
     }
 
+    /// Evaluate synchronously. Returns nil on any failure (bad input, crash, timeout).
+    /// Use evaluateAsync for non-blocking evaluation with hard timeout.
     func evaluate(_ query: String) -> CalculatorResult? {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
-        if let currencyResult = evaluateCurrency(trimmed) {
-            return currencyResult
+        // Currency requires cachedRates (actor-isolated), handled by evaluateAsync
+        if Self.currencyPattern.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)) != nil {
+            return nil
         }
         return evaluateMath(trimmed)
+    }
+
+    /// Async evaluation with 2-second timeout. Runs off the main thread so
+    /// a blocking/crashing NSExpression cannot freeze the UI.
+    func evaluateAsync(_ query: String) async -> CalculatorResult? {
+        do {
+            return try await withThrowingTaskGroup(of: CalculatorResult?.self) { group in
+                // CalculatorService is @unchecked Sendable — single-threaded use.
+                // Capture self directly; the class owns its own synchronization.
+                let capturedSelf = self
+                let capturedQuery = query
+                group.addTask {
+                    await Task.detached(priority: .userInitiated) {
+                        capturedSelf.evaluate(capturedQuery)
+                    }.value
+                }
+
+                // Timeout task
+                group.addTask {
+                    try await Task.sleep(nanoseconds: 2_000_000_000)
+                    return nil
+                }
+
+                for try await result in group {
+                    if result != nil {
+                        group.cancelAll()
+                        return result
+                    }
+                }
+                return nil
+            }
+        } catch {
+            return nil
+        }
     }
 
     // MARK: - Math
@@ -58,6 +105,10 @@ final class CalculatorService {
 
         // Strip trailing operators so partial input doesn't crash
         while let last = expr.last, "+-*/".contains(last) {
+            expr.removeLast()
+        }
+        // Strip trailing dots (incomplete decimals like "7*0.")
+        while expr.hasSuffix(".") {
             expr.removeLast()
         }
         guard !expr.isEmpty else { return nil }
@@ -88,7 +139,7 @@ final class CalculatorService {
     }
 
     /// Append `.0` to bare integer literals so NSExpression uses floating-point arithmetic.
-    private static func intToDouble(_ expr: String) -> String {
+    private nonisolated static func intToDouble(_ expr: String) -> String {
         // Match sequences of digits that are NOT already followed by a decimal point
         let pattern = #"(\d+)(?![\d.])"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return expr }
@@ -179,7 +230,7 @@ final class CalculatorService {
 
     // MARK: - Formatting
 
-    private func formatNumber(_ value: Double) -> String {
+    private nonisolated func formatNumber(_ value: Double) -> String {
         if value == value.rounded(), abs(value) < 1e15 {
             return String(format: "%.0f", value)
         }

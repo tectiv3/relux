@@ -3,7 +3,7 @@ import Foundation
 
 @MainActor
 final class SystemSettingsSearcher {
-    struct SettingsPane: Sendable {
+    struct SettingsPane {
         let name: String
         let keywords: [String]
         let url: String

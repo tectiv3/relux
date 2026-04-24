@@ -1,6 +1,6 @@
 import Foundation
 
-enum SearchItemKind: Sendable {
+enum SearchItemKind {
     case app
     case webSearch
     case script
@@ -10,7 +10,7 @@ enum SearchItemKind: Sendable {
     case systemSettings
 }
 
-struct SearchItem: Identifiable, Sendable {
+struct SearchItem: Identifiable {
     let id: String
     let title: String
     var subtitle: String

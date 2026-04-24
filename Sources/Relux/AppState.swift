@@ -18,7 +18,7 @@ final class AppState {
     let scriptSearcher = ScriptSearcher()
     let frecency = FrecencyTracker()
     let extensionRegistry = ExtensionRegistry()
-    let calculatorService = CalculatorService()
+    private let calculatorService = CalculatorService()
     let systemSettingsSearcher = SystemSettingsSearcher()
 
     let gestureBindingManager = GestureBindingManager()
@@ -79,7 +79,7 @@ final class AppState {
         UserDefaults.standard.object(forKey: "maxSearchResults") as? Int ?? 10
     }
 
-    func performSearch(query: String, stdinValue: String? = nil) -> [SearchItem] {
+    func performSearch(query: String, stdinValue: String? = nil) async -> [SearchItem] {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
 
         let limit = maxSearchResults
@@ -89,7 +89,7 @@ final class AppState {
         all += appSearcher.search(trimmed, limit: limit)
         all += scriptSearcher.search(trimmed, limit: limit, stdinValue: stdinValue)
         all += systemSettingsSearcher.search(trimmed, limit: limit)
-        all += syntheticItems(query: trimmed, selection: stdinValue)
+        all += await syntheticItems(query: trimmed, selection: stdinValue)
 
         // Selection-aware script bonus
         if stdinValue != nil {
@@ -107,10 +107,10 @@ final class AppState {
         return Array(all.prefix(limit))
     }
 
-    private func syntheticItems(query: String, selection: String?) -> [SearchItem] {
+    private func syntheticItems(query: String, selection: String?) async -> [SearchItem] {
         var items: [SearchItem] = []
 
-        if let calc = calculatorItem(query: query) { items.append(calc) }
+        if let calc = await calculatorItem(query: query) { items.append(calc) }
         if let jwt = jwtItem(query: query, selection: selection) { items.append(jwt) }
         if let trans = translateItem(query: query, selection: selection) { items.append(trans) }
         items.append(webSearchItem(query: query))
@@ -118,9 +118,9 @@ final class AppState {
         return items
     }
 
-    private func calculatorItem(query: String) -> SearchItem? {
+    private func calculatorItem(query: String) async -> SearchItem? {
         guard extensionRegistry.isReady("calculator"),
-              let calcResult = calculatorService.evaluate(query) else { return nil }
+              let calcResult = await calculatorService.evaluateAsync(query) else { return nil }
         return SearchItem(
             id: "calculator-result",
             title: calcResult.expression,

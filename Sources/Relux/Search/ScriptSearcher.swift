@@ -3,7 +3,7 @@ import os
 
 private let logger = Logger(subsystem: "com.relux.app", category: "ScriptSearcher")
 
-enum ScriptOutputMode: String, Codable, CaseIterable, Sendable {
+enum ScriptOutputMode: String, Codable, CaseIterable {
     case none
     case capture
     case replace
@@ -17,7 +17,7 @@ enum ScriptOutputMode: String, Codable, CaseIterable, Sendable {
     }
 }
 
-enum InputMode: String, Codable, CaseIterable, Sendable {
+enum InputMode: String, Codable, CaseIterable {
     case none
     case stdin
     case argument
@@ -35,7 +35,7 @@ enum InputMode: String, Codable, CaseIterable, Sendable {
     }
 }
 
-enum InputFilter: Codable, Sendable, Equatable {
+enum InputFilter: Codable, Equatable {
     case any
     case integer
     case number
@@ -126,7 +126,7 @@ enum InputFilter: Codable, Sendable, Equatable {
     }
 }
 
-struct ScriptItem: Codable, Identifiable, Sendable {
+struct ScriptItem: Codable, Identifiable {
     let id: String
     var title: String
     var command: String
@@ -183,7 +183,7 @@ struct ScriptItem: Codable, Identifiable, Sendable {
     }
 }
 
-struct EnvVar: Codable, Identifiable, Sendable {
+struct EnvVar: Codable, Identifiable {
     let id: String
     var name: String
     var value: String
