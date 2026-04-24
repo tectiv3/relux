@@ -12,21 +12,11 @@ struct CalculatorResult {
     let lastUpdated: Date?
 }
 
-final class CalculatorService: @unchecked Sendable {
+@MainActor @Observable
+final class CalculatorService {
     private let cache = ExchangeRateCache()
-    private let stateLock = NSLock()
-    private var _cachedRates: CachedRates?
-    private var _isFetching = false
-
-    private var cachedRates: CachedRates? {
-        get { stateLock.withLock { _cachedRates } }
-        set { stateLock.withLock { _cachedRates = newValue } }
-    }
-
-    private var isFetching: Bool {
-        get { stateLock.withLock { _isFetching } }
-        set { stateLock.withLock { _isFetching = newValue } }
-    }
+    private var cachedRates: CachedRates?
+    private var isFetching = false
 
     /// Default target currency for each source
     private let defaultPairs: [String: String] = [
@@ -47,49 +37,12 @@ final class CalculatorService: @unchecked Sendable {
         }
     }
 
-    /// Evaluate synchronously. Returns nil on any failure (bad input, crash, timeout).
-    /// Use evaluateAsync for non-blocking evaluation with hard timeout.
     func evaluate(_ query: String) -> CalculatorResult? {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
-        // Currency requires cachedRates (actor-isolated), handled by evaluateAsync
-        if Self.currencyPattern.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)) != nil {
-            return nil
+        if let currencyResult = evaluateCurrency(trimmed) {
+            return currencyResult
         }
         return evaluateMath(trimmed)
-    }
-
-    /// Async evaluation with 2-second timeout. Runs off the main thread so
-    /// a blocking/crashing NSExpression cannot freeze the UI.
-    func evaluateAsync(_ query: String) async -> CalculatorResult? {
-        do {
-            return try await withThrowingTaskGroup(of: CalculatorResult?.self) { group in
-                // CalculatorService is @unchecked Sendable — single-threaded use.
-                // Capture self directly; the class owns its own synchronization.
-                let capturedSelf = self
-                let capturedQuery = query
-                group.addTask {
-                    await Task.detached(priority: .userInitiated) {
-                        capturedSelf.evaluate(capturedQuery)
-                    }.value
-                }
-
-                // Timeout task
-                group.addTask {
-                    try await Task.sleep(nanoseconds: 2_000_000_000)
-                    return nil
-                }
-
-                for try await result in group {
-                    if result != nil {
-                        group.cancelAll()
-                        return result
-                    }
-                }
-                return nil
-            }
-        } catch {
-            return nil
-        }
     }
 
     // MARK: - Math
@@ -116,11 +69,12 @@ final class CalculatorService: @unchecked Sendable {
         // Force floating-point arithmetic: integer division by zero throws an
         // uncatchable ObjC exception that kills the SwiftUI task context,
         // and integer division gives wrong results (800/500 = 1 instead of 1.6).
-        expr = Self.intToDouble(expr)
+        // Replace each `/` with `/.0/` so both operands become floats.
+        // This works even when operands already have decimals — the extra `.0`
+        // after an existing decimal is ignored by NSExpression (e.g. `5.0/1.02.0` = `5.0/2.0`).
+        expr = expr.replacingOccurrences(of: "/", with: "/1.0/")
 
-        let nsExpr = NSExpression(format: expr)
-
-        guard let result = nsExpr.expressionValue(with: nil, context: nil) as? NSNumber else {
+        guard let result = NSExpression.relux_safeEvaluateExpression(expr) else {
             return nil
         }
 
@@ -136,15 +90,6 @@ final class CalculatorService: @unchecked Sendable {
             targetCurrency: nil,
             lastUpdated: nil
         )
-    }
-
-    /// Append `.0` to bare integer literals so NSExpression uses floating-point arithmetic.
-    private nonisolated static func intToDouble(_ expr: String) -> String {
-        // Match sequences of digits that are NOT already followed by a decimal point
-        let pattern = #"(\d+)(?![\d.])"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return expr }
-        let range = NSRange(expr.startIndex..., in: expr)
-        return regex.stringByReplacingMatches(in: expr, range: range, withTemplate: "$1.0")
     }
 
     private func isMathExpression(_ query: String) -> Bool {
@@ -230,7 +175,7 @@ final class CalculatorService: @unchecked Sendable {
 
     // MARK: - Formatting
 
-    private nonisolated func formatNumber(_ value: Double) -> String {
+    private func formatNumber(_ value: Double) -> String {
         if value == value.rounded(), abs(value) < 1e15 {
             return String(format: "%.0f", value)
         }
@@ -251,14 +196,12 @@ final class CalculatorService: @unchecked Sendable {
 
     // MARK: - Rate Refresh
 
-    private func refreshRates() {
+    private func refreshRates() async {
         guard !isFetching else { return }
         isFetching = true
-        Task {
-            if let fresh = await cache.fetchFresh() {
-                cachedRates = fresh
-            }
-            isFetching = false
+        defer { isFetching = false }
+        if let fresh = await cache.fetchFresh() {
+            cachedRates = fresh
         }
     }
 }

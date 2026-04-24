@@ -180,7 +180,7 @@ struct OverlayView: View {
         .frame(maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .task(id: "\(query)\(searchTrigger)") {
-            await performSearch(query)
+            performSearch(query)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             guard appState.panelMode == .search else { return }
@@ -599,7 +599,7 @@ struct OverlayView: View {
 
     // MARK: - Actions
 
-    private func performSearch(_ text: String) async {
+    private func performSearch(_ text: String) {
         runningAppPaths = Set(
             NSWorkspace.shared.runningApplications.compactMap { $0.bundleURL?.path }
         )
@@ -658,7 +658,7 @@ struct OverlayView: View {
                 results = groupByKind(selectionItems + recents)
             }
         } else {
-            results = await appState.performSearch(query: trimmed, stdinValue: appState.currentSelection)
+            results = appState.performSearch(query: trimmed, stdinValue: appState.currentSelection)
 
             // Deduplicate by id, preserving order
             var seen = Set<String>()
