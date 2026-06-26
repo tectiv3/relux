@@ -34,7 +34,7 @@ enum SelectionCapture {
             kAXFocusedApplicationAttribute as CFString,
             &focusedApp
         )
-        guard appResult == .success else { return captureViaClipboard() }
+        guard appResult == .success else { return nil }
 
         // swiftlint:disable:next force_cast
         let appElement = focusedApp as! AXUIElement
@@ -49,7 +49,7 @@ enum SelectionCapture {
             kAXFocusedUIElementAttribute as CFString,
             &focusedElement
         )
-        guard elemResult == .success else { return captureViaClipboard() }
+        guard elemResult == .success else { return nil }
         // swiftlint:disable:next force_cast
         let element = focusedElement as! AXUIElement
 
@@ -69,8 +69,30 @@ enum SelectionCapture {
             return text
         }
 
-        // Universal fallback — simulated Cmd+C for apps where AX doesn't expose selection
+        // Universal fallback — simulated Cmd+C for apps where AX doesn't expose selection.
+        // Gated on a text-bearing role: injecting Cmd+C into a non-text focus (e.g. Finder's
+        // file view) triggers the macOS "no valid action" system beep.
+        guard isTextBearing(element) else { return nil }
         return captureViaClipboard()
+    }
+
+    /// Roles whose focused element can hold a text selection worth copying.
+    private static let textBearingRoles: Set<String> = [
+        kAXTextFieldRole as String,
+        kAXTextAreaRole as String,
+        kAXComboBoxRole as String,
+        kAXStaticTextRole as String,
+        "AXWebArea",
+    ]
+
+    private static func isTextBearing(_ element: AXUIElement) -> Bool {
+        var role: AnyObject?
+        guard AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role) == .success,
+              let roleString = role as? String
+        else {
+            return false
+        }
+        return textBearingRoles.contains(roleString)
     }
 
     private static func selectedTextViaMarkers(from element: AXUIElement) -> String? {
