@@ -179,7 +179,7 @@ struct OverlayView: View {
         .frame(width: 750)
         .frame(maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .task(id: "\(query)\(searchTrigger)") {
+        .task(id: "\(query)\(searchTrigger)\(appState.selectionCaptureID)") {
             performSearch(query)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in

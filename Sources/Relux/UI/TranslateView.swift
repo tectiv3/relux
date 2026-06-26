@@ -85,6 +85,14 @@ struct TranslateView: View {
             }
             isInputFocused = true
         }
+        .onChange(of: appState.selectionCaptureID) { _, _ in
+            // Selection captured asynchronously after the view appeared
+            if inputText.isEmpty, let selection = appState.currentSelection, !selection.isEmpty {
+                inputText = selection
+                appState.currentSelection = nil
+                translateCurrent()
+            }
+        }
         .onKeyPress(.escape) {
             if showActions {
                 showActions = false

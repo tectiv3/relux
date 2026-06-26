@@ -32,6 +32,8 @@ final class AppState {
     var previousApp: NSRunningApplication?
 
     var currentSelection: String?
+    /// Bumped when async selection capture completes, so views can refresh derived results.
+    var selectionCaptureID = UUID()
     var needsFirstRun: Bool {
         !UserDefaults.standard.bool(forKey: "hasCompletedSetup")
     }

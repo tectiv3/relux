@@ -95,6 +95,14 @@ struct JWTView: View {
             isInputFocused = true
             installKeyMonitor()
         }
+        .onChange(of: appState.selectionCaptureID) { _, _ in
+            // Selection captured asynchronously after the view appeared
+            if inputText.isEmpty, let selection = appState.currentSelection, !selection.isEmpty {
+                inputText = selection
+                appState.currentSelection = nil
+                saveToFrecency()
+            }
+        }
         .onDisappear {
             removeKeyMonitor()
         }
