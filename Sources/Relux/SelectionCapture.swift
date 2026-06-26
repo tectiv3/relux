@@ -3,26 +3,26 @@ import os
 
 private let log = Logger(subsystem: "com.relux.app", category: "selection")
 
+/// AXEnhancedUserInterface interferes with Cmd+C simulation — skip for these
 private let chromiumBundleIDs: Set<String> = [
     "com.google.Chrome",
     "com.google.Chrome.canary",
     "com.brave.Browser",
     "com.microsoft.edgemac",
-    "company.thebrowser.Browser", // Arc
+    "company.thebrowser.Browser",
     "com.vivaldi.Vivaldi",
     "com.operasoftware.Opera",
-    "com.nickvision.nicegab", // Nicegab
+    "com.nickvision.nicegab",
     "org.chromium.Chromium",
 ]
 
 enum SelectionCapture {
     /// Must be called BEFORE Relux's panel takes focus.
     static func captureSelectedText() -> String? {
-        let frontApp = NSWorkspace.shared.frontmostApplication
+        let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
 
-        // Chromium browsers don't expose selection via AX — use clipboard hack
-        if let bundleID = frontApp?.bundleIdentifier, chromiumBundleIDs.contains(bundleID) {
-            log.debug("Chromium app detected (\(bundleID)), using clipboard fallback")
+        if let bundleID, chromiumBundleIDs.contains(bundleID) {
+            log.debug("Chromium app (\(bundleID)), using clipboard fallback")
             return captureViaClipboard()
         }
 
@@ -34,10 +34,14 @@ enum SelectionCapture {
             kAXFocusedApplicationAttribute as CFString,
             &focusedApp
         )
-        guard appResult == .success else { return nil }
+        guard appResult == .success else { return captureViaClipboard() }
 
         // swiftlint:disable:next force_cast
         let appElement = focusedApp as! AXUIElement
+
+        // Tells browsers like Firefox to expose selection via standard AX
+        AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
 
         var focusedElement: AnyObject?
         let elemResult = AXUIElementCopyAttributeValue(
@@ -45,7 +49,7 @@ enum SelectionCapture {
             kAXFocusedUIElementAttribute as CFString,
             &focusedElement
         )
-        guard elemResult == .success else { return nil }
+        guard elemResult == .success else { return captureViaClipboard() }
         // swiftlint:disable:next force_cast
         let element = focusedElement as! AXUIElement
 
@@ -65,7 +69,8 @@ enum SelectionCapture {
             return text
         }
 
-        return nil
+        // Universal fallback — simulated Cmd+C for apps where AX doesn't expose selection
+        return captureViaClipboard()
     }
 
     private static func selectedTextViaMarkers(from element: AXUIElement) -> String? {

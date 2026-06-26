@@ -30,10 +30,10 @@ final class CalculatorService {
         if let loaded = cache.loadCached() {
             cachedRates = loaded
             if cache.isStale(loaded) {
-                refreshRates()
+                Task { await refreshRates() }
             }
         } else {
-            refreshRates()
+            Task { await refreshRates() }
         }
     }
 
