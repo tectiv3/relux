@@ -2,7 +2,7 @@ import Foundation
 
 @MainActor @Observable
 final class ExtensionRegistry {
-    struct Extension: Identifiable, Sendable {
+    struct Extension: Identifiable {
         let id: String
         let name: String
         let icon: String

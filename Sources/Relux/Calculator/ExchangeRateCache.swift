@@ -3,7 +3,7 @@ import os
 
 private let log = Logger(subsystem: "com.relux.app", category: "ExchangeRateCache")
 
-struct CachedRates: Sendable {
+struct CachedRates {
     let rates: [String: Double]
     let fetchedAt: Date
 }

@@ -4,7 +4,7 @@ import SQLite3
 
 private let log = Logger(subsystem: "com.relux.app", category: "translatestore")
 
-struct TranslationEntry: Identifiable, Sendable {
+struct TranslationEntry: Identifiable {
     let id: Int64
     let sourceText: String
     let translatedText: String

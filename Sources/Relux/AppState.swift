@@ -18,7 +18,7 @@ final class AppState {
     let scriptSearcher = ScriptSearcher()
     let frecency = FrecencyTracker()
     let extensionRegistry = ExtensionRegistry()
-    let calculatorService = CalculatorService()
+    private let calculatorService = CalculatorService()
     let systemSettingsSearcher = SystemSettingsSearcher()
 
     let gestureBindingManager = GestureBindingManager()

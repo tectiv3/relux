@@ -30,10 +30,10 @@ final class CalculatorService {
         if let loaded = cache.loadCached() {
             cachedRates = loaded
             if cache.isStale(loaded) {
-                refreshRates()
+                Task { await refreshRates() }
             }
         } else {
-            refreshRates()
+            Task { await refreshRates() }
         }
     }
 
@@ -60,16 +60,21 @@ final class CalculatorService {
         while let last = expr.last, "+-*/".contains(last) {
             expr.removeLast()
         }
+        // Strip trailing dots (incomplete decimals like "7*0.")
+        while expr.hasSuffix(".") {
+            expr.removeLast()
+        }
         guard !expr.isEmpty else { return nil }
 
         // Force floating-point arithmetic: integer division by zero throws an
         // uncatchable ObjC exception that kills the SwiftUI task context,
         // and integer division gives wrong results (800/500 = 1 instead of 1.6).
-        expr = Self.intToDouble(expr)
+        // Replace each `/` with `/.0/` so both operands become floats.
+        // This works even when operands already have decimals — the extra `.0`
+        // after an existing decimal is ignored by NSExpression (e.g. `5.0/1.02.0` = `5.0/2.0`).
+        expr = expr.replacingOccurrences(of: "/", with: "/1.0/")
 
-        let nsExpr = NSExpression(format: expr)
-
-        guard let result = nsExpr.expressionValue(with: nil, context: nil) as? NSNumber else {
+        guard let result = NSExpression.relux_safeEvaluateExpression(expr) else {
             return nil
         }
 
@@ -85,15 +90,6 @@ final class CalculatorService {
             targetCurrency: nil,
             lastUpdated: nil
         )
-    }
-
-    /// Append `.0` to bare integer literals so NSExpression uses floating-point arithmetic.
-    private static func intToDouble(_ expr: String) -> String {
-        // Match sequences of digits that are NOT already followed by a decimal point
-        let pattern = #"(\d+)(?![\d.])"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return expr }
-        let range = NSRange(expr.startIndex..., in: expr)
-        return regex.stringByReplacingMatches(in: expr, range: range, withTemplate: "$1.0")
     }
 
     private func isMathExpression(_ query: String) -> Bool {
@@ -200,14 +196,12 @@ final class CalculatorService {
 
     // MARK: - Rate Refresh
 
-    private func refreshRates() {
+    private func refreshRates() async {
         guard !isFetching else { return }
         isFetching = true
-        Task {
-            if let fresh = await cache.fetchFresh() {
-                cachedRates = fresh
-            }
-            isFetching = false
+        defer { isFetching = false }
+        if let fresh = await cache.fetchFresh() {
+            cachedRates = fresh
         }
     }
 }
