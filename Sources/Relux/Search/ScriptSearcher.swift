@@ -282,8 +282,7 @@ final class ScriptSearcher {
             } else if fuzzyMatch(query: lowercasedQuery, target: name) {
                 scored.append((script, 330))
             } else if script.inputMode.acceptsInput {
-                let effective = stdinValue ?? query
-                if script.inputFilter.matches(effective) {
+                if script.inputFilter.matches(query) {
                     let filterScore: Double = script.inputFilter == .any ? 100 : 700
                     scored.append((script, filterScore))
                 }
