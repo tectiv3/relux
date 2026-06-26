@@ -83,14 +83,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             appState.panelClosedAt = Date()
             panel.close()
         } else {
-            appState.previousApp = NSWorkspace.shared.frontmostApplication
-            appState.currentSelection = SelectionCapture.captureSelectedText()
+            let previousApp = NSWorkspace.shared.frontmostApplication
+            appState.previousApp = previousApp
+            appState.currentSelection = nil
             // Keep last panel mode if closed within 60s
             if Date().timeIntervalSince(appState.panelClosedAt) > 60 {
                 appState.panelMode = .search
             }
             applyForcedInputSource()
-            panel.makeKeyAndOrderFront(nil)
+
+            if SelectionCapture.isClipboardOnly(previousApp?.bundleIdentifier) {
+                // ⌘C must be synthesized while the source app is still key — before the panel.
+                appState.currentSelection = SelectionCapture.captureViaClipboard()
+                panel.makeKeyAndOrderFront(nil)
+            } else {
+                // Panel first so keystrokes are never dropped; read the selection via AX
+                // off the main thread and fill it in when ready.
+                panel.makeKeyAndOrderFront(nil)
+                if let pid = previousApp?.processIdentifier {
+                    Task.detached(priority: .userInitiated) { [appState] in
+                        guard let text = SelectionCapture.captureViaAX(pid: pid) else { return }
+                        await MainActor.run {
+                            appState.currentSelection = text
+                            appState.selectionCaptureID = UUID()
+                        }
+                    }
+                }
+            }
         }
     }
 

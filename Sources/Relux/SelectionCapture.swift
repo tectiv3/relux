@@ -3,8 +3,9 @@ import os
 
 private let log = Logger(subsystem: "com.relux.app", category: "selection")
 
-/// AXEnhancedUserInterface interferes with Cmd+C simulation — skip for these
-private let chromiumBundleIDs: Set<String> = [
+/// Apps that don't expose selection via standard AX — capture via simulated Cmd+C instead.
+/// Chromium browsers (AXEnhancedUserInterface interferes) plus other non-AX toolkits (Telegram).
+private let clipboardOnlyBundleIDs: Set<String> = [
     "com.google.Chrome",
     "com.google.Chrome.canary",
     "com.brave.Browser",
@@ -14,42 +15,41 @@ private let chromiumBundleIDs: Set<String> = [
     "com.operasoftware.Opera",
     "com.nickvision.nicegab",
     "org.chromium.Chromium",
+    "ru.keepcoder.Telegram",
 ]
 
 enum SelectionCapture {
-    /// Must be called BEFORE Relux's panel takes focus.
-    static func captureSelectedText() -> String? {
-        let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    /// Apps that don't expose selection via AX. The caller must use `captureViaClipboard()`
+    /// synchronously while they're still the key app — the synthesized ⌘C goes to whichever
+    /// window is key, so it has to happen before Relux's panel takes focus.
+    static func isClipboardOnly(_ bundleID: String?) -> Bool {
+        guard let bundleID else { return false }
+        return clipboardOnlyBundleIDs.contains(bundleID)
+    }
 
-        if let bundleID, chromiumBundleIDs.contains(bundleID) {
-            log.debug("Chromium app (\(bundleID)), using clipboard fallback")
-            return captureViaClipboard()
+    /// AX-only selection read for a specific app. Injects no events and is thread-safe, so it
+    /// can run on a background queue *after* Relux's panel is already key — capture never blocks
+    /// panel presentation or keyboard input.
+    static func captureViaAX(pid: pid_t) -> String? {
+        let appElement = AXUIElementCreateApplication(pid)
+        if let text = selectedText(in: appElement) { return text }
+
+        // Stubborn apps (Firefox, some Electron) only expose selection once enhanced AX is on.
+        // Setting it rebuilds the app's AX tree, so do it once per app and retry — never on
+        // every activation, which was the prior latency hit.
+        if enableEnhancedAccessibilityIfNeeded(pid: pid, appElement: appElement) {
+            return selectedText(in: appElement)
         }
+        return nil
+    }
 
-        let systemWide = AXUIElementCreateSystemWide()
-
-        var focusedApp: AnyObject?
-        let appResult = AXUIElementCopyAttributeValue(
-            systemWide,
-            kAXFocusedApplicationAttribute as CFString,
-            &focusedApp
-        )
-        guard appResult == .success else { return captureViaClipboard() }
-
-        // swiftlint:disable:next force_cast
-        let appElement = focusedApp as! AXUIElement
-
-        // Tells browsers like Firefox to expose selection via standard AX
-        AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
-        AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-
+    private static func selectedText(in appElement: AXUIElement) -> String? {
         var focusedElement: AnyObject?
-        let elemResult = AXUIElementCopyAttributeValue(
+        guard AXUIElementCopyAttributeValue(
             appElement,
             kAXFocusedUIElementAttribute as CFString,
             &focusedElement
-        )
-        guard elemResult == .success else { return captureViaClipboard() }
+        ) == .success else { return nil }
         // swiftlint:disable:next force_cast
         let element = focusedElement as! AXUIElement
 
@@ -69,8 +69,24 @@ enum SelectionCapture {
             return text
         }
 
-        // Universal fallback — simulated Cmd+C for apps where AX doesn't expose selection
-        return captureViaClipboard()
+        return nil
+    }
+
+    // PIDs already switched into enhanced AX. captureViaAX runs off the main thread, so guard the set.
+    private nonisolated(unsafe) static var enhancedPIDs: Set<pid_t> = []
+    private static let enhancedLock = NSLock()
+
+    /// Enables enhanced AX once per app. Returns true if it was just enabled (caller should retry).
+    private static func enableEnhancedAccessibilityIfNeeded(pid: pid_t, appElement: AXUIElement) -> Bool {
+        enhancedLock.lock()
+        let alreadyEnabled = enhancedPIDs.contains(pid)
+        if !alreadyEnabled { enhancedPIDs.insert(pid) }
+        enhancedLock.unlock()
+        guard !alreadyEnabled else { return false }
+
+        AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        return true
     }
 
     private static func selectedTextViaMarkers(from element: AXUIElement) -> String? {
@@ -120,7 +136,7 @@ enum SelectionCapture {
 
     // MARK: - Chromium clipboard fallback
 
-    private static func captureViaClipboard() -> String? {
+    static func captureViaClipboard() -> String? {
         let pasteboard = NSPasteboard.general
         let oldChangeCount = pasteboard.changeCount
 
