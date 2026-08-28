@@ -558,7 +558,10 @@ struct SettingsView: View {
                         try? appState.clipboardStore?.clearAll()
                     }
                 } message: {
-                    Text("This will permanently delete all clipboard history entries and images.")
+                    Text("""
+                    This will permanently delete all unpinned clipboard history \
+                    entries and images. Pinned entries will be kept.
+                    """)
                 }
             }
 
