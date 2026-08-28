@@ -6,7 +6,7 @@ import SQLite3
 private let log = Logger(subsystem: "com.relux.app", category: "clipboardstore")
 
 // swiftformat:disable:next redundantSendable
-struct ClipboardEntry: Identifiable, Sendable {
+struct ClipboardEntry: Identifiable, Equatable, Sendable {
     let id: Int64
     let contentType: String
     let textContent: String?
@@ -21,6 +21,10 @@ struct ClipboardEntry: Identifiable, Sendable {
     let wordCount: Int?
     let createdAt: Date
     let updatedAt: Date
+    let pinnedAt: Date?
+    var isPinned: Bool {
+        pinnedAt != nil
+    }
 }
 
 enum ContentType {
@@ -92,6 +96,25 @@ final class ClipboardStore {
             try execute("UPDATE clipboard_history SET updated_at = created_at")
             try execute("COMMIT")
         }
+
+        // Migrate: add pinned_at column if missing
+        var pragmaStmt2: OpaquePointer?
+        guard sqlite3_prepare_v2(db, pragmaSql, -1, &pragmaStmt2, nil) == SQLITE_OK else {
+            throw StoreError.query
+        }
+        defer { sqlite3_finalize(pragmaStmt2) }
+        var hasPinnedAt = false
+        while sqlite3_step(pragmaStmt2) == SQLITE_ROW {
+            if let name = sqlite3_column_text(pragmaStmt2, 1) {
+                if String(cString: name) == "pinned_at" {
+                    hasPinnedAt = true
+                    break
+                }
+            }
+        }
+        if !hasPinnedAt {
+            try execute("ALTER TABLE clipboard_history ADD COLUMN pinned_at REAL")
+        }
     }
 
     deinit {
@@ -100,6 +123,7 @@ final class ClipboardStore {
 
     // MARK: - Insert
 
+    // swiftlint:disable:next function_parameter_count
     func insert(
         contentType: String,
         textContent: String?,
@@ -170,8 +194,10 @@ final class ClipboardStore {
         let sql = """
         SELECT id, content_type, text_content, NULL, image_path, \
         image_width, image_height, image_size, source_app, \
-        source_name, char_count, word_count, created_at, updated_at \
-        FROM clipboard_history ORDER BY updated_at DESC LIMIT ?
+        source_name, char_count, word_count, created_at, updated_at, pinned_at \
+        FROM clipboard_history \
+        ORDER BY CASE WHEN pinned_at IS NOT NULL THEN 0 ELSE 1 END, pinned_at ASC, updated_at DESC \
+        LIMIT ?
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
@@ -186,9 +212,23 @@ final class ClipboardStore {
         return entries
     }
 
-    /// Check if the most recent entry has the same text content (dedup)
+    /// Check if the most recent entry or any pinned entry has the same text content (dedup)
     func isDuplicate(textContent: String) -> Bool {
-        let sql = "SELECT text_content FROM clipboard_history ORDER BY updated_at DESC LIMIT 1"
+        // Check pinned entries first — bump updated_at if matched
+        let pinnedSql = "SELECT id FROM clipboard_history WHERE pinned_at IS NOT NULL AND text_content = ? LIMIT 1"
+        var pinnedStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, pinnedSql, -1, &pinnedStmt, nil) == SQLITE_OK {
+            defer { sqlite3_finalize(pinnedStmt) }
+            sqlite3_bind_text(pinnedStmt, 1, textContent, -1, Self.transient)
+            if sqlite3_step(pinnedStmt) == SQLITE_ROW {
+                let pinnedId = sqlite3_column_int64(pinnedStmt, 0)
+                bumpTimestamp(id: pinnedId)
+                return true
+            }
+        }
+
+        // Check most recent entry
+        let sql = "SELECT text_content FROM clipboard_history WHERE pinned_at IS NULL ORDER BY updated_at DESC LIMIT 1"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
         defer { sqlite3_finalize(stmt) }
@@ -210,6 +250,35 @@ final class ClipboardStore {
         sqlite3_bind_int64(stmt, 2, id)
         if sqlite3_step(stmt) != SQLITE_DONE {
             log.warning("bumpTimestamp: failed to update id \(id)")
+        }
+    }
+
+    func pin(id: Int64) {
+        let sql = "UPDATE clipboard_history SET pinned_at = ? WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            log.warning("pin: failed to prepare statement")
+            return
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970)
+        sqlite3_bind_int64(stmt, 2, id)
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            log.warning("pin: failed to update id \(id)")
+        }
+    }
+
+    func unpin(id: Int64) {
+        let sql = "UPDATE clipboard_history SET pinned_at = NULL WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            log.warning("unpin: failed to prepare statement")
+            return
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, id)
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            log.warning("unpin: failed to update id \(id)")
         }
     }
 
@@ -236,20 +305,36 @@ final class ClipboardStore {
     }
 
     func clearAll() throws {
-        // Delete all image files
-        let fileManager = FileManager.default
-        if let files = try? fileManager.contentsOfDirectory(at: imageDir, includingPropertiesForKeys: nil) {
-            for file in files {
-                try? fileManager.removeItem(at: file)
+        // Delete image files for unpinned entries only
+        let sql = "SELECT image_path FROM clipboard_history WHERE pinned_at IS NULL AND image_path IS NOT NULL"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw StoreError.query
+        }
+
+        var paths: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let ptr = sqlite3_column_text(stmt, 0) {
+                paths.append(String(cString: ptr))
             }
         }
-        try execute("DELETE FROM clipboard_history")
+        sqlite3_finalize(stmt)
+
+        for path in paths {
+            let fullPath = imageDir.appendingPathComponent(path)
+            try? FileManager.default.removeItem(at: fullPath)
+        }
+
+        try execute("DELETE FROM clipboard_history WHERE pinned_at IS NULL")
     }
 
     /// Delete entries older than the given date and their associated image files
     func deleteExpired(before date: Date) throws {
         // Collect image paths first
-        let sql = "SELECT image_path FROM clipboard_history WHERE created_at < ? AND image_path IS NOT NULL"
+        let sql = """
+        SELECT image_path FROM clipboard_history \
+        WHERE created_at < ? AND pinned_at IS NULL AND image_path IS NOT NULL
+        """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             throw StoreError.query
@@ -270,7 +355,7 @@ final class ClipboardStore {
             try? FileManager.default.removeItem(at: fullPath)
         }
 
-        let delSql = "DELETE FROM clipboard_history WHERE created_at < ?"
+        let delSql = "DELETE FROM clipboard_history WHERE created_at < ? AND pinned_at IS NULL"
         var delStmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, delSql, -1, &delStmt, nil) == SQLITE_OK else {
             throw StoreError.query
@@ -288,7 +373,7 @@ final class ClipboardStore {
         let sql = """
         SELECT id, content_type, text_content, raw_data, image_path, \
         image_width, image_height, image_size, source_app, \
-        source_name, char_count, word_count, created_at, updated_at \
+        source_name, char_count, word_count, created_at, updated_at, pinned_at \
         FROM clipboard_history WHERE id = ?
         """
         var stmt: OpaquePointer?
@@ -321,7 +406,10 @@ final class ClipboardStore {
             updatedAt: Date(timeIntervalSince1970: {
                 let val = sqlite3_column_double(stmt, 13)
                 return val > 0 ? val : sqlite3_column_double(stmt, 12)
-            }())
+            }()),
+            pinnedAt: sqlite3_column_type(stmt, 14) != SQLITE_NULL
+                ? Date(timeIntervalSince1970: sqlite3_column_double(stmt, 14))
+                : nil
         )
     }
 

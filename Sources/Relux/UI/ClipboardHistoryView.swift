@@ -42,22 +42,32 @@ struct ClipboardHistoryView: View {
     @State private var showActions: Bool = false
     @State private var actionIndex: Int = 0
     @State private var typeFilter: ClipboardContentType?
+    @State private var cachedFilteredEntries: [ClipboardEntry] = []
     @FocusState private var isFilterFocused: Bool
 
     private var filteredEntries: [ClipboardEntry] {
+        cachedFilteredEntries
+    }
+
+    private func recomputeFilteredEntries() {
         var result = entries
+        let hasTypeFilter = typeFilter != nil
         if let typeFilter {
             result = result.filter { typeFilter.matches($0.contentType) }
         }
         let query = filter.trimmingCharacters(in: .whitespaces).lowercased()
-        if query.isEmpty { return result }
-        return result.filter { entry in
+        if query.isEmpty {
+            cachedFilteredEntries = hasTypeFilter
+                ? result.sorted { $0.updatedAt > $1.updatedAt } : result
+            return
+        }
+        cachedFilteredEntries = result.filter { entry in
             let text = entry.textContent ?? ""
             let firstLine = String(text.split(separator: "\n", maxSplits: 1).first ?? "")
             return text.lowercased().contains(query)
                 || fuzzyMatch(query: query, target: firstLine)
                 || fuzzyMatch(query: query, target: entry.sourceName ?? "")
-        }
+        }.sorted { $0.updatedAt > $1.updatedAt }
     }
 
     private var selectedEntry: ClipboardEntry? {
@@ -91,6 +101,15 @@ struct ClipboardHistoryView: View {
         actions.append(ClipAction(label: "Delete", icon: "trash", shortcut: "⌫") {
             deleteEntry(entry)
         })
+        if entry.isPinned {
+            actions.append(ClipAction(label: "Unpin", icon: "pin.slash", shortcut: nil) {
+                togglePin(entry)
+            })
+        } else {
+            actions.append(ClipAction(label: "Pin", icon: "pin", shortcut: nil) {
+                togglePin(entry)
+            })
+        }
         for filterType in ClipboardContentType.allCases {
             actions.append(ClipAction(
                 label: typeFilter == filterType ? "Clear Filter" : "Show \(filterType.label) Only",
@@ -223,7 +242,14 @@ struct ClipboardHistoryView: View {
                 .font(.system(size: 16))
                 .focused($isFilterFocused)
                 .onChange(of: filter) { _, _ in
+                    recomputeFilteredEntries()
                     selectedIndex = 0
+                }
+                .onChange(of: typeFilter) { _, _ in
+                    recomputeFilteredEntries()
+                }
+                .onChange(of: entries) { _, _ in
+                    recomputeFilteredEntries()
                 }
         }
         .padding(.horizontal, 16)
@@ -235,6 +261,7 @@ struct ClipboardHistoryView: View {
     private var groupedEntries: [(label: String, items: [(index: Int, entry: ClipboardEntry)])] {
         let items = filteredEntries
         let calendar = Calendar.current
+        let isFiltering = !filter.trimmingCharacters(in: .whitespaces).isEmpty || typeFilter != nil
 
         var groups: [(label: String, items: [(index: Int, entry: ClipboardEntry)])] = []
         var currentLabel = ""
@@ -244,7 +271,18 @@ struct ClipboardHistoryView: View {
         dateFormatter.dateStyle = .medium
         dateFormatter.timeStyle = .none
 
+        if !isFiltering {
+            let pinnedItems = items.enumerated()
+                .filter(\.element.isPinned)
+                .map { (index: $0.offset, entry: $0.element) }
+            if !pinnedItems.isEmpty {
+                groups.append(("Pinned", pinnedItems))
+            }
+        }
+
         for (index, entry) in items.enumerated() {
+            if !isFiltering, entry.isPinned { continue }
+
             let label: String = if calendar.isDateInToday(entry.updatedAt) {
                 "Today"
             } else if calendar.isDateInYesterday(entry.updatedAt) {
@@ -328,6 +366,12 @@ struct ClipboardHistoryView: View {
                 .lineLimit(1)
 
             Spacer()
+
+            if entry.isPinned {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 10))
+                    .foregroundColor(isSelected ? .white.opacity(0.7) : .secondary)
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
@@ -729,8 +773,25 @@ struct ClipboardHistoryView: View {
     private func deleteEntry(_ entry: ClipboardEntry) {
         try? appState.clipboardStore?.delete(id: entry.id)
         entries.removeAll { $0.id == entry.id }
-        let items = filteredEntries
-        selectedIndex = min(selectedIndex, max(0, items.count - 1))
+        recomputeFilteredEntries()
+        selectedIndex = min(selectedIndex, max(0, filteredEntries.count - 1))
+        showActions = false
+    }
+
+    private func togglePin(_ entry: ClipboardEntry) {
+        if entry.isPinned {
+            appState.clipboardStore?.unpin(id: entry.id)
+        } else {
+            appState.clipboardStore?.pin(id: entry.id)
+        }
+        let entryId = entry.id
+        entries = appState.clipboardStore?.fetchAll() ?? []
+        recomputeFilteredEntries()
+        if let newIndex = filteredEntries.firstIndex(where: { $0.id == entryId }) {
+            selectedIndex = newIndex
+        } else {
+            selectedIndex = min(selectedIndex, max(0, filteredEntries.count - 1))
+        }
         showActions = false
     }
 
@@ -739,6 +800,7 @@ struct ClipboardHistoryView: View {
         selectedIndex = 0
         filter = ""
         typeFilter = nil
+        recomputeFilteredEntries()
     }
 
     // MARK: - Helpers
