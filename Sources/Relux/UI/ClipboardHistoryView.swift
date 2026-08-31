@@ -797,10 +797,10 @@ struct ClipboardHistoryView: View {
 
     private func loadEntries() {
         entries = appState.clipboardStore?.fetchAll() ?? []
-        selectedIndex = 0
         filter = ""
         typeFilter = nil
         recomputeFilteredEntries()
+        selectedIndex = cachedFilteredEntries.firstIndex(where: { !$0.isPinned }) ?? 0
     }
 
     // MARK: - Helpers
