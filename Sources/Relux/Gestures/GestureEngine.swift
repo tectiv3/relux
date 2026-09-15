@@ -1,5 +1,4 @@
 import AppKit
-import OpenMultitouchSupport
 import os
 
 private let log = Logger(subsystem: "com.relux.app", category: "gesture-engine")
@@ -22,6 +21,7 @@ private enum TapDecision {
 final class GestureEngine {
     var onGesture: ((GestureType) -> Void)?
 
+    private let touchStream = TouchStream()
     private var touchTask: Task<Void, Never>?
     private nonisolated(unsafe) var eventTap: CFMachPort?
     private nonisolated(unsafe) var runLoopSource: CFRunLoopSource?
@@ -96,11 +96,11 @@ final class GestureEngine {
             }
         }
 
-        OMSManager.shared.startListening()
+        touchStream.start()
         installClickTap()
 
+        let stream = touchStream.stream
         touchTask = Task { [weak self] in
-            let stream = OMSManager.shared.touchDataStream
             for await touches in stream {
                 guard !Task.isCancelled else { break }
                 self?.processTouchFrame(touches)
@@ -128,7 +128,7 @@ final class GestureEngine {
 
         uninstallClickTap()
 
-        OMSManager.shared.stopListening()
+        touchStream.stop()
         resetTracking()
         tapState.withLock { $0.threeFingersTouching = false }
     }
@@ -255,19 +255,23 @@ final class GestureEngine {
         }
     }
 
-    private func isLikelyPalm(_ touch: OMSTouchData) -> Bool {
+    private func isLikelyPalm(_ touch: TouchData) -> Bool {
         let margin = edgeMargin
         return touch.position.y < margin || touch.position.y > (1 - margin)
             || touch.position.x < margin || touch.position.x > (1 - margin)
     }
 
-    private func processTouchFrame(_ touches: [OMSTouchData]) {
+    private func processTouchFrame(_ touches: [TouchData]) {
         // Don't try to interpret gestures while the user is actively typing;
         // palms land on the trackpad between keystrokes and look like multi-finger contacts.
         if keystrokeWindow > 0, Date().timeIntervalSince(lastKeystrokeAt) < keystrokeWindow {
             tapState.withLock { $0.threeFingersTouching = false }
-            if trackingTouches { resetThreeFingerTracking() }
-            if trackingFourFingers { resetFourFingerTracking() }
+            if trackingTouches {
+                resetThreeFingerTracking()
+            }
+            if trackingFourFingers {
+                resetFourFingerTracking()
+            }
             return
         }
 
@@ -290,7 +294,9 @@ final class GestureEngine {
         if activeCount == 4 {
             consecutiveFourFingerFrames += 1
             consecutiveThreeFingerFrames = 0
-            if trackingTouches { resetThreeFingerTracking() }
+            if trackingTouches {
+                resetThreeFingerTracking()
+            }
 
             if !trackingFourFingers {
                 if consecutiveFourFingerFrames >= requiredStableFrames {
@@ -373,8 +379,8 @@ final class GestureEngine {
 
     /// Emits one log line per swipe arming with per-touch `total` and aspect ratio.
     /// Use this to calibrate `touchQualityMin` / `aspectRatioMax` against real hardware —
-    /// the OMS `total` field has no documented scale so defaults are provisional.
-    private func logArmingCharacteristics(_ label: String, touches: [OMSTouchData]) {
+    /// the MultitouchSupport `total` field has no documented scale so defaults are provisional.
+    private func logArmingCharacteristics(_ label: String, touches: [TouchData]) {
         let details = touches.map { touch -> String in
             let aspect = touch.axis.major / max(touch.axis.minor, 0.001)
             return String(format: "total=%.3f aspect=%.2f", touch.total, aspect)

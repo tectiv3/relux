@@ -164,10 +164,18 @@ final class GestureBindingManager {
 
     private func postKeyCombo(_ combo: KeyCombo) {
         var flags = CGEventFlags()
-        if combo.modifiers.contains(.command) { flags.insert(.maskCommand) }
-        if combo.modifiers.contains(.option) { flags.insert(.maskAlternate) }
-        if combo.modifiers.contains(.control) { flags.insert(.maskControl) }
-        if combo.modifiers.contains(.shift) { flags.insert(.maskShift) }
+        if combo.modifiers.contains(.command) {
+            flags.insert(.maskCommand)
+        }
+        if combo.modifiers.contains(.option) {
+            flags.insert(.maskAlternate)
+        }
+        if combo.modifiers.contains(.control) {
+            flags.insert(.maskControl)
+        }
+        if combo.modifiers.contains(.shift) {
+            flags.insert(.maskShift)
+        }
 
         guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: combo.keyCode, keyDown: true),
               let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: combo.keyCode, keyDown: false)
@@ -193,9 +201,9 @@ final class GestureBindingManager {
         case .showDesktop:
             postKeyCombo(KeyCombo(keyCode: 103, modifierRawValue: 0))
         case .switchSpaceLeft:
-            _ = iss_switch(ISSDirectionLeft)
+            _ = ReluxSwitchSpace(-1)
         case .switchSpaceRight:
-            _ = iss_switch(ISSDirectionRight)
+            _ = ReluxSwitchSpace(1)
         }
     }
 
