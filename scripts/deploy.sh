@@ -6,9 +6,6 @@ APP_NAME="Relux"
 SCHEME="Relux"
 BUNDLE_ID="com.relux.app"
 IDENTITY="Developer ID Application"  # will match any Developer ID cert
-TEAM_ID="${NOTARY_TEAM_ID:?Set NOTARY_TEAM_ID env var to your Apple team ID}"
-APPLE_ID="${NOTARY_APPLE_ID:?Set NOTARY_APPLE_ID env var to your Apple ID email}"
-APP_PASSWORD="${NOTARY_PASSWORD:?Set NOTARY_PASSWORD env var (app-specific password from appleid.apple.com)}"
 HOMEBREW_TAP="$HOME/code/homebrew-relux"
 
 GIT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
@@ -22,30 +19,45 @@ ARCHIVE_PATH="$BUILD_DIR/$APP_NAME.xcarchive"
 EXPORT_PATH="$BUILD_DIR/export"
 DMG_PATH="$BUILD_DIR/$APP_NAME-$VERSION.dmg"
 
-# ── Clean ────────────────────────────────────────────────────────────
-echo "==> Cleaning build directory"
-rm -rf "$BUILD_DIR"
-mkdir -p "$BUILD_DIR"
+# Modes:
+#   (default)             build, notarize, publish
+#   RELUX_DIST_ONLY=1     build and notarize the DMG only
+#   RELUX_PUBLISH_ONLY=1  publish an existing notarized DMG only
+if [ "${RELUX_PUBLISH_ONLY:-}" = "1" ]; then
+  if [ ! -f "$DMG_PATH" ]; then
+    echo "ERROR: RELUX_PUBLISH_ONLY=1 but $DMG_PATH not found. Build it first: make dist"
+    exit 1
+  fi
+  echo "==> Publish-only: reusing $DMG_PATH"
+else
+  TEAM_ID="${NOTARY_TEAM_ID:?Set NOTARY_TEAM_ID env var to your Apple team ID}"
+  APPLE_ID="${NOTARY_APPLE_ID:?Set NOTARY_APPLE_ID env var to your Apple ID email}"
+  APP_PASSWORD="${NOTARY_PASSWORD:?Set NOTARY_PASSWORD env var (app-specific password from appleid.apple.com)}"
 
-# ── Archive ──────────────────────────────────────────────────────────
-echo "==> Archiving $SCHEME (v$VERSION)"
-xcodebuild archive \
-  -scheme "$SCHEME" \
-  -destination 'generic/platform=macOS' \
-  -archivePath "$ARCHIVE_PATH" \
-  CODE_SIGN_IDENTITY="$IDENTITY" \
-  DEVELOPMENT_TEAM="$TEAM_ID" \
-  CODE_SIGN_STYLE=Manual \
-  MARKETING_VERSION="$VERSION" \
-  ENABLE_HARDENED_RUNTIME=YES \
-  OTHER_CODE_SIGN_FLAGS="--timestamp" \
-  | tail -1
+  # ── Clean ──────────────────────────────────────────────────────────
+  echo "==> Cleaning build directory"
+  rm -rf "$BUILD_DIR"
+  mkdir -p "$BUILD_DIR"
 
-# ── Export ───────────────────────────────────────────────────────────
-echo "==> Exporting archive"
+  # ── Archive ────────────────────────────────────────────────────────
+  echo "==> Archiving $SCHEME (v$VERSION)"
+  xcodebuild archive \
+    -scheme "$SCHEME" \
+    -destination 'generic/platform=macOS' \
+    -archivePath "$ARCHIVE_PATH" \
+    CODE_SIGN_IDENTITY="$IDENTITY" \
+    DEVELOPMENT_TEAM="$TEAM_ID" \
+    CODE_SIGN_STYLE=Manual \
+    MARKETING_VERSION="$VERSION" \
+    ENABLE_HARDENED_RUNTIME=YES \
+    OTHER_CODE_SIGN_FLAGS="--timestamp" \
+    | tail -1
 
-EXPORT_PLIST="$BUILD_DIR/ExportOptions.plist"
-cat > "$EXPORT_PLIST" <<PLIST
+  # ── Export ─────────────────────────────────────────────────────────
+  echo "==> Exporting archive"
+
+  EXPORT_PLIST="$BUILD_DIR/ExportOptions.plist"
+  cat > "$EXPORT_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -62,48 +74,49 @@ cat > "$EXPORT_PLIST" <<PLIST
 </plist>
 PLIST
 
-xcodebuild -exportArchive \
-  -archivePath "$ARCHIVE_PATH" \
-  -exportPath "$EXPORT_PATH" \
-  -exportOptionsPlist "$EXPORT_PLIST" \
-  | tail -1
+  xcodebuild -exportArchive \
+    -archivePath "$ARCHIVE_PATH" \
+    -exportPath "$EXPORT_PATH" \
+    -exportOptionsPlist "$EXPORT_PLIST" \
+    | tail -1
 
-APP_PATH="$EXPORT_PATH/$APP_NAME.app"
+  APP_PATH="$EXPORT_PATH/$APP_NAME.app"
 
-if [ ! -d "$APP_PATH" ]; then
-  echo "ERROR: $APP_PATH not found after export"
-  exit 1
+  if [ ! -d "$APP_PATH" ]; then
+    echo "ERROR: $APP_PATH not found after export"
+    exit 1
+  fi
+
+  # ── Create DMG ─────────────────────────────────────────────────────
+  echo "==> Creating DMG"
+
+  DMG_STAGING="$BUILD_DIR/dmg-staging"
+  mkdir -p "$DMG_STAGING"
+  cp -R "$APP_PATH" "$DMG_STAGING/"
+  ln -s /Applications "$DMG_STAGING/Applications"
+
+  hdiutil create \
+    -volname "$APP_NAME" \
+    -srcfolder "$DMG_STAGING" \
+    -ov \
+    -format UDZO \
+    "$DMG_PATH"
+
+  rm -rf "$DMG_STAGING"
+
+  # ── Notarize ───────────────────────────────────────────────────────
+  echo "==> Submitting for notarization (this may take a few minutes)"
+
+  xcrun notarytool submit "$DMG_PATH" \
+    --apple-id "$APPLE_ID" \
+    --team-id "$TEAM_ID" \
+    --password "$APP_PASSWORD" \
+    --wait || { echo "Notarization failed. Run: xcrun notarytool log <id> --apple-id \$NOTARY_APPLE_ID --team-id \$NOTARY_TEAM_ID --password \$NOTARY_PASSWORD"; exit 1; }
+
+  # ── Staple ─────────────────────────────────────────────────────────
+  echo "==> Stapling notarization ticket"
+  xcrun stapler staple "$DMG_PATH"
 fi
-
-# ── Create DMG ───────────────────────────────────────────────────────
-echo "==> Creating DMG"
-
-DMG_STAGING="$BUILD_DIR/dmg-staging"
-mkdir -p "$DMG_STAGING"
-cp -R "$APP_PATH" "$DMG_STAGING/"
-ln -s /Applications "$DMG_STAGING/Applications"
-
-hdiutil create \
-  -volname "$APP_NAME" \
-  -srcfolder "$DMG_STAGING" \
-  -ov \
-  -format UDZO \
-  "$DMG_PATH"
-
-rm -rf "$DMG_STAGING"
-
-# ── Notarize ─────────────────────────────────────────────────────────
-echo "==> Submitting for notarization (this may take a few minutes)"
-
-xcrun notarytool submit "$DMG_PATH" \
-  --apple-id "$APPLE_ID" \
-  --team-id "$TEAM_ID" \
-  --password "$APP_PASSWORD" \
-  --wait || { echo "Notarization failed. Run: xcrun notarytool log <id> --apple-id \$NOTARY_APPLE_ID --team-id \$NOTARY_TEAM_ID --password \$NOTARY_PASSWORD"; exit 1; }
-
-# ── Staple ───────────────────────────────────────────────────────────
-echo "==> Stapling notarization ticket"
-xcrun stapler staple "$DMG_PATH"
 
 # ── Publish (skip with RELUX_DIST_ONLY=1) ────────────────────────────
 DMG_SHA=$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')
@@ -111,10 +124,15 @@ DMG_SHA=$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')
 if [ "${RELUX_DIST_ONLY:-}" != "1" ]; then
   # ── GitHub Release ──────────────────────────────────────────────────
   if command -v gh &>/dev/null; then
-    echo "==> Creating GitHub release and uploading DMG"
-    gh release create "$GIT_TAG" "$DMG_PATH" \
-      --title "Relux $VERSION" \
-      --generate-notes
+    if gh release view "$GIT_TAG" &>/dev/null; then
+      echo "==> Updating GitHub release asset"
+      gh release upload "$GIT_TAG" "$DMG_PATH" --clobber
+    else
+      echo "==> Creating GitHub release and uploading DMG"
+      gh release create "$GIT_TAG" "$DMG_PATH" \
+        --title "Relux $VERSION" \
+        --generate-notes
+    fi
   else
     echo "==> Opening GitHub release page — attach the DMG manually"
     open "https://github.com/tectiv3/relux/releases/new?tag=$GIT_TAG&title=Relux+$VERSION"

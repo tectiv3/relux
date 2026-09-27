@@ -1,4 +1,4 @@
-.PHONY: build open run clean generate release dist
+.PHONY: build open run clean generate release dist publish
 
 XCODEPROJ := Relux.xcodeproj
 
@@ -21,6 +21,9 @@ generate:
 
 dist:
 	@RELUX_DIST_ONLY=1 bash scripts/deploy.sh
+
+publish:
+	@RELUX_PUBLISH_ONLY=1 bash scripts/deploy.sh
 
 release:
 	@bash scripts/deploy.sh

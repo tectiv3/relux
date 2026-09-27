@@ -40,6 +40,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if appState.needsFirstRun {
             appState.markSetupComplete()
         }
+
+        // Show the panel on launch so Relux is immediately usable after start.
+        showPanel()
     }
 
     func setupPanel() {
@@ -73,6 +76,49 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel = floatingPanel
     }
 
+    /// Positions the panel on the active display and shows it. All open paths
+    /// (hotkey, gesture, launch) go through here so the panel always follows the user.
+    func showPanel() {
+        guard let panel else { return }
+        movePanelToActiveDisplay()
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    /// The "active" display is the one under the mouse cursor — the same display
+    /// gestures and Mission Control act on. Moves the panel there, preserving its
+    /// relative placement on the previous screen, and clamps it into view.
+    private func movePanelToActiveDisplay() {
+        guard let panel else { return }
+        let screens = NSScreen.screens
+        guard !screens.isEmpty else { return }
+
+        let mouse = NSEvent.mouseLocation
+        let target = screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main ?? screens[0]
+
+        let frame = panel.frame
+        let current = screens.first { NSMouseInRect(NSPoint(x: frame.midX, y: frame.midY), $0.frame, false) }
+        if current != nil, Self.screenIdentifier(current) == Self.screenIdentifier(target) {
+            return
+        }
+
+        let source = current?.visibleFrame ?? target.visibleFrame
+        let relX = source.width > 0 ? (frame.midX - source.minX) / source.width : 0.5
+        let relY = source.height > 0 ? (frame.midY - source.minY) / source.height : 0.5
+
+        let visible = target.visibleFrame
+        var origin = NSPoint(
+            x: visible.minX + relX * visible.width - frame.width / 2,
+            y: visible.minY + relY * visible.height - frame.height / 2
+        )
+        origin.x = min(max(origin.x, visible.minX), visible.maxX - frame.width)
+        origin.y = min(max(origin.y, visible.minY), visible.maxY - frame.height)
+        panel.setFrameOrigin(origin)
+    }
+
+    private static func screenIdentifier(_ screen: NSScreen?) -> CGDirectDisplayID? {
+        screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+    }
+
     func togglePanel() {
         guard let panel else { return }
         if panel.isVisible {
@@ -95,11 +141,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if SelectionCapture.isClipboardOnly(previousApp?.bundleIdentifier) {
                 // ⌘C must be synthesized while the source app is still key — before the panel.
                 appState.currentSelection = SelectionCapture.captureViaClipboard()
-                panel.makeKeyAndOrderFront(nil)
+                showPanel()
             } else {
                 // Panel first so keystrokes are never dropped; read the selection via AX
                 // off the main thread and fill it in when ready.
-                panel.makeKeyAndOrderFront(nil)
+                showPanel()
                 if let pid = previousApp?.processIdentifier {
                     Task.detached(priority: .userInitiated) { [appState] in
                         guard let text = SelectionCapture.captureViaAX(pid: pid) else { return }
@@ -130,7 +176,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         appState.panelMode = .clipboard
         if !panel.isVisible {
-            panel.makeKeyAndOrderFront(nil)
+            showPanel()
         }
     }
 

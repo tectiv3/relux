@@ -233,8 +233,8 @@ final class GestureBindingManager {
             }
             delegate.appState.panelMode = .translate
             if !panel.isVisible {
-                DispatchQueue.main.async {
-                    panel.makeKeyAndOrderFront(nil)
+                Task { @MainActor in
+                    delegate.showPanel()
                 }
             }
         }
