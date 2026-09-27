@@ -3,7 +3,7 @@
 
 #include <stdbool.h>
 
-/// Switches the active Space on the current display by `delta` steps
+/// Switches the active Space on the display under the cursor by `delta` steps
 /// (+1 = next, -1 = previous) using SkyLight's native WMBridge operations.
 /// Returns true if a switch was requested.
 ///
