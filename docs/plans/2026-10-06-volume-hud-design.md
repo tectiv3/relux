@@ -6,7 +6,7 @@ macOS 26 "Tahoe" replaced the long-standing lower-center volume indicator with a
 
 ## Solution
 
-A system-wide volume HUD: when the default output device's volume or mute state changes, show a large, Relux-styled indicator in the **lower-center of the active display**, then fade it out.
+A system-wide volume HUD: when the default output device's volume or mute state changes, show a large, Relux-styled indicator in the **center of the active display**, then fade it out.
 
 Detection uses **CoreAudio property listeners** (no private APIs, no key interception — `'vmvc'` is deprecated-by-association but functional via the HAL). The HUD appears *in addition to* macOS's own indicator (macOS is left completely untouched), so the feature is permission-free and low-risk.
 
@@ -20,8 +20,7 @@ Detection uses **CoreAudio property listeners** (no private APIs, no key interce
 | Visual style | Relux-native HUD (retro/Hudlum style deferred; view kept isolated) |
 | Form factor | Horizontal pill: SF Symbol speaker + segmented bar |
 | Display | Display under the mouse cursor |
-| Position | Bottom-center, `y = 17% of screen height`, fixed |
-| Vertical offset | Scale-aware, not configurable |
+| Position | Screen center (horizontal + vertical) on the active display, fixed |
 | Enable toggle | General tab section, backed by `ExtensionRegistry` |
 | Default state | **OFF** (opt-in) |
 | Unsupported devices | Silent skip — never show a fake/stale HUD |
@@ -101,13 +100,18 @@ w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
 - `.ignoresCycle` → stays out of window cycling.
 - **Do not set `.stationary`.** Its documented effect is the opposite of what a HUD wants: it keeps the window visible through Exposé / Mission Control / Show Desktop. (The repo's `FloatingPanel` uses `.stationary`, but it is an interactive panel; the HUD deliberately diverges.)
 - **On `.transient`:** the earlier draft claimed to "avoid" it, but at a non-normal window level (`.statusBar`) the documented default *is* transient behavior, so omitting the flag does not avoid it. That is fine — "floats in spaces, hidden in Exposé" is exactly the desired HUD behavior. The spec simply does not opt into `.stationary`; no explicit `.transient` flag is needed.
-- **Full-screen fallback:** `.fullScreenAuxiliary` at `.statusBar` is untested by precedent (the reference does not set it). Verify on a real full-screen space. If the HUD does not appear, raise `w.level` one notch — `.screenSaver` is the next sane step above `.statusBar` — and re-verify that it does not then draw over Mission Control / Exposé. This is a hard checklist gate: the lower-center HUD is the entire feature.
+- **Full-screen fallback:** `.fullScreenAuxiliary` at `.statusBar` is untested by precedent (the reference does not set it). Verify on a real full-screen space. If the HUD does not appear, raise `w.level` one notch — `.screenSaver` is the next sane step above `.statusBar` — and re-verify that it does not then draw over Mission Control / Exposé. This is a hard checklist gate: the centered HUD is the entire feature.
 - Content is an `NSVisualEffectView` (`.hudWindow` material, rounded mask radius 12 — same helper pattern as `FloatingPanel`) hosting a `NSHostingView<VolumeHUDView>`.
 - Window is created once and reused; content is updated on each change.
 
 ### Position
 
-Center horizontally on the display under the mouse; anchor `y` at 17 % of screen height above the bottom of the **full** screen frame (ignores Dock).
+Center on the display under the mouse — horizontally **and** vertically — using the full screen frame (ignores Dock):
+
+```swift
+x = frame.origin.x + (frame.width - size.width) / 2
+y = frame.origin.y + (frame.height - size.height) / 2
+```
 
 `AppDelegate.movePanelToActiveDisplay()` cannot be reused as-is: it is `private`, and it preserves the panel's relative placement rather than bottom-centering. Extract the reusable display-selection piece into a shared utility.
 
@@ -141,8 +145,8 @@ The old `private static screenIdentifier(_:)` helper is removed. The HUD control
 Relux-native pill, roughly 220 × 56:
 
 - Left: SF Symbol speaker glyph, `speaker.fill` → `speaker.wave.1/2/3.fill` by level, `speaker.slash.fill` when muted or value ≤ 0.001.
-- Right: 16-segment bar filled to the current level.
-- Muted: bars rendered dimmed at the current level (mirrors volumeHUD).
+- Right: a 16-segment bar, each segment = 1/16 of the range. The segment containing the current value is filled **proportionally in quarter steps** (25 / 50 / 75 / 100 %) — `round(positionInBar * 4) / 4` — matching volumeHUD. This makes 1/64 hardware increments visible and stops boundary float noise from making the bar count jump or stall.
+- Muted: every segment renders as a dim track (no fill).
 - No text, so no localization keys needed.
 
 ### Logging

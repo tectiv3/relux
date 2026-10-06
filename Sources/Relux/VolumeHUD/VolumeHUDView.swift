@@ -4,15 +4,15 @@ struct VolumeHUDView: View {
     let snapshot: VolumeSnapshot
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 12) {
             Image(systemName: glyphName)
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 30)
+                .frame(width: 26)
 
             SegmentBar(value: snapshot.value, dimmed: snapshot.isMuted)
         }
-        .padding(.horizontal, 22)
+        .padding(.horizontal, 16)
         .frame(width: 220, height: 56)
     }
 
@@ -34,22 +34,48 @@ private struct SegmentBar: View {
     let dimmed: Bool
 
     private let segmentCount = 16
+    private let segmentWidth: CGFloat = 7.5
+    private let segmentHeight: CGFloat = 22
+    private let segmentSpacing: CGFloat = 2
+    private let cornerRadius: CGFloat = 1.5
 
     var body: some View {
-        HStack(spacing: 3) {
+        HStack(spacing: segmentSpacing) {
             ForEach(0 ..< segmentCount, id: \.self) { index in
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(color(for: index))
-                    .frame(maxWidth: .infinity)
+                segment(at: index)
             }
         }
-        .frame(height: 22)
+        .frame(height: segmentHeight)
     }
 
-    private func color(for index: Int) -> Color {
-        let isFilled = Float(index) < value * Float(segmentCount)
-        guard isFilled else { return .white.opacity(0.15) }
-        return dimmed ? .white.opacity(0.45) : .white
+    private func segment(at index: Int) -> some View {
+        let fill = fillFraction(at: index)
+        return ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .fill(.white.opacity(0.15))
+                .frame(width: segmentWidth, height: segmentHeight)
+
+            if fill > 0 {
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .fill(dimmed ? .white.opacity(0.45) : .white)
+                    .frame(width: segmentWidth * fill, height: segmentHeight)
+            }
+        }
+        .frame(width: segmentWidth, height: segmentHeight)
+    }
+
+    private func fillFraction(at index: Int) -> CGFloat {
+        guard !dimmed else { return 0 }
+        let barStart = Float(index) / Float(segmentCount)
+        let barEnd = Float(index + 1) / Float(segmentCount)
+        if value >= barEnd {
+            return 1
+        }
+        if value <= barStart {
+            return 0
+        }
+        let positionInBar = (value - barStart) / (barEnd - barStart)
+        return CGFloat((positionInBar * 4).rounded() / 4)
     }
 }
 

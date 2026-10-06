@@ -191,7 +191,7 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 
 **Context**: macOS 26 moved the volume indicator to a small top-right popover. Hudlum/volumeHUD restore a large overlay; Relux should offer the same.
 
-**Decision**: Add an opt-in Volume HUD — a Relux-styled pill, lower-center of the display under the mouse.
+**Decision**: Add an opt-in Volume HUD — a Relux-styled pill, centered on the display under the mouse (leading bar partially filled in quarter steps so 1/64 hardware increments are visible).
 
 **Rationale / constraints**:
 - Detection is **CoreAudio property listening** (`kAudioHardwareServiceDeviceProperty_VirtualMainVolume` + `kAudioDevicePropertyMute`, with a `kAudioHardwarePropertyDefaultOutputDevice` listener for device switches). No polling. No private APIs.

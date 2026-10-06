@@ -142,7 +142,7 @@ final class VolumeHUDController {
         let size = window.frame.size
         let origin = NSPoint(
             x: frame.origin.x + (frame.width - size.width) / 2,
-            y: frame.origin.y + frame.height * 0.17
+            y: frame.origin.y + (frame.height - size.height) / 2
         )
         window.setFrameOrigin(origin)
     }
