@@ -186,3 +186,17 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Fix: `intToDouble()` regex converts bare integer literals to `N.0` before NSExpression evaluation, forcing floating-point arithmetic
 - Float division by zero returns `inf` which is caught by `.isFinite` guard
 - Also fixes the correctness bug where `800/500` evaluated to `1` instead of `1.6`
+
+## 2026-10-06: Volume HUD (planned)
+
+**Context**: macOS 26 moved the volume indicator to a small top-right popover. Hudlum/volumeHUD restore a large overlay; Relux should offer the same.
+
+**Decision**: Add an opt-in Volume HUD — a Relux-styled pill, lower-center of the display under the mouse.
+
+**Rationale / constraints**:
+- Detection is **CoreAudio property listening** (`kAudioHardwareServiceDeviceProperty_VirtualMainVolume` + `kAudioDevicePropertyMute`, with a `kAudioHardwarePropertyDefaultOutputDevice` listener for device switches). No polling. No private APIs.
+- The native macOS indicator is left untouched. No key interception, no suppression — the feature stays additive and permission-free.
+- HUD defaults **OFF**; enabled via a General-tab toggle backed by `ExtensionRegistry` (`extension.volumeHUD.enabled`).
+- `AppState` owns the controller. Feature code lives in `Sources/Relux/VolumeHUD/`; display selection is factored into `Sources/Relux/Util/DisplaySelection.swift`, extracted from `AppDelegate.movePanelToActiveDisplay()` so the panel and HUD share it. New directories are auto-globbed by XcodeGen (no `project.yml` change).
+- Brightness, retro style, native HUD suppression, and configurable position/duration are explicit non-goals.
+- Full spec: `docs/plans/2026-10-06-volume-hud-design.md`
