@@ -28,6 +28,7 @@ struct SettingsView: View {
     @State private var showClearTranslateConfirmation: Bool = false
     @State private var searchPaths: [String] = []
     @State private var newSearchPath: String = ""
+    @State private var volumeHUDEnabled: Bool = false
 
     var body: some View {
         TabView {
@@ -144,6 +145,14 @@ struct SettingsView: View {
                     .font(.caption)
             }
 
+            Section("Volume HUD") {
+                Toggle("Volume HUD", isOn: $volumeHUDEnabled)
+                    .onChange(of: volumeHUDEnabled) { _, enabled in
+                        appState.extensionRegistry.setEnabled("volumeHUD", enabled: enabled)
+                        appState.setVolumeHUDEnabled(enabled)
+                    }
+            }
+
             Section("Keyboard Layout") {
                 Picker("Force layout on open:", selection: $selectedInputSourceId) {
                     Text("Don't change").tag("")
@@ -171,6 +180,7 @@ struct SettingsView: View {
         .padding()
         .onAppear {
             applyAppearance(selectedAppearance)
+            volumeHUDEnabled = appState.extensionRegistry.isEnabled("volumeHUD")
         }
     }
 
@@ -446,7 +456,9 @@ struct SettingsView: View {
         guard let editing = editingScript else { return }
         let exists = appState.scriptSearcher.scripts.contains { $0.id == editing.id }
         if editing.title.isEmpty, editing.command.isEmpty {
-            if exists { appState.scriptSearcher.remove(id: editing.id) }
+            if exists {
+                appState.scriptSearcher.remove(id: editing.id)
+            }
         } else if exists {
             appState.scriptSearcher.update(editing)
         } else {

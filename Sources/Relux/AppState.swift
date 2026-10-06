@@ -23,6 +23,8 @@ final class AppState {
 
     let gestureBindingManager = GestureBindingManager()
 
+    var volumeHUDController: VolumeHUDController?
+
     var clipboardStore: ClipboardStore?
     var clipboardMonitor: ClipboardMonitor?
     var translateStore: TranslateStore?
@@ -70,7 +72,24 @@ final class AppState {
         extensionRegistry.register(
             id: "gestures", name: "Gesture Shortcuts", icon: "hand.draw", defaultEnabled: true
         )
+        extensionRegistry.register(
+            id: "volumeHUD", name: "Volume HUD", icon: "speaker.wave.3", defaultEnabled: false
+        )
         gestureBindingManager.startIfEnabled(registry: extensionRegistry)
+        if extensionRegistry.isEnabled("volumeHUD") {
+            setVolumeHUDEnabled(true)
+        }
+    }
+
+    func setVolumeHUDEnabled(_ enabled: Bool) {
+        if enabled {
+            if volumeHUDController == nil {
+                volumeHUDController = VolumeHUDController()
+            }
+            volumeHUDController?.start()
+        } else {
+            volumeHUDController?.stop()
+        }
     }
 
     func markSetupComplete() {
@@ -112,9 +131,15 @@ final class AppState {
     private func syntheticItems(query: String, selection: String?) -> [SearchItem] {
         var items: [SearchItem] = []
 
-        if let calc = calculatorItem(query: query) { items.append(calc) }
-        if let jwt = jwtItem(query: query, selection: selection) { items.append(jwt) }
-        if let trans = translateItem(query: query, selection: selection) { items.append(trans) }
+        if let calc = calculatorItem(query: query) {
+            items.append(calc)
+        }
+        if let jwt = jwtItem(query: query, selection: selection) {
+            items.append(jwt)
+        }
+        if let trans = translateItem(query: query, selection: selection) {
+            items.append(trans)
+        }
         items.append(webSearchItem(query: query))
 
         return items

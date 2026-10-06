@@ -89,15 +89,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// relative placement on the previous screen, and clamps it into view.
     private func movePanelToActiveDisplay() {
         guard let panel else { return }
-        let screens = NSScreen.screens
-        guard !screens.isEmpty else { return }
-
-        let mouse = NSEvent.mouseLocation
-        let target = screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main ?? screens[0]
 
         let frame = panel.frame
-        let current = screens.first { NSMouseInRect(NSPoint(x: frame.midX, y: frame.midY), $0.frame, false) }
-        if current != nil, Self.screenIdentifier(current) == Self.screenIdentifier(target) {
+        guard let target = DisplaySelection.screenUnderMouse() else { return }
+        let current = DisplaySelection.screen(containing: NSPoint(x: frame.midX, y: frame.midY))
+        if let current,
+           DisplaySelection.identifier(of: current) == DisplaySelection.identifier(of: target)
+        {
             return
         }
 
@@ -113,10 +111,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         origin.x = min(max(origin.x, visible.minX), visible.maxX - frame.width)
         origin.y = min(max(origin.y, visible.minY), visible.maxY - frame.height)
         panel.setFrameOrigin(origin)
-    }
-
-    private static func screenIdentifier(_ screen: NSScreen?) -> CGDirectDisplayID? {
-        screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
     }
 
     func togglePanel() {
