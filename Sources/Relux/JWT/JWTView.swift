@@ -41,6 +41,11 @@ struct JWTView: View {
         tokenParts.isValid
     }
 
+    private var expiryBadge: JWTExpiryBadge? {
+        guard isValidJWT else { return nil }
+        return JWTParser.claims(ofToken: inputText)?.expiryBadge()
+    }
+
     private var currentActions: [JWTAction] {
         guard isValidJWT else { return [] }
         return [
@@ -132,9 +137,28 @@ struct JWTView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 14, design: .monospaced))
                 .focused($isInputFocused)
+
+            if let expiryBadge {
+                expiryBadgeView(expiryBadge)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+    }
+
+    private func expiryBadgeView(_ badge: JWTExpiryBadge) -> some View {
+        Text(badge.text)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(badge.tone.color)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(badge.tone.color.opacity(0.12))
+            )
+            .fixedSize()
+            .help(badge.detail)
     }
 
     // MARK: - Content Views
@@ -426,6 +450,19 @@ extension JWTView {
         if let monitor = keyMonitor {
             NSEvent.removeMonitor(monitor)
             keyMonitor = nil
+        }
+    }
+}
+
+private extension JWTExpiryTone {
+    var color: Color {
+        switch self {
+        case .neutral:
+            .secondary
+        case .warning:
+            .orange
+        case .critical:
+            .red
         }
     }
 }

@@ -29,6 +29,33 @@ final class JWTParserTests: XCTestCase {
         return formatter
     }
 
+    private let badgeLocale = Locale(identifier: "en_US_POSIX")
+    private let badgeTimeZone = TimeZone(secondsFromGMT: 0)!
+
+    private func badgeFormatter(dateStyle: DateFormatter.Style, timeStyle: DateFormatter.Style) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = dateStyle
+        formatter.timeStyle = timeStyle
+        formatter.locale = badgeLocale
+        formatter.timeZone = badgeTimeZone
+        return formatter
+    }
+
+    private func compactInstant(_ date: Date) -> String {
+        badgeFormatter(dateStyle: .medium, timeStyle: .medium).string(from: date)
+    }
+
+    private func longInstant(_ date: Date) -> String {
+        badgeFormatter(dateStyle: .full, timeStyle: .long).string(from: date)
+    }
+
+    private func badge(
+        _ claims: JWTClaims,
+        at date: Date
+    ) -> JWTExpiryBadge? {
+        claims.expiryBadge(at: date, locale: badgeLocale, timeZone: badgeTimeZone)
+    }
+
     // MARK: - Parts
 
     func testPartsOfThreeSegmentToken() {
@@ -164,6 +191,89 @@ final class JWTParserTests: XCTestCase {
 
     func testClaimsWithoutExpiryOrNotBeforeAreValid() {
         XCTAssertEqual(JWTClaims().expiryState(at: Date(timeIntervalSince1970: 0)), .valid)
+    }
+
+    // MARK: - Expiry badge
+
+    func testBadgeExpiredExactlyOneSecondAfterExpiry() {
+        let expiry = Date(timeIntervalSince1970: 1_516_242_622)
+        let result = badge(JWTClaims(expiresAt: expiry), at: expiry.addingTimeInterval(1))
+
+        XCTAssertEqual(result?.text, "Expired · \(compactInstant(expiry))")
+        XCTAssertEqual(result?.detail, "Expired \(longInstant(expiry))")
+        XCTAssertEqual(result?.tone, .critical)
+    }
+
+    func testBadgeExpiredAtExactExpiryBoundary() {
+        let expiry = Date(timeIntervalSince1970: 1_516_242_622)
+
+        XCTAssertEqual(badge(JWTClaims(expiresAt: expiry), at: expiry.addingTimeInterval(-1))?.text,
+                       "Valid · expires \(compactInstant(expiry))")
+        XCTAssertEqual(badge(JWTClaims(expiresAt: expiry), at: expiry)?.text,
+                       "Expired · \(compactInstant(expiry))")
+    }
+
+    func testBadgeNotYetValid() {
+        let notBefore = Date(timeIntervalSince1970: 1_516_242_622)
+        let result = badge(JWTClaims(notBefore: notBefore), at: notBefore.addingTimeInterval(-1))
+
+        XCTAssertEqual(result?.text, "Not yet valid · \(compactInstant(notBefore))")
+        XCTAssertEqual(result?.detail, "Not valid until \(longInstant(notBefore))")
+        XCTAssertEqual(result?.tone, .warning)
+    }
+
+    func testBadgeValidWithExpiryOnly() {
+        let expiry = Date(timeIntervalSince1970: 1_516_242_622)
+        let result = badge(JWTClaims(expiresAt: expiry), at: expiry.addingTimeInterval(-3600))
+
+        XCTAssertEqual(result?.text, "Valid · expires \(compactInstant(expiry))")
+        XCTAssertEqual(result?.tone, .neutral)
+    }
+
+    func testBadgeValidWithNotBeforeOnly() {
+        let notBefore = Date(timeIntervalSince1970: 1_516_242_622)
+        let result = badge(JWTClaims(notBefore: notBefore), at: notBefore.addingTimeInterval(3600))
+
+        XCTAssertEqual(result?.text, "Valid · since \(compactInstant(notBefore))")
+        XCTAssertEqual(result?.detail, "Valid since \(longInstant(notBefore))")
+        XCTAssertEqual(result?.tone, .neutral)
+    }
+
+    func testBadgePrefersNotBeforeWhenBothClaimsPresent() {
+        let claims = JWTClaims(
+            notBefore: Date(timeIntervalSince1970: 2000),
+            expiresAt: Date(timeIntervalSince1970: 1000)
+        )
+        let result = badge(claims, at: Date(timeIntervalSince1970: 1500))
+
+        XCTAssertEqual(result?.text, "Not yet valid · \(compactInstant(Date(timeIntervalSince1970: 2000)))")
+        XCTAssertEqual(result?.tone, .warning)
+    }
+
+    func testBadgeIsNilWithoutTemporalClaims() {
+        let claims = JWTClaims(issuedAt: Date(timeIntervalSince1970: 1000))
+        XCTAssertNil(badge(claims, at: Date(timeIntervalSince1970: 1500)))
+        XCTAssertNil(badge(JWTClaims(), at: Date(timeIntervalSince1970: 1500)))
+        XCTAssertEqual(claims.expiryState(at: Date(timeIntervalSince1970: 1500)), .valid)
+    }
+
+    func testBadgeIgnoresNonNumericExpiryClaim() throws {
+        let payload = #"{"sub":"1234567890","exp":"1516242622"}"#
+        let claims = try XCTUnwrap(JWTParser.claims(ofToken: token(payload: payload)))
+
+        XCTAssertNil(claims.expiresAt)
+        XCTAssertNil(badge(claims, at: Date(timeIntervalSince1970: 1_516_240_000)))
+    }
+
+    func testBadgeForFractionalExpiry() throws {
+        let payload = #"{"exp":1516242622.5}"#
+        let claims = try XCTUnwrap(JWTParser.claims(ofToken: token(payload: payload)))
+        let expiry = Date(timeIntervalSince1970: 1_516_242_622.5)
+
+        XCTAssertEqual(badge(claims, at: Date(timeIntervalSince1970: 1_516_242_000))?.text,
+                       "Valid · expires \(compactInstant(expiry))")
+        XCTAssertEqual(badge(claims, at: Date(timeIntervalSince1970: 1_516_242_623))?.text,
+                       "Expired · \(compactInstant(expiry))")
     }
 
     // MARK: - Timestamp tooltips

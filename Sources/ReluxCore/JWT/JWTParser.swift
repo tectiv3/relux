@@ -14,6 +14,27 @@ public enum JWTExpiryState: Equatable, Sendable {
     case notYetValid
 }
 
+/// Semantic weight of an expiry badge; the UI maps this to a colour so
+/// `ReluxCore` stays free of SwiftUI types.
+public enum JWTExpiryTone: Equatable, Sendable {
+    case neutral
+    case warning
+    case critical
+}
+
+public struct JWTExpiryBadge: Equatable, Sendable {
+    public let text: String
+    /// Long-form instant for the tooltip, matching `timestampTooltip`'s style.
+    public let detail: String
+    public let tone: JWTExpiryTone
+
+    public init(text: String, detail: String, tone: JWTExpiryTone) {
+        self.text = text
+        self.detail = detail
+        self.tone = tone
+    }
+}
+
 public struct JWTClaims: Equatable, Sendable {
     public let issuedAt: Date?
     public let notBefore: Date?
@@ -35,6 +56,76 @@ public struct JWTClaims: Equatable, Sendable {
             return .expired
         }
         return .valid
+    }
+
+    /// Returns `nil` when the token carries neither `exp` nor `nbf`, so tokens
+    /// without temporal claims render exactly as before.
+    public func expiryBadge(
+        at date: Date = Date(),
+        locale: Locale = .current,
+        timeZone: TimeZone = .current
+    ) -> JWTExpiryBadge? {
+        guard notBefore != nil || expiresAt != nil else { return nil }
+
+        let compact = Self.badgeFormatter(
+            dateStyle: .medium,
+            timeStyle: .medium,
+            locale: locale,
+            timeZone: timeZone
+        )
+        let long = Self.badgeFormatter(
+            dateStyle: .full,
+            timeStyle: .long,
+            locale: locale,
+            timeZone: timeZone
+        )
+
+        switch expiryState(at: date) {
+        case .expired:
+            guard let expiresAt else { return nil }
+            return JWTExpiryBadge(
+                text: "Expired · \(compact.string(from: expiresAt))",
+                detail: "Expired \(long.string(from: expiresAt))",
+                tone: .critical
+            )
+        case .notYetValid:
+            guard let notBefore else { return nil }
+            return JWTExpiryBadge(
+                text: "Not yet valid · \(compact.string(from: notBefore))",
+                detail: "Not valid until \(long.string(from: notBefore))",
+                tone: .warning
+            )
+        case .valid:
+            if let expiresAt {
+                return JWTExpiryBadge(
+                    text: "Valid · expires \(compact.string(from: expiresAt))",
+                    detail: "Expires \(long.string(from: expiresAt))",
+                    tone: .neutral
+                )
+            }
+            guard let notBefore else { return nil }
+            return JWTExpiryBadge(
+                text: "Valid · since \(compact.string(from: notBefore))",
+                detail: "Valid since \(long.string(from: notBefore))",
+                tone: .neutral
+            )
+        }
+    }
+
+    /// Built per call: DateFormatter is not Sendable, so it cannot be shared
+    /// under Swift 6 strict concurrency.
+    private static func badgeFormatter(
+        dateStyle: DateFormatter.Style,
+        timeStyle: DateFormatter.Style,
+        locale: Locale,
+        timeZone: TimeZone
+    ) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = dateStyle
+        formatter.timeStyle = timeStyle
+        formatter.locale = locale
+        formatter.timeZone = timeZone
+        return formatter
     }
 }
 
