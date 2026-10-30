@@ -65,10 +65,29 @@ final class AppRankingTests: XCTestCase {
         )
     }
 
-    func testLastPickOutweighsTheTwoHundredPointTierGap() {
-        // The widest gap the ladder can produce between adjacent name tiers.
-        XCTAssertEqual(900 - 700, 200)
-        XCTAssertGreaterThan(Double(UsageBoost.lastPick), 200)
+    /// A learned pick must be worth more than the widest gap between two name tiers,
+    /// otherwise learning could never override the ladder. Asserted through the ranker:
+    /// the ladder alone puts Reminders first, and marking Remote Desktop as the last pick
+    /// for the query must invert that order.
+    func testLearnedPickFlipsTheWidestTierGap() throws {
+        // Name-prefix tier (900) against word-prefix tier (700): a 200-point tier gap
+        // before the length penalty, which widens it further. Neither app has usage.
+        let reminders = try XCTUnwrap(AppRanking.score(query: "rem", name: "Reminders", now: Self.now))
+        let remote = try XCTUnwrap(AppRanking.score(
+            query: "rem",
+            name: "Microsoft Remote Desktop",
+            now: Self.now
+        ))
+        XCTAssertGreaterThan(reminders, remote)
+
+        let remoteAfterPick = try XCTUnwrap(AppRanking.score(
+            query: "rem",
+            name: "Microsoft Remote Desktop",
+            usage: AppUsage(lastPick: true),
+            now: Self.now
+        ))
+        XCTAssertGreaterThan(remoteAfterPick, reminders)
+        XCTAssertEqual(remoteAfterPick - remote, Double(UsageBoost.lastPick))
     }
 
     func testNewlyDetectedAppKeepsItsFlatBonus() throws {

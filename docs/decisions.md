@@ -13,11 +13,11 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 ## Frecency System
 
 - Tracks query→item selections to rank results; the scoring lives in `ReluxCore/Search/AppRanking.swift` (`AppUsage`, `UsageBoost`) and `FuzzyMatch.score(query:name:)`
-- `usage: [String: Int]` counts opens per stable identity (the app path for apps, the item id for everything else) — no per-query buckets
-- `learned: [String: String]` maps folded query → identity of the last pick for that query
+- `usage` counts opens per stable identity (the app path for apps, the item id for everything else) — no per-query buckets. The value is now `{opens, lastUsed}`; it was a bare `Int` before the 2026-10-30 decay unit, see *Usage Recency Decay and Learned-Pick TTL* below
+- `learned` maps folded query → the last pick's identity (now `{path, at}`; `[String: String]` before the same unit, see below) so a pick can expire
 - Queries are normalised in exactly one place (`FrecencyTracker.normalizedQuery`: trimmed, case- and diacritic-folded) so recording and lookup cannot disagree
 - Web-search and calculator selections are never recorded (no stable identity)
-- Legacy `"<query prefix>:<item id>" → {count, lastUsed}` files are migrated once on load by summing counts per app path
+- Legacy `"<query prefix>:<item id>" → {count, lastUsed}` files are migrated once on load by summing counts per identity (app path for apps, item id for non-apps)
 - Stores full SearchItem data so recents can be displayed on empty query
 - Data persisted atomically in `~/Library/Application Support/Relux/` (frecency.json, recents.json)
 
@@ -26,7 +26,7 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Actions menu (Cmd+K) floats as overlay over results (ZStack, bottom-trailing), does NOT replace them
 - Empty query shows up to 8 recently used items
 - Keyboard layout can be forced on panel open (setting in General tab, uses `TISSelectInputSource`)
-- App icons via `NSWorkspace.shared.icon(forFile:)`
+- App icons via `NSWorkspace.shared.icon(forFile:)`, funnelled through `AppIconCache` (fetch once per path, 48×48 rasterization, process-lifetime reuse)
 
 ## Keyboard Navigation
 
@@ -75,6 +75,8 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 
 ## Capture Output Scripts
 
+> **Partially superseded** by *Script Output Modes* below: the `capturesOutput: Bool` became `ScriptOutputMode` (`.none` / `.capture` / `.replace`). Read the enabled/disabled wording below as `.capture` / `.none`.
+
 - Scripts can opt into `capturesOutput: Bool` to stream stdout into the panel's answer section
 - When enabled, the panel stays open and output streams incrementally (same UX as Ask AI)
 - When disabled, existing fire-and-forget behavior with toast is preserved
@@ -83,8 +85,8 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 
 ## Clipboard History
 
-- Integrated as a second panel mode via `PanelMode` enum on AppState (`.search` / `.clipboard`)
-- `PanelRootView` wrapper switches between `OverlayView` and `ClipboardHistoryView` based on mode
+- Integrated as the second panel mode via `PanelMode` on AppState — `.search` / `.clipboard` at the time; the enum now also has `.translate` and `.jwt`
+- `PanelRootView` wrapper switches on the mode (`.search` → `OverlayView`, `.clipboard` → `ClipboardHistoryView`, plus the translate and JWT views)
 - Clipboard monitoring uses timer-based polling of `NSPasteboard.general.changeCount` every 0.5s
 - Storage: SQLite `clipboard_history` table in existing `relux.db`, images saved as PNG files in `~/Library/Application Support/Relux/clipboard/`
 - Paste-back: puts content on system clipboard, closes panel, activates previous app, simulates Cmd+V via CGEvent
@@ -135,7 +137,7 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Frecency integration persists the last decoded token in `meta["token"]` inside recents.json
 - Excluded from generic `recordSelection` in `openSelectedItem` to prevent overwriting stored token with empty dict
 - Actions overlay (Cmd+K) for copying header/payload/full token
-- Lives in `Sources/Relux/JWT/JWTView.swift` as a self-contained view with inline key monitor
+- Lives in `Sources/Relux/JWT/JWTView.swift` as a self-contained view; panel key handling is attached through the shared `PanelKeyMonitor`
 
 ## System Settings Search
 
@@ -169,7 +171,7 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 ## Unified Score-Based Search Ranking
 
 - `SearchItem` carries a `score: Double` field populated by every searcher and synthetic item generator
-- All searchers (AppSearcher, ScriptSearcher, SystemSettingsSearcher) produce scores on a shared global scale (0-1050)
+- All searchers (AppSearcher, ScriptSearcher, SystemSettingsSearcher) produce *base* scores on a shared 0–1050 scale; the usage boost (up to +500) is added afterwards in `AppState`, so a final score can exceed 1050
 - Synthetic items (calculator, JWT, translate, web search) are created in `AppState.syntheticItems()` with explicit scores
 - `AppState.performSearch` merges all sources, sorts by score descending, then truncates
 - No positional manipulation in OverlayView — the view receives a pre-ranked list and renders it
@@ -178,7 +180,7 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Selection-aware script bonus: +200 to base score (replaces unconditional prepend)
 - App fuzzy tiers (higher is better): exact 1000, name prefix 900, initials prefix 800, word prefix 700, substring 500, in-order subsequence `max(1, 300 - gaps * 8)`. Tiers subtract a length penalty `min(name.count, 60)`; the subsequence tier does not
 - App usage boost, evaluated at read time: `min(200, 20 * opens) * 0.5^(age / 30 days)` plus 300 when the app was the last pick for that exact folded query **and** that pick is at most 90 days old. 300 > the widest adjacent tier gap (200), so learning can override the name ladder
-- Score bands: calculator 1050, JWT keyword 1000, apps 1000–500 by fuzzy tier (+50 newly detected, +usage ≤500), scripts exact 930, settings exact 850, web search fallback 200, translate 100
+- Score bands (base score, before the +up to 500 usage boost): calculator 1050, JWT keyword 1000 / JWT-shaped content 900, apps 1000 (exact) down to 1 (the subsequence tier is `max(1, 300 - gaps * 8)`, so 500 is a tier value, not a floor) plus +50 newly detected, scripts exact 930, settings exact 850, web search URL open 500 / DuckDuckGo fallback 200, translate 100
 - See `docs/plans/2026-03-11-unified-search-scoring.md` for full scoring contract
 
 ## Instant Space Switching (4-Finger Swipes)
@@ -208,7 +210,7 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - The bonus is computed at read time, the whole bonus decaying as one unit: `min(200, 20 * opens) * 0.5^((now - lastUsed) / 30 days)`. Only the opens bonus decays; the learned pick is binary (`+300` while live).
 - Half-life is **30 days**, a single named constant (`UsageBoost.halfLifeDays`). Rationale: because the whole bonus decays rather than a per-event counter, a 14-day half-life halves everything every fortnight, which forgets a weekly-used app too eagerly; 30 days keeps a weekly app near full weight while letting an abandoned app fade over a quarter.
 - `learned` is `[foldedQuery: { path: String, at: Date }]` with a **hard 90-day TTL**: a pick older than 90 days is ignored at read time and pruned from the file on load and on every write. The boundary is inclusive — exactly 90 days old still applies.
-- Every model function (`UsageBoost.value`, `UsageBoost.decay`, `UsageBoost.isLive`, `AppRanking.score`) and every tracker read (`appUsage`, `usageBoost`) takes an injected `now: Date`; only `AppState` calls `Date()`, so the arithmetic is exactly testable.
+- Every scoring function (`UsageBoost.value`, `UsageBoost.decay`, `UsageBoost.isLive`, `AppRanking.score`) and every tracker read/write that feeds it (`appUsage`, `usageBoost`, `recordSelection`) takes an injected `now: Date`, so the ranking arithmetic is exactly testable. The rule is about the scoring path only, not "only `AppState` calls `Date()`" — two non-scoring call sites default it: `FrecencyTracker.removeItem(id:now: Date = Date())` (called from `OverlayView`) and `JWTView`'s badge instant.
 
 **Migration** (all three on-disk shapes load):
 - **Legacy** `["<query prefix>:<itemId>": { count, lastUsed }]` -> group by item id, `opens = sum(count)`, `lastUsed = max(lastUsed)` per identity. The reference-date timestamps are real, so they are preserved rather than replaced with `now`. `learned` starts empty: a 4-character query prefix is not a full folded query, so a prefix -> path record could never match. Non-app ids (`script:`, `settings:`, `translate-selection`) are kept under their item id instead of being dropped.

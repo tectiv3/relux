@@ -123,19 +123,120 @@ final class PanelActionsTests: XCTestCase {
 
     // MARK: - Shared invariants
 
-    func testEveryDescriptorCarriesAnIconAndIsEnabled() {
-        let all = [SearchItemKind.app, .webSearch, .script, .translate, .calculator, .jwt, .systemSettings]
-            .flatMap { PanelActions.search(kind: $0, hasCapturedOutput: false) }
-            + PanelActions.clipboard(
+    /// The exact descriptor of every row in every panel, in order, including icon and the
+    /// `isEnabled` default. `ActionOverlay` honours `descriptor.isEnabled` (it refuses to run a
+    /// disabled row and will not highlight it), but no builder passes `isEnabled: false` — the
+    /// initializer defaults it to true — so there is no disabled state to pin; the equality
+    /// below pins the default instead.
+    func testPanelActionSetsAreExactlyTheExpectedDescriptors() {
+        XCTAssertEqual(
+            PanelActions.search(kind: .app, hasCapturedOutput: false),
+            [
+                ActionDescriptor(kind: .launch, label: "Launch", icon: "arrow.up.forward.app", shortcut: "⏎"),
+                ActionDescriptor(kind: .showInFinder, label: "Show in Finder", icon: "folder", shortcut: "⌘⏎"),
+                ActionDescriptor(
+                    kind: .removeFromHistory,
+                    label: "Remove from history",
+                    icon: "trash",
+                    shortcut: nil
+                ),
+            ]
+        )
+        XCTAssertEqual(
+            PanelActions.search(kind: .script, hasCapturedOutput: false),
+            [
+                ActionDescriptor(kind: .run, label: "Run", icon: "play.fill", shortcut: "⏎"),
+                ActionDescriptor(
+                    kind: .removeFromHistory,
+                    label: "Remove from history",
+                    icon: "trash",
+                    shortcut: nil
+                ),
+            ]
+        )
+        XCTAssertEqual(
+            PanelActions.search(kind: .script, hasCapturedOutput: true),
+            [
+                ActionDescriptor(kind: .copyOutput, label: "Copy output", icon: "doc.on.clipboard", shortcut: nil),
+                ActionDescriptor(kind: .rerun, label: "Re-run", icon: "arrow.clockwise", shortcut: nil),
+                ActionDescriptor(kind: .clearOutput, label: "Clear", icon: "xmark", shortcut: nil),
+            ]
+        )
+        XCTAssertEqual(
+            [SearchItemKind.webSearch, .translate, .calculator, .jwt, .systemSettings]
+                .flatMap { PanelActions.search(kind: $0, hasCapturedOutput: false) },
+            [
+                ActionDescriptor(kind: .search, label: "Search", icon: "magnifyingglass", shortcut: "⏎"),
+                ActionDescriptor(kind: .translate, label: "Translate", icon: "character.book.closed", shortcut: "⏎"),
+                ActionDescriptor(kind: .copy, label: "Copy", icon: "doc.on.clipboard", shortcut: "⏎"),
+                ActionDescriptor(kind: .open, label: "Open", icon: "key.viewfinder", shortcut: "⏎"),
+                ActionDescriptor(kind: .open, label: "Open", icon: "gear", shortcut: "⏎"),
+            ]
+        )
+        XCTAssertEqual(
+            PanelActions.clipboard(
                 previousAppName: "Terminal",
                 isRichText: true,
-                isPinned: true,
-                activeFilter: nil,
+                isPinned: false,
+                activeFilter: "image",
                 filters: filters
-            )
-            + PanelActions.translate()
-            + PanelActions.jwt()
-        XCTAssertFalse(all.isEmpty)
-        XCTAssertTrue(all.allSatisfy { !$0.icon.isEmpty && $0.isEnabled })
+            ),
+            [
+                ActionDescriptor(
+                    kind: .paste,
+                    label: "Paste to Terminal",
+                    icon: "doc.on.clipboard.fill",
+                    shortcut: "⏎"
+                ),
+                ActionDescriptor(
+                    kind: .copyToClipboard,
+                    label: "Copy to Clipboard",
+                    icon: "doc.on.clipboard",
+                    shortcut: "⌘⏎"
+                ),
+                ActionDescriptor(
+                    kind: .pasteFormatted,
+                    label: "Paste Formatted to Terminal",
+                    icon: "textformat",
+                    shortcut: "⌘⇧⏎"
+                ),
+                ActionDescriptor(kind: .delete, label: "Delete", icon: "trash", shortcut: "⌫"),
+                ActionDescriptor(kind: .pin, label: "Pin", icon: "pin", shortcut: nil),
+                ActionDescriptor(kind: .filter("text"), label: "Show Text Only", icon: "doc.plaintext", shortcut: nil),
+                ActionDescriptor(kind: .filter("image"), label: "Clear Filter", icon: "photo", shortcut: nil),
+                ActionDescriptor(
+                    kind: .filter("richText"),
+                    label: "Show Rich Text Only",
+                    icon: "doc.richtext",
+                    shortcut: nil
+                ),
+                ActionDescriptor(
+                    kind: .filter("color"),
+                    label: "Show Colors Only",
+                    icon: "paintpalette",
+                    shortcut: nil
+                ),
+            ]
+        )
+        XCTAssertEqual(
+            PanelActions.translate(),
+            [
+                ActionDescriptor(kind: .retranslate, label: "Re-translate", icon: "arrow.clockwise", shortcut: "⌘R"),
+                ActionDescriptor(
+                    kind: .copyToClipboard,
+                    label: "Copy to Clipboard",
+                    icon: "doc.on.clipboard",
+                    shortcut: "⌘⏎"
+                ),
+                ActionDescriptor(kind: .delete, label: "Delete", icon: "trash", shortcut: "⌫"),
+            ]
+        )
+        XCTAssertEqual(
+            PanelActions.jwt(),
+            [
+                ActionDescriptor(kind: .copyPayload, label: "Copy Payload", icon: "doc.on.clipboard", shortcut: "⏎"),
+                ActionDescriptor(kind: .copyToken, label: "Copy Token", icon: "key", shortcut: nil),
+            ]
+        )
     }
 }
