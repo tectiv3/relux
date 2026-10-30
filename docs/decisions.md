@@ -12,10 +12,14 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 
 ## Frecency System
 
-- Tracks query→item selections (frequency + recency) to rank results
-- Query normalized to first 4 chars for grouping similar queries
+- Tracks query→item selections to rank results; the scoring lives in `ReluxCore/Search/AppRanking.swift` (`AppUsage`, `UsageBoost`) and `FuzzyMatch.score(query:name:)`
+- `usage: [String: Int]` counts opens per stable identity (the app path for apps, the item id for everything else) — no per-query buckets
+- `learned: [String: String]` maps folded query → identity of the last pick for that query
+- Queries are normalised in exactly one place (`FrecencyTracker.normalizedQuery`: trimmed, case- and diacritic-folded) so recording and lookup cannot disagree
+- Web-search and calculator selections are never recorded (no stable identity)
+- Legacy `"<query prefix>:<item id>" → {count, lastUsed}` files are migrated once on load by summing counts per app path
 - Stores full SearchItem data so recents can be displayed on empty query
-- Data persisted in `~/Library/Application Support/Relux/` (frecency.json, recents.json)
+- Data persisted atomically in `~/Library/Application Support/Relux/` (frecency.json, recents.json)
 
 ## UI Behavior
 
@@ -167,11 +171,14 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - `SearchItem` carries a `score: Double` field populated by every searcher and synthetic item generator
 - All searchers (AppSearcher, ScriptSearcher, SystemSettingsSearcher) produce scores on a shared global scale (0-1050)
 - Synthetic items (calculator, JWT, translate, web search) are created in `AppState.syntheticItems()` with explicit scores
-- `AppState.performSearch` merges all sources, applies frecency boost additively to ALL item kinds, sorts by score descending, then truncates
+- `AppState.performSearch` merges all sources, sorts by score descending, then truncates
 - No positional manipulation in OverlayView — the view receives a pre-ranked list and renders it
-- Frecency applies to apps, scripts, AND settings (previously settings were excluded)
+- App rows are ranked by `AppSearcher` through the pure `AppRanking.score`: fuzzy tier + newly-detected bonus + usage boost. `AppSearcher` returns up to 50 candidates so usage can promote an app below the visible cut; `AppState` applies the final `prefix(maxSearchResults)`
+- Non-app rows keep their searcher score and receive the usage boost (`min(200, opens * 20)` + 300 for the last pick of that query) in `AppState`; frecency therefore still applies to apps, scripts, AND settings
 - Selection-aware script bonus: +200 to base score (replaces unconditional prepend)
-- Score bands: calculator 1050, JWT keyword 1000, apps exact 950, scripts exact 930, settings exact 850, web search fallback 200, translate 100
+- App fuzzy tiers (higher is better): exact 1000, name prefix 900, initials prefix 800, word prefix 700, substring 500, in-order subsequence `max(1, 300 - gaps * 8)`. Tiers subtract a length penalty `min(name.count, 60)`; the subsequence tier does not
+- App usage boost: `min(200, opens * 20)` plus 300 when the app was the last pick for that exact folded query. 300 > the widest adjacent tier gap (200), so learning can override the name ladder
+- Score bands: calculator 1050, JWT keyword 1000, apps 1000–500 by fuzzy tier (+50 newly detected, +usage ≤500), scripts exact 930, settings exact 850, web search fallback 200, translate 100
 - See `docs/plans/2026-03-11-unified-search-scoring.md` for full scoring contract
 
 ## Instant Space Switching (4-Finger Swipes)

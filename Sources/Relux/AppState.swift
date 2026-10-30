@@ -114,7 +114,12 @@ final class AppState {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
 
         var all: [SearchItem] = []
-        all += appSearcher.search(trimmed, limit: limit)
+        let tracker = frecency
+        all += appSearcher.search(
+            trimmed,
+            limit: AppSearcher.candidateLimit,
+            usage: { path in tracker.appUsage(query: trimmed, path: path) }
+        )
         all += scriptSearcher.search(trimmed, limit: limit, stdinValue: stdinValue)
         all += systemSettingsSearcher.search(trimmed, limit: limit)
         all += syntheticItems(query: trimmed, selection: stdinValue)
@@ -126,9 +131,10 @@ final class AppState {
             }
         }
 
-        // Frecency boost applied to ALL items
-        for idx in all.indices {
-            all[idx].score += frecency.boost(query: trimmed, itemId: all[idx].id)
+        // App rows are already ranked with usage by AppSearcher; other kinds get
+        // the usage boost here because they have no fuzzy app ladder.
+        for idx in all.indices where all[idx].kind != .app {
+            all[idx].score += tracker.usageBoost(query: trimmed, itemId: all[idx].id)
         }
 
         all.sort { $0.score > $1.score }

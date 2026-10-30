@@ -70,4 +70,62 @@ final class FuzzyMatchTests: XCTestCase {
             nil
         )
     }
+
+    // MARK: - Folding, initials, scoring
+
+    private static let locale = Locale(identifier: "en_US_POSIX")
+
+    func testFoldLowercasesAndStripsDiacritics() {
+        XCTAssertEqual(FuzzyMatch.fold("Café", locale: Self.locale), "cafe")
+        XCTAssertEqual(FuzzyMatch.fold("ÉCOLE", locale: Self.locale), "ecole")
+        XCTAssertEqual(FuzzyMatch.fold("Plain", locale: Self.locale), "plain")
+    }
+
+    func testInitialsTakeWordStartsAndInnerCapitals() {
+        XCTAssertEqual(FuzzyMatch.initials("Visual Studio Code"), "vsc")
+        XCTAssertEqual(FuzzyMatch.initials("WebStorm"), "ws")
+        XCTAssertEqual(FuzzyMatch.initials("Microsoft Remote Desktop"), "mrd")
+        XCTAssertEqual(FuzzyMatch.initials("Xcode"), "x")
+        XCTAssertEqual(FuzzyMatch.initials("7-Zip"), "7z")
+    }
+
+    func testTierOrderingIsMonotonic() {
+        let name = "Visual Studio Code"
+        // exact, name prefix, initials, word prefix, substring, subsequence
+        let scores = ["visual studio code", "visual", "vsc", "studio", "isual", "vsd"]
+            .compactMap { FuzzyMatch.score(query: $0, name: name, locale: Self.locale) }
+        XCTAssertEqual(scores.count, 6)
+        for (higher, lower) in zip(scores, scores.dropFirst()) {
+            XCTAssertGreaterThan(higher, lower, "expected \(scores) to be strictly descending")
+        }
+        XCTAssertEqual(scores, [982, 882, 782, 682, 482, 236])
+    }
+
+    func testExactAndPrefixSubtractLengthPenalty() {
+        XCTAssertEqual(FuzzyMatch.score(query: "code", name: "code", locale: Self.locale), 996)
+        XCTAssertEqual(FuzzyMatch.score(query: "cod", name: "code", locale: Self.locale), 896)
+    }
+
+    func testLengthPenaltyIsCappedAtSixty() {
+        let long = "q" + String(repeating: "x", count: 79)
+        XCTAssertEqual(FuzzyMatch.score(query: "q", name: long, locale: Self.locale), 840)
+        XCTAssertEqual(FuzzyMatch.score(query: "sw", name: "swift", locale: Self.locale), 895)
+        XCTAssertEqual(FuzzyMatch.score(query: "sw", name: "swiftx", locale: Self.locale), 894)
+    }
+
+    func testSubsequenceScoreDropsWithGaps() {
+        XCTAssertEqual(FuzzyMatch.score(query: "abc", name: "axbc", locale: Self.locale), 292)
+        XCTAssertEqual(FuzzyMatch.score(query: "abc", name: "axxbc", locale: Self.locale), 284)
+    }
+
+    func testDiacriticQueryMatchesAccentedName() {
+        XCTAssertEqual(FuzzyMatch.score(query: "cafe", name: "Café", locale: Self.locale), 996)
+        XCTAssertEqual(FuzzyMatch.score(query: "CAFÉ", name: "cafe", locale: Self.locale), 996)
+    }
+
+    func testNoMatchIsNil() {
+        XCTAssertNil(FuzzyMatch.score(query: "zzz", name: "Reminders", locale: Self.locale))
+        XCTAssertNil(FuzzyMatch.score(query: "", name: "Reminders", locale: Self.locale))
+        XCTAssertNil(FuzzyMatch.score(query: "rem", name: "", locale: Self.locale))
+    }
 }

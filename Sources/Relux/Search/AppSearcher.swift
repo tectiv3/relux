@@ -170,23 +170,28 @@ final class AppSearcher {
         }
     }
 
-    func search(_ query: String, limit: Int = 5) -> [SearchItem] {
+    /// Candidates kept before the caller's final cut. Must comfortably exceed
+    /// `AppState.maxSearchResults` so usage learning can promote an app that the
+    /// name match alone would leave below the visible cut.
+    static let candidateLimit = 50
+
+    func search(
+        _ query: String,
+        limit: Int = 5,
+        usage: (String) -> AppUsage = { _ in AppUsage() }
+    ) -> [SearchItem] {
         guard !query.isEmpty else { return [] }
-        let lowercasedQuery = query.lowercased()
 
         var scored: [(app: AppItem, score: Double)] = []
         for app in apps {
-            let name = app.name.lowercased()
-            let bonus: Double = newlyDetected.contains(app.path.path) ? 50 : 0
-            if name == lowercasedQuery {
-                scored.append((app, 950 + bonus))
-            } else if name.hasPrefix(lowercasedQuery) {
-                scored.append((app, 800 + bonus))
-            } else if name.contains(lowercasedQuery) {
-                scored.append((app, 600 + bonus))
-            } else if FuzzyMatch.matches(lowercasedQuery, in: name) {
-                scored.append((app, 350 + bonus))
-            }
+            let path = app.path.path
+            guard let score = AppRanking.score(
+                query: query,
+                name: app.name,
+                isNew: newlyDetected.contains(path),
+                usage: usage(path)
+            ) else { continue }
+            scored.append((app, score))
         }
 
         scored.sort { $0.score > $1.score }
