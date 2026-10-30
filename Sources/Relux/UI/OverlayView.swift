@@ -44,6 +44,15 @@ struct OverlayView: View {
     @State private var results: [SearchItem] = []
     @State private var selectedIndex: Int = 0
 
+    /// Set by an explicit navigation (arrows, Tab, Cmd+1...9, a row click). Until then the
+    /// highlight belongs to the ranking and must follow it across refreshes instead of being
+    /// restored by identity — see `ResultSelection.indexAfterRefresh`.
+    @State private var userMovedSelection = false
+
+    /// The query `results` currently reflect, so a typed change can be told apart from a
+    /// selection-capture or panel-open refresh of the same query.
+    @State private var resultsQuery: String = ""
+
     // Script output streaming state
     @State private var rawAnswer: String = ""
     @State private var isGenerating: Bool = false
@@ -136,6 +145,7 @@ struct OverlayView: View {
             if UserDefaults.standard.bool(forKey: "clearQueryOnOpen") {
                 query = ""
             }
+            userMovedSelection = false
             searchTrigger = UUID()
             focusSearchField()
         }
@@ -148,6 +158,7 @@ struct OverlayView: View {
             }
             guard !results.isEmpty else { return .ignored }
             selectedIndex = ResultSelection.retreated(selectedIndex, count: results.count)
+            userMovedSelection = true
             return .handled
         }
         .onKeyPress(.downArrow) {
@@ -156,6 +167,7 @@ struct OverlayView: View {
             }
             guard !results.isEmpty else { return .ignored }
             selectedIndex = ResultSelection.advanced(selectedIndex, count: results.count)
+            userMovedSelection = true
             return .handled
         }
         .onKeyPress(.return) {
@@ -183,6 +195,7 @@ struct OverlayView: View {
             }
             guard !results.isEmpty else { return .ignored }
             selectedIndex = ResultSelection.advanced(selectedIndex, count: results.count)
+            userMovedSelection = true
             return .handled
         }
         .background {
@@ -284,6 +297,7 @@ struct OverlayView: View {
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 selectedIndex = index
+                                userMovedSelection = true
                                 openSelectedItem()
                             }
                         }
@@ -596,7 +610,17 @@ struct OverlayView: View {
             results = ResultGrouping.groupByKind(results)
         }
         // Restore against the grouped array, which is what `selectedIndex` indexes into.
-        selectedIndex = ResultSelection.restoredIndex(of: previousSelectionID, in: results)
+        selectedIndex = ResultSelection.indexAfterRefresh(
+            of: previousSelectionID,
+            userMoved: userMovedSelection,
+            in: results,
+            previousQuery: resultsQuery,
+            newQuery: text
+        )
+        if resultsQuery != text {
+            userMovedSelection = false
+            resultsQuery = text
+        }
         menu.close()
     }
 
@@ -796,6 +820,7 @@ struct OverlayView: View {
         guard let index = ResultSelection.rowIndex(forCommandKey: number, rowCount: results.count)
         else { return }
         selectedIndex = index
+        userMovedSelection = true
         openSelectedItem()
     }
 

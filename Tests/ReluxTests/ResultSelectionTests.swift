@@ -31,40 +31,92 @@ final class ResultSelectionTests: XCTestCase {
         XCTAssertEqual(ResultSelection.index(of: "dup", in: items), 0)
     }
 
-    // MARK: - restoredIndex(of:in:)
+    // MARK: - indexAfterRefresh(of:userMoved:in:previousQuery:newQuery:)
 
-    func testRestoredIndexPrefersSurvivingSelection() {
+    /// The reported defect, exactly: `rem` ranked Remote Desktop first and Reminders second,
+    /// the highlight sat on Reminders from an earlier query, and nothing had been pressed since.
+    func testUntouchedHighlightFollowsTheNewRanking() {
+        let reminders = "app:/System/Applications/Reminders.app"
+        let ranked = [
+            item("app:/Applications/Microsoft Remote Desktop.app"),
+            item(reminders),
+        ]
+        // The stale selection really is row 1 of the new ranking, so identity-restore would keep it.
+        XCTAssertEqual(ResultSelection.index(of: reminders, in: ranked), 1)
+        XCTAssertEqual(
+            ResultSelection.indexAfterRefresh(
+                of: reminders, userMoved: false, in: ranked,
+                previousQuery: "rem", newQuery: "rem"
+            ),
+            0
+        )
+    }
+
+    func testMovedHighlightIsRestoredByIdentity() {
         let items = [item("new-top"), item("kept"), item("other")]
-        XCTAssertEqual(ResultSelection.restoredIndex(of: "kept", in: items), 1)
+        XCTAssertEqual(
+            ResultSelection.indexAfterRefresh(
+                of: "kept", userMoved: true, in: items,
+                previousQuery: "rem", newQuery: "rem"
+            ),
+            1
+        )
     }
 
-    func testRestoredIndexFallsBackToZeroWhenSelectionDisappears() {
-        XCTAssertEqual(ResultSelection.restoredIndex(of: "gone", in: [item("a1")]), 0)
-    }
-
-    func testRestoredIndexFallsBackToZeroForNilAndEmpty() {
-        XCTAssertEqual(ResultSelection.restoredIndex(of: nil, in: [item("a1"), item("a2")]), 0)
-        XCTAssertEqual(ResultSelection.restoredIndex(of: "a1", in: []), 0)
-    }
-
-    func testRestoredIndexSurvivesRegroupingOfRealGroupingOutput() {
-        // Display order is the grouped order, so restore must run against that same array.
+    func testRestoreRunsAgainstTheGroupedArray() {
+        // Display order is the grouped order, so the index must be resolved there, not upstream.
         let ungrouped = [item("s1", .script), item("a1", .app), item("w1", .webSearch), item("s2", .script)]
         let grouped = ResultGrouping.groupByKind(ungrouped)
         XCTAssertEqual(grouped.map(\.id), ["s1", "s2", "a1", "w1"])
-        XCTAssertEqual(ResultSelection.restoredIndex(of: "a1", in: grouped), 2)
+        XCTAssertEqual(
+            ResultSelection.indexAfterRefresh(
+                of: "a1", userMoved: true, in: grouped,
+                previousQuery: "rem", newQuery: "rem"
+            ),
+            2
+        )
 
         // The same ids in the ungrouped order would give a different index; the grouped array wins.
-        XCTAssertEqual(ResultSelection.restoredIndex(of: "a1", in: ungrouped), 1)
+        XCTAssertEqual(ResultSelection.index(of: "a1", in: ungrouped), 1)
     }
 
-    func testRestoredIndexAfterSelectionRowDropsOut() {
-        let before = [item("a1"), item("a2"), item("a3")]
-        let selected = ResultSelection.restoredIndex(of: "a3", in: before)
-        XCTAssertEqual(selected, 2)
+    func testMovedHighlightFallsBackToTopWhenItsRowDisappears() {
+        let items = [item("a1"), item("a2")]
+        XCTAssertEqual(
+            ResultSelection.indexAfterRefresh(
+                of: "gone", userMoved: true, in: items,
+                previousQuery: "rem", newQuery: "rem"
+            ),
+            0
+        )
+    }
 
-        let after = [item("a1"), item("a2")]
-        XCTAssertEqual(ResultSelection.restoredIndex(of: before[selected].id, in: after), 0)
+    func testQueryChangeResetsToTopEvenAfterMoving() {
+        let items = [item("a1"), item("a2"), item("a3")]
+        XCTAssertEqual(
+            ResultSelection.indexAfterRefresh(
+                of: "a3", userMoved: true, in: items,
+                previousQuery: "rem", newQuery: "remo"
+            ),
+            0
+        )
+    }
+
+    func testEmptyResultsSelectTopRegardlessOfMovement() {
+        XCTAssertEqual(
+            ResultSelection.indexAfterRefresh(
+                of: "a1", userMoved: true, in: [],
+                previousQuery: "rem", newQuery: "rem"
+            ),
+            0
+        )
+        XCTAssertEqual(
+            ResultSelection.indexAfterRefresh(
+                of: nil, userMoved: true, in: [item("a1")],
+                previousQuery: "rem", newQuery: "rem"
+            ),
+            0
+        )
     }
 
     // MARK: - advanced(_:count:)

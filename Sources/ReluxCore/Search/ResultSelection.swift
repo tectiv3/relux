@@ -13,10 +13,23 @@ public enum ResultSelection {
         return items.firstIndex { $0.id == id }
     }
 
-    /// Index to select after a results refresh: the previous selection's new position, or 0
-    /// when it is gone (the historical "snap to top when nothing matches" behaviour).
-    public static func restoredIndex(of id: String?, in items: [SearchItem]) -> Int {
-        index(of: id, in: items) ?? 0
+    /// Index to select after a results refresh, where `userMoved` records whether the user has
+    /// explicitly navigated the list since `previousQuery` was typed.
+    ///
+    /// A query change always resets to 0: the ranking was recomputed for new input, so the best
+    /// result is what the user is looking at. Inside one query, a refresh (selection-capture bump,
+    /// a late Spotlight gather) follows the highlight by identity only when the user put it there;
+    /// otherwise it stays on row 0 and keeps tracking the ranking. Restoring unconditionally is
+    /// what made an untouched highlight ride the previous query's top result down the list.
+    public static func indexAfterRefresh(
+        of id: String?,
+        userMoved: Bool,
+        in items: [SearchItem],
+        previousQuery: String,
+        newQuery: String
+    ) -> Int {
+        guard !items.isEmpty, previousQuery == newQuery, userMoved else { return 0 }
+        return index(of: id, in: items) ?? 0
     }
 
     /// Next row for Tab/Down-style forward movement, wrapping past the end. An empty list or
