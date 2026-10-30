@@ -17,7 +17,7 @@ enum PanelMode {
 final class AppState {
     let appSearcher = AppSearcher()
     let scriptSearcher = ScriptSearcher()
-    let frecency = FrecencyTracker()
+    let frecency = FrecencyTracker(now: Date())
     let extensionRegistry = ExtensionRegistry()
     private let calculatorService = CalculatorService()
     let systemSettingsSearcher = SystemSettingsSearcher()
@@ -115,10 +115,13 @@ final class AppState {
 
         var all: [SearchItem] = []
         let tracker = frecency
+        // One instant for the whole query, so every row decays against the same clock.
+        let now = Date()
         all += appSearcher.search(
             trimmed,
             limit: AppSearcher.candidateLimit,
-            usage: { path in tracker.appUsage(query: trimmed, path: path) }
+            usage: { path in tracker.appUsage(query: trimmed, path: path, now: now) },
+            now: now
         )
         all += scriptSearcher.search(trimmed, limit: limit, stdinValue: stdinValue)
         all += systemSettingsSearcher.search(trimmed, limit: limit)
@@ -134,7 +137,7 @@ final class AppState {
         // App rows are already ranked with usage by AppSearcher; other kinds get
         // the usage boost here because they have no fuzzy app ladder.
         for idx in all.indices where all[idx].kind != .app {
-            all[idx].score += tracker.usageBoost(query: trimmed, itemId: all[idx].id)
+            all[idx].score += tracker.usageBoost(query: trimmed, itemId: all[idx].id, now: now)
         }
 
         all.sort { $0.score > $1.score }
@@ -228,7 +231,7 @@ final class AppState {
     }
 
     func recordSelection(query: String, item: SearchItem) {
-        frecency.recordSelection(query: query, item: item)
+        frecency.recordSelection(query: query, item: item, now: Date())
     }
 
     func recentItems() -> [SearchItem] {

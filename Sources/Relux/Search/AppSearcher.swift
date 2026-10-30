@@ -178,7 +178,8 @@ final class AppSearcher {
     func search(
         _ query: String,
         limit: Int = 5,
-        usage: (String) -> AppUsage = { _ in AppUsage() }
+        usage: (String) -> AppUsage = { _ in AppUsage() },
+        now: Date
     ) -> [SearchItem] {
         guard !query.isEmpty else { return [] }
 
@@ -189,7 +190,8 @@ final class AppSearcher {
                 query: query,
                 name: app.name,
                 isNew: newlyDetected.contains(path),
-                usage: usage(path)
+                usage: usage(path),
+                now: now
             ) else { continue }
             scored.append((app, score))
         }

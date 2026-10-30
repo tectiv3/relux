@@ -173,11 +173,11 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Synthetic items (calculator, JWT, translate, web search) are created in `AppState.syntheticItems()` with explicit scores
 - `AppState.performSearch` merges all sources, sorts by score descending, then truncates
 - No positional manipulation in OverlayView — the view receives a pre-ranked list and renders it
-- App rows are ranked by `AppSearcher` through the pure `AppRanking.score`: fuzzy tier + newly-detected bonus + usage boost. `AppSearcher` returns up to 50 candidates so usage can promote an app below the visible cut; `AppState` applies the final `prefix(maxSearchResults)`
-- Non-app rows keep their searcher score and receive the usage boost (`min(200, opens * 20)` + 300 for the last pick of that query) in `AppState`; frecency therefore still applies to apps, scripts, AND settings
+- App rows are ranked by `AppSearcher` through the pure `AppRanking.score`: fuzzy tier + newly-detected bonus + usage boost. `AppSearcher` returns up to 50 candidates so usage can promote an app below the visible cut; `AppState` applies the final `prefix(maxSearchResults)`. Both the model and the tracker take an injected `now: Date`; `AppState.performSearch` captures one `Date()` per query so every row ranks against the same instant
+- Non-app rows keep their searcher score and receive the same usage boost in `AppState`; frecency therefore still applies to apps, scripts, AND settings
 - Selection-aware script bonus: +200 to base score (replaces unconditional prepend)
 - App fuzzy tiers (higher is better): exact 1000, name prefix 900, initials prefix 800, word prefix 700, substring 500, in-order subsequence `max(1, 300 - gaps * 8)`. Tiers subtract a length penalty `min(name.count, 60)`; the subsequence tier does not
-- App usage boost: `min(200, opens * 20)` plus 300 when the app was the last pick for that exact folded query. 300 > the widest adjacent tier gap (200), so learning can override the name ladder
+- App usage boost, evaluated at read time: `min(200, 20 * opens) * 0.5^(age / 30 days)` plus 300 when the app was the last pick for that exact folded query **and** that pick is at most 90 days old. 300 > the widest adjacent tier gap (200), so learning can override the name ladder
 - Score bands: calculator 1050, JWT keyword 1000, apps 1000–500 by fuzzy tier (+50 newly detected, +usage ≤500), scripts exact 930, settings exact 850, web search fallback 200, translate 100
 - See `docs/plans/2026-03-11-unified-search-scoring.md` for full scoring contract
 
@@ -196,6 +196,25 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Fix: `intToDouble()` regex converts bare integer literals to `N.0` before NSExpression evaluation, forcing floating-point arithmetic
 - Float division by zero returns `inf` which is caught by `.isFinite` guard
 - Also fixes the correctness bug where `800/500` evaluated to `1` instead of `1.6`
+
+## Usage Recency Decay and Learned-Pick TTL
+
+> **Status 2026-10-30**: implemented — `Sources/ReluxCore/Search/AppRanking.swift` (`UsageBoost`), `Sources/Relux/Search/FrecencyTracker.swift`.
+
+**Context**: the previous unit stored bare open counts, so usage saturated and never forgot: an app opened 10 times stayed at the full `+200` forever, and a learned pick stayed authoritative forever.
+
+**Decision**:
+- `usage` is `[identity: { opens: Int, lastUsed: Date }]`; `opens += 1` and `lastUsed = now` on every recorded selection.
+- The bonus is computed at read time, the whole bonus decaying as one unit: `min(200, 20 * opens) * 0.5^((now - lastUsed) / 30 days)`. Only the opens bonus decays; the learned pick is binary (`+300` while live).
+- Half-life is **30 days**, a single named constant (`UsageBoost.halfLifeDays`). Rationale: because the whole bonus decays rather than a per-event counter, a 14-day half-life halves everything every fortnight, which forgets a weekly-used app too eagerly; 30 days keeps a weekly app near full weight while letting an abandoned app fade over a quarter.
+- `learned` is `[foldedQuery: { path: String, at: Date }]` with a **hard 90-day TTL**: a pick older than 90 days is ignored at read time and pruned from the file on load and on every write. The boundary is inclusive — exactly 90 days old still applies.
+- Every model function (`UsageBoost.value`, `UsageBoost.decay`, `UsageBoost.isLive`, `AppRanking.score`) and every tracker read (`appUsage`, `usageBoost`) takes an injected `now: Date`; only `AppState` calls `Date()`, so the arithmetic is exactly testable.
+
+**Migration** (all three on-disk shapes load):
+- **Legacy** `["<query prefix>:<itemId>": { count, lastUsed }]` -> group by item id, `opens = sum(count)`, `lastUsed = max(lastUsed)` per identity. The reference-date timestamps are real, so they are preserved rather than replaced with `now`. `learned` starts empty: a 4-character query prefix is not a full folded query, so a prefix -> path record could never match. Non-app ids (`script:`, `settings:`, `translate-selection`) are kept under their item id instead of being dropped.
+- **Previous unit** `{ usage: [identity: Int], learned: [query: String] }` -> `opens` carried over, `lastUsed = now`, each learned pick gets `at = now` (no timestamp was ever stored).
+- **Current shape** loads directly.
+- Written atomically; a migration rewrites only after `recents.json` has been read, so it does not clobber recents.
 
 ## 2026-10-06: Volume HUD
 
