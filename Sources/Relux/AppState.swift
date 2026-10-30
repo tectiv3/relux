@@ -22,7 +22,8 @@ final class AppState {
     private let calculatorService = CalculatorService()
     let systemSettingsSearcher = SystemSettingsSearcher()
 
-    let gestureBindingManager = GestureBindingManager()
+    let settings: SettingsStore
+    let gestureBindingManager: GestureBindingManager
 
     var volumeHUDController: VolumeHUDController?
 
@@ -39,8 +40,14 @@ final class AppState {
     var currentSelection: String?
     /// Bumped when async selection capture completes, so views can refresh derived results.
     var selectionCaptureID = UUID()
+    init() {
+        let store = SettingsStore()
+        settings = store
+        gestureBindingManager = GestureBindingManager(settings: store)
+    }
+
     var needsFirstRun: Bool {
-        !UserDefaults.standard.bool(forKey: "hasCompletedSetup")
+        settings.isFirstRun
     }
 
     func setup() throws {
@@ -53,7 +60,7 @@ final class AppState {
 
         let clipStore = try ClipboardStore(db: database)
         clipboardStore = clipStore
-        let monitor = ClipboardMonitor(store: clipStore)
+        let monitor = ClipboardMonitor(store: clipStore, settings: settings)
         clipboardMonitor = monitor
         monitor.start()
 
@@ -70,7 +77,7 @@ final class AppState {
         )
 
         // Clean up expired clipboard entries
-        let retentionMonths = UserDefaults.standard.object(forKey: "clipboardRetentionMonths") as? Int ?? 3
+        let retentionMonths = settings.clipboardRetentionMonths
         if let cutoffDate = Calendar.current.date(byAdding: .month, value: -retentionMonths, to: Date()) {
             try? clipStore.deleteExpired(before: cutoffDate)
         }
@@ -111,11 +118,11 @@ final class AppState {
     }
 
     func markSetupComplete() {
-        UserDefaults.standard.set(true, forKey: "hasCompletedSetup")
+        settings.hasCompletedSetup = true
     }
 
     var maxSearchResults: Int {
-        UserDefaults.standard.object(forKey: "maxSearchResults") as? Int ?? 10
+        settings.maxSearchResults
     }
 
     func performSearch(query: String, stdinValue: String? = nil) -> [SearchItem] {

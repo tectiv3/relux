@@ -14,10 +14,8 @@ struct SettingsView: View {
     @State private var selectedAppearance: String = "system"
     @State private var availableInputSources: [(id: String, name: String)] = []
     @State private var showMaxResults: Int = 10
-    @State private var clipboardEnabled: Bool =
-        UserDefaults.standard.object(forKey: "clipboardEnabled") as? Bool ?? true
-    @State private var clipboardRetention: Int =
-        UserDefaults.standard.object(forKey: "clipboardRetentionMonths") as? Int ?? 3
+    @State private var clipboardEnabled: Bool = SettingsStore().clipboardEnabled
+    @State private var clipboardRetention: Int = SettingsStore().clipboardRetentionMonths
     @State private var disabledApps: [DisabledApp] = []
     @State private var showClearConfirmation = false
     @State private var anthropicApiKey: String = ""
@@ -42,12 +40,12 @@ struct SettingsView: View {
         }
         .frame(width: 450, height: 500)
         .onAppear {
-            selectedInputSourceId = UserDefaults.standard.string(forKey: "forceInputSourceId") ?? ""
-            clearQueryOnOpen = UserDefaults.standard.bool(forKey: "clearQueryOnOpen")
+            selectedInputSourceId = appState.settings.forceInputSourceID
+            clearQueryOnOpen = appState.settings.clearQueryOnOpen
             launchAtLogin = SMAppService.mainApp.status == .enabled
-            selectedAppearance = UserDefaults.standard.string(forKey: "appAppearance") ?? "system"
+            selectedAppearance = appState.settings.appAppearance
             availableInputSources = Self.getKeyboardLayouts()
-            showMaxResults = UserDefaults.standard.object(forKey: "maxSearchResults") as? Int ?? 10
+            showMaxResults = appState.settings.maxSearchResults
             searchPaths = appState.appSearcher.searchPaths
         }
     }
@@ -81,7 +79,7 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
                 .onChange(of: selectedAppearance) { _, newValue in
-                    UserDefaults.standard.set(newValue, forKey: "appAppearance")
+                    appState.settings.appAppearance = newValue
                     applyAppearance(newValue)
                 }
 
@@ -91,12 +89,12 @@ struct SettingsView: View {
             Section("Behavior") {
                 Toggle("Clear search on open", isOn: $clearQueryOnOpen)
                     .onChange(of: clearQueryOnOpen) { _, newValue in
-                        UserDefaults.standard.set(newValue, forKey: "clearQueryOnOpen")
+                        appState.settings.clearQueryOnOpen = newValue
                     }
 
                 Stepper("Max results: \(showMaxResults)", value: $showMaxResults, in: 5 ... 20)
                     .onChange(of: showMaxResults) { _, newValue in
-                        UserDefaults.standard.set(newValue, forKey: "maxSearchResults")
+                        appState.settings.maxSearchResults = newValue
                     }
             }
 
@@ -161,11 +159,7 @@ struct SettingsView: View {
                     }
                 }
                 .onChange(of: selectedInputSourceId) { _, newValue in
-                    if newValue.isEmpty {
-                        UserDefaults.standard.removeObject(forKey: "forceInputSourceId")
-                    } else {
-                        UserDefaults.standard.set(newValue, forKey: "forceInputSourceId")
-                    }
+                    appState.settings.forceInputSourceID = newValue
                 }
             }
 
@@ -544,7 +538,7 @@ struct SettingsView: View {
                         if let monitor = ClipboardServices.monitor(appState) {
                             monitor.isEnabled = newValue
                         } else {
-                            UserDefaults.standard.set(newValue, forKey: "clipboardEnabled")
+                            appState.settings.clipboardEnabled = newValue
                         }
                     }
 
@@ -558,7 +552,7 @@ struct SettingsView: View {
                     Text("6 Months").tag(6)
                 }
                 .onChange(of: clipboardRetention) { _, newValue in
-                    UserDefaults.standard.set(newValue, forKey: "clipboardRetentionMonths")
+                    appState.settings.clipboardRetentionMonths = newValue
                 }
 
                 Button("Clear All History", role: .destructive) {
@@ -662,7 +656,7 @@ struct SettingsView: View {
 
                 TextField("Model", text: $translateModel)
                     .onChange(of: translateModel) { _, newValue in
-                        UserDefaults.standard.set(newValue, forKey: "translateModel")
+                        appState.settings.translateModel = newValue
                     }
             }
 
@@ -671,12 +665,12 @@ struct SettingsView: View {
                     .font(.system(size: 12, design: .monospaced))
                     .frame(minHeight: 80)
                     .onChange(of: translateSystemPrompt) { _, newValue in
-                        UserDefaults.standard.set(newValue, forKey: "translateSystemPrompt")
+                        appState.settings.translateSystemPrompt = newValue
                     }
 
                 Button("Reset to Default") {
                     translateSystemPrompt = AnthropicService.defaultSystemPrompt
-                    UserDefaults.standard.removeObject(forKey: "translateSystemPrompt")
+                    appState.settings.translateSystemPrompt = nil
                 }
                 .font(.system(size: 12))
             }
@@ -696,12 +690,12 @@ struct SettingsView: View {
                     }
                     .onMove { from, destination in
                         translateLanguages.move(fromOffsets: from, toOffset: destination)
-                        UserDefaults.standard.set(translateLanguages, forKey: "translateLanguages")
+                        appState.settings.translateLanguages = translateLanguages
                     }
                     .onDelete { offsets in
                         guard translateLanguages.count > 1 else { return }
                         translateLanguages.remove(atOffsets: offsets)
-                        UserDefaults.standard.set(translateLanguages, forKey: "translateLanguages")
+                        appState.settings.translateLanguages = translateLanguages
                     }
                 }
                 .frame(minHeight: 80)
@@ -713,7 +707,7 @@ struct SettingsView: View {
                         let trimmed = newLanguage.trimmingCharacters(in: .whitespaces)
                         guard !trimmed.isEmpty, !translateLanguages.contains(trimmed) else { return }
                         translateLanguages.append(trimmed)
-                        UserDefaults.standard.set(translateLanguages, forKey: "translateLanguages")
+                        appState.settings.translateLanguages = translateLanguages
                         newLanguage = ""
                     }
                     .disabled(newLanguage.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -738,10 +732,10 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .onAppear {
             anthropicApiKey = KeychainHelper.load(key: "anthropicApiKey") ?? ""
-            translateModel = UserDefaults.standard.string(forKey: "translateModel") ?? AnthropicService.defaultModel
-            translateSystemPrompt = UserDefaults.standard.string(forKey: "translateSystemPrompt")
+            translateModel = appState.settings.translateModel ?? AnthropicService.defaultModel
+            translateSystemPrompt = appState.settings.translateSystemPrompt
                 ?? AnthropicService.defaultSystemPrompt
-            translateLanguages = UserDefaults.standard.stringArray(forKey: "translateLanguages") ?? ["English"]
+            translateLanguages = appState.settings.translateLanguages
         }
     }
 

@@ -3,14 +3,16 @@ import SwiftUI
 struct GestureSettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var gesturesEnabled: Bool = false
-    @State private var threeFingerClickEnabled: Bool = UserDefaults.standard.object(forKey: "gesture.threeFingerClickEnabled") as? Bool ?? true
-    @State private var stableFrames: Double = .init(UserDefaults.standard.object(forKey: "gesture.stableFrames") as? Int ?? 2)
-    @State private var swipeThreshold: Double = .init(UserDefaults.standard.object(forKey: "gesture.swipeThreshold") as? Float ?? 0.15)
-    @State private var edgeMargin: Double = .init(UserDefaults.standard.object(forKey: "gesture.edgeMargin") as? Float ?? 0.05)
-    @State private var keystrokeWindowMs: Double = .init(UserDefaults.standard.object(forKey: "gesture.keystrokeWindowMs") as? Int ?? 180)
-    @State private var touchQualityMin: Double = .init(UserDefaults.standard.object(forKey: "gesture.touchQualityMin") as? Float ?? 0.125)
-    @State private var fingerSpreadMin: Double = .init(UserDefaults.standard.object(forKey: "gesture.fingerSpreadMin") as? Float ?? 0.15)
-    @State private var aspectRatioMax: Double = .init(UserDefaults.standard.object(forKey: "gesture.aspectRatioMax") as? Float ?? 2.5)
+    // Seeded once from the store at view init (no environment access in a property initializer),
+    // matching the previous direct UserDefaults reads.
+    @State private var threeFingerClickEnabled: Bool = SettingsStore().gestureThreeFingerClickEnabled
+    @State private var stableFrames: Double = .init(SettingsStore().gestureStableFrames)
+    @State private var swipeThreshold: Double = .init(SettingsStore().gestureSwipeThreshold)
+    @State private var edgeMargin: Double = .init(SettingsStore().gestureEdgeMargin)
+    @State private var keystrokeWindowMs: Double = .init(SettingsStore().gestureKeystrokeWindowMs)
+    @State private var touchQualityMin: Double = .init(SettingsStore().gestureTouchQualityMin)
+    @State private var fingerSpreadMin: Double = .init(SettingsStore().gestureFingerSpreadMin)
+    @State private var aspectRatioMax: Double = .init(SettingsStore().gestureAspectRatioMax)
 
     var body: some View {
         Form {
@@ -35,7 +37,7 @@ struct GestureSettingsView: View {
                             .toggleStyle(.switch)
                             .controlSize(.small)
                             .onChange(of: threeFingerClickEnabled) { _, enabled in
-                                UserDefaults.standard.set(enabled, forKey: "gesture.threeFingerClickEnabled")
+                                appState.settings.gestureThreeFingerClickEnabled = enabled
                             }
                             Spacer()
                         }
@@ -65,7 +67,7 @@ struct GestureSettingsView: View {
                         }
                         Slider(value: $stableFrames, in: 1 ... 8, step: 1)
                             .onChange(of: stableFrames) { _, newValue in
-                                UserDefaults.standard.set(Int(newValue), forKey: "gesture.stableFrames")
+                                appState.settings.gestureStableFrames = Int(newValue)
                             }
                         Text("Frames with 3 fingers before tracking starts. Lower = faster but more false positives.")
                             .font(.system(size: 10))
@@ -82,7 +84,7 @@ struct GestureSettingsView: View {
                         }
                         Slider(value: $swipeThreshold, in: 0.05 ... 0.40, step: 0.01)
                             .onChange(of: swipeThreshold) { _, newValue in
-                                UserDefaults.standard.set(Float(newValue), forKey: "gesture.swipeThreshold")
+                                appState.settings.gestureSwipeThreshold = Float(newValue)
                             }
                         Text("Minimum finger travel to register a swipe. Lower = easier to trigger.")
                             .font(.system(size: 10))
@@ -99,7 +101,7 @@ struct GestureSettingsView: View {
                         }
                         Slider(value: $edgeMargin, in: 0.0 ... 0.15, step: 0.01)
                             .onChange(of: edgeMargin) { _, newValue in
-                                UserDefaults.standard.set(Float(newValue), forKey: "gesture.edgeMargin")
+                                appState.settings.gestureEdgeMargin = Float(newValue)
                             }
                         Text("Trackpad edge zone for palm rejection. Higher = more aggressive filtering.")
                             .font(.system(size: 10))
@@ -116,7 +118,7 @@ struct GestureSettingsView: View {
                         }
                         Slider(value: $keystrokeWindowMs, in: 0 ... 500, step: 10)
                             .onChange(of: keystrokeWindowMs) { _, newValue in
-                                UserDefaults.standard.set(Int(newValue), forKey: "gesture.keystrokeWindowMs")
+                                appState.settings.gestureKeystrokeWindowMs = Int(newValue)
                             }
                         Text("Ignore gestures for N ms after a keystroke. 0 = disabled.")
                             .font(.system(size: 10))
@@ -133,7 +135,7 @@ struct GestureSettingsView: View {
                         }
                         Slider(value: $touchQualityMin, in: 0.0 ... 0.5, step: 0.01)
                             .onChange(of: touchQualityMin) { _, newValue in
-                                UserDefaults.standard.set(Float(newValue), forKey: "gesture.touchQualityMin")
+                                appState.settings.gestureTouchQualityMin = Float(newValue)
                             }
                         Text("Minimum touch capacitance to count. Higher = reject more noise.")
                             .font(.system(size: 10))
@@ -150,7 +152,7 @@ struct GestureSettingsView: View {
                         }
                         Slider(value: $fingerSpreadMin, in: 0.0 ... 0.4, step: 0.01)
                             .onChange(of: fingerSpreadMin) { _, newValue in
-                                UserDefaults.standard.set(Float(newValue), forKey: "gesture.fingerSpreadMin")
+                                appState.settings.gestureFingerSpreadMin = Float(newValue)
                             }
                         Text("Minimum X-axis spread at arming. Higher rejects more palms but swipes that start with clustered fingers (fanning out mid-swipe) may lose travel distance. 0 = disabled.")
                             .font(.system(size: 10))
@@ -167,7 +169,7 @@ struct GestureSettingsView: View {
                         }
                         Slider(value: $aspectRatioMax, in: 1.5 ... 5.0, step: 0.1)
                             .onChange(of: aspectRatioMax) { _, newValue in
-                                UserDefaults.standard.set(Float(newValue), forKey: "gesture.aspectRatioMax")
+                                appState.settings.gestureAspectRatioMax = Float(newValue)
                             }
                         Text("Reject elongated touches (palms). Lower = stricter. Raise if real gestures are being rejected.")
                             .font(.system(size: 10))

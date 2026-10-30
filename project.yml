@@ -62,6 +62,9 @@ targets:
       # The clipboard list model is state over the store with its pasteboard side effects
       # injected, so the panel's filtering/selection rules run host-free too.
       - path: Sources/Relux/Clipboard/ClipboardListModel.swift
+      # SettingsStore is a Foundation-only wrapper over UserDefaults; compiling it into the test
+      # bundle pins every persisted key string and default against a scratch suite.
+      - path: Sources/Relux/Util/SettingsStore.swift
     dependencies:
       - target: ReluxCore
     settings:

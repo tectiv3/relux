@@ -9,12 +9,13 @@ private let log = Logger(subsystem: "com.relux.app", category: "gesture-bindings
 final class GestureBindingManager {
     private(set) var bindings: [GestureBinding]
     private(set) var shortcutBindings: [ShortcutBinding]
-    private let engine = GestureEngine()
-    private let storageKey = "gesture.bindings"
-    private let shortcutStorageKey = "gesture.shortcutBindings"
+    private let engine: GestureEngine
+    private let settings: SettingsStore
 
-    init() {
-        if let data = UserDefaults.standard.data(forKey: storageKey),
+    init(settings: SettingsStore) {
+        self.settings = settings
+        engine = GestureEngine(settings: settings)
+        if let data = settings.gestureBindingsData,
            let decoded = try? JSONDecoder().decode([GestureBinding].self, from: data)
         {
             // Merge in any new gesture types that didn't exist in saved data
@@ -29,7 +30,7 @@ final class GestureBindingManager {
             bindings = GestureType.allCases.map { GestureBinding(gesture: $0, action: Self.defaultAction(for: $0)) }
         }
 
-        if let data = UserDefaults.standard.data(forKey: shortcutStorageKey),
+        if let data = settings.gestureShortcutBindingsData,
            let decoded = try? JSONDecoder().decode([ShortcutBinding].self, from: data)
         {
             shortcutBindings = decoded
@@ -121,12 +122,12 @@ final class GestureBindingManager {
 
     private func save() {
         guard let data = try? JSONEncoder().encode(bindings) else { return }
-        UserDefaults.standard.set(data, forKey: storageKey)
+        settings.gestureBindingsData = data
     }
 
     private func saveShortcuts() {
         guard let data = try? JSONEncoder().encode(shortcutBindings) else { return }
-        UserDefaults.standard.set(data, forKey: shortcutStorageKey)
+        settings.gestureShortcutBindingsData = data
     }
 
     private static func defaultAction(for gesture: GestureType) -> GestureActionType {
@@ -222,8 +223,7 @@ final class GestureBindingManager {
             guard let panel = delegate.panel else { return }
             if panel.isVisible, delegate.appState.panelMode == .translate {
                 let frame = panel.frame
-                UserDefaults.standard.set(frame.origin.x, forKey: "panelX")
-                UserDefaults.standard.set(frame.origin.y, forKey: "panelY")
+                delegate.appState.settings.panelOrigin = frame.origin
                 delegate.appState.panelClosedAt = Date()
                 panel.close()
                 return
