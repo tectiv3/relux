@@ -48,9 +48,7 @@ struct OverlayView: View {
     @State private var rawAnswer: String = ""
     @State private var isGenerating: Bool = false
 
-    // Actions menu state
-    @State private var showActions: Bool = false
-    @State private var actionIndex: Int = 0
+    @State private var menu = ActionSelection()
 
     /// Bumped on panel open to force re-search even when query hasn't changed
     @State private var searchTrigger: UUID = .init()
@@ -67,74 +65,21 @@ struct OverlayView: View {
         !results.isEmpty || !answer.isEmpty || isGenerating
     }
 
-    private var currentActions: [ItemAction] {
+    private var currentActions: [Action] {
         guard selectedIndex < results.count else { return [] }
         let item = results[selectedIndex]
-        switch item.kind {
-        case .app:
-            return [
-                ItemAction(label: "Launch", icon: "arrow.up.forward.app", shortcut: "⏎") {
-                    openSelectedItem()
-                },
-                ItemAction(label: "Show in Finder", icon: "folder", shortcut: "\u{2318}\u{23CE}") {
-                    showInFinder()
-                },
-                ItemAction(label: "Remove from history", icon: "trash", shortcut: nil) {
-                    removeFromHistory()
-                },
-            ]
-        case .webSearch:
-            return [
-                ItemAction(label: "Search", icon: "magnifyingglass", shortcut: "⏎") {
-                    openSelectedItem()
-                },
-            ]
-        case .translate:
-            return [
-                ItemAction(label: "Translate", icon: "character.book.closed", shortcut: "⏎") {
-                    openSelectedItem()
-                },
-            ]
-        case .script:
-            if !answer.isEmpty, item.meta["outputMode"] == "capture" {
-                return [
-                    ItemAction(label: "Copy output", icon: "doc.on.clipboard", shortcut: nil) {
-                        copyOutput()
-                    },
-                    ItemAction(label: "Re-run", icon: "arrow.clockwise", shortcut: nil) {
-                        openSelectedItem()
-                    },
-                    ItemAction(label: "Clear", icon: "xmark", shortcut: nil) {
-                        clearOutput()
-                    },
-                ]
+        let hasCapturedOutput = !answer.isEmpty && item.meta["outputMode"] == "capture"
+        return PanelActions.search(kind: item.kind, hasCapturedOutput: hasCapturedOutput).map { descriptor in
+            Action(descriptor) {
+                // Only search-panel kinds are built above, so the remaining cases are unreachable.
+                switch descriptor.kind {
+                case .showInFinder: showInFinder()
+                case .removeFromHistory: removeFromHistory()
+                case .copyOutput: copyOutput()
+                case .clearOutput: clearOutput()
+                default: openSelectedItem()
+                }
             }
-            return [
-                ItemAction(label: "Run", icon: "play.fill", shortcut: "⏎") {
-                    openSelectedItem()
-                },
-                ItemAction(label: "Remove from history", icon: "trash", shortcut: nil) {
-                    removeFromHistory()
-                },
-            ]
-        case .calculator:
-            return [
-                ItemAction(label: "Copy", icon: "doc.on.clipboard", shortcut: "⏎") {
-                    openSelectedItem()
-                },
-            ]
-        case .jwt:
-            return [
-                ItemAction(label: "Open", icon: "key.viewfinder", shortcut: "⏎") {
-                    openSelectedItem()
-                },
-            ]
-        case .systemSettings:
-            return [
-                ItemAction(label: "Open", icon: "gear", shortcut: "⏎") {
-                    openSelectedItem()
-                },
-            ]
         }
     }
 
@@ -156,19 +101,18 @@ struct OverlayView: View {
                     }
                 }
 
-                if showActions {
-                    actionsMenu
-                        .padding(.vertical, 4)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(.ultraThickMaterial)
-                                .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .frame(width: 280)
-                        .padding(.trailing, 8)
-                        .padding(.bottom, 8)
-                        .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .bottomTrailing)))
+                if menu.isOpen {
+                    ActionOverlay(
+                        actions: currentActions,
+                        selectedIndex: menu.index,
+                        width: 280,
+                        placement: .inline,
+                        onSelect: runAction,
+                        header: { actionMenuHeader }
+                    )
+                    .padding(.trailing, 8)
+                    .padding(.bottom, 8)
+                    .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .bottomTrailing)))
                 }
             }
 
@@ -185,7 +129,7 @@ struct OverlayView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             guard appState.panelMode == .search else { return }
-            showActions = false
+            menu.close()
             streamingTask?.cancel()
             rawAnswer = ""
             isGenerating = false
@@ -199,41 +143,33 @@ struct OverlayView: View {
             focusSearchField()
         }
         .onKeyPress(.upArrow) {
-            if showActions {
-                let actions = currentActions
-                guard !actions.isEmpty else { return .ignored }
-                actionIndex = actionIndex <= 0 ? actions.count - 1 : actionIndex - 1
-                return .handled
+            if menu.isOpen {
+                return menu.moveUp(count: currentActions.count) ? .handled : .ignored
             }
             guard !results.isEmpty else { return .ignored }
-            selectedIndex = selectedIndex <= 0 ? results.count - 1 : selectedIndex - 1
+            selectedIndex = ResultSelection.retreated(selectedIndex, count: results.count)
             return .handled
         }
         .onKeyPress(.downArrow) {
-            if showActions {
-                let actions = currentActions
-                guard !actions.isEmpty else { return .ignored }
-                actionIndex = actionIndex >= actions.count - 1 ? 0 : actionIndex + 1
-                return .handled
+            if menu.isOpen {
+                return menu.moveDown(count: currentActions.count) ? .handled : .ignored
             }
             guard !results.isEmpty else { return .ignored }
-            selectedIndex = selectedIndex >= results.count - 1 ? 0 : selectedIndex + 1
+            selectedIndex = ResultSelection.advanced(selectedIndex, count: results.count)
             return .handled
         }
         .onKeyPress(.return) {
-            if showActions {
-                let actions = currentActions
-                guard actionIndex < actions.count else { return .ignored }
-                actions[actionIndex].action()
-                showActions = false
+            if menu.isOpen {
+                guard let index = menu.activationIndex(count: currentActions.count) else { return .ignored }
+                runAction(index)
                 return .handled
             }
             openSelectedItem()
             return .handled
         }
         .onKeyPress(.escape) {
-            if showActions {
-                showActions = false
+            if menu.isOpen {
+                menu.close()
                 return .handled
             }
             return .ignored
@@ -242,11 +178,8 @@ struct OverlayView: View {
             // Tab means "next row", not "complete": no result kind carries a completable keyword
             // (the DuckDuckGo hint's query already equals the text field), so completing would be
             // a no-op and stealing Tab for it would break the expected forward-movement behaviour.
-            if showActions {
-                let actions = currentActions
-                guard !actions.isEmpty else { return .ignored }
-                actionIndex = actionIndex >= actions.count - 1 ? 0 : actionIndex + 1
-                return .handled
+            if menu.isOpen {
+                return menu.moveDown(count: currentActions.count) ? .handled : .ignored
             }
             guard !results.isEmpty else { return .ignored }
             selectedIndex = ResultSelection.advanced(selectedIndex, count: results.count)
@@ -256,9 +189,7 @@ struct OverlayView: View {
             Group {
                 // Cmd+K to toggle actions menu
                 Button("") {
-                    guard !results.isEmpty, selectedIndex < results.count else { return }
-                    actionIndex = 0
-                    showActions.toggle()
+                    menu.toggle(isAvailable: !results.isEmpty && selectedIndex < results.count)
                 }
                 .keyboardShortcut("k", modifiers: .command)
 
@@ -501,62 +432,31 @@ struct OverlayView: View {
 
     // MARK: - Actions Menu
 
-    private var actionsMenu: some View {
-        VStack(spacing: 0) {
-            if selectedIndex < results.count {
-                let item = results[selectedIndex]
-                HStack(spacing: 6) {
-                    itemIcon(for: item)
-                        .scaleEffect(0.7)
-                    Text(item.title)
-                        .font(.system(size: 12, weight: .medium))
-                    Spacer()
-                }
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-
-                Divider()
+    @ViewBuilder
+    private var actionMenuHeader: some View {
+        if selectedIndex < results.count {
+            let item = results[selectedIndex]
+            HStack(spacing: 6) {
+                itemIcon(for: item)
+                    .scaleEffect(0.7)
+                Text(item.title)
+                    .font(.system(size: 12, weight: .medium))
+                Spacer()
             }
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
 
-            ForEach(Array(currentActions.enumerated()), id: \.offset) { index, action in
-                actionRow(action: action, isSelected: index == actionIndex)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        action.action()
-                        showActions = false
-                    }
-            }
+            Divider()
         }
-        .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func actionRow(action: ItemAction, isSelected: Bool) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: action.icon)
-                .foregroundColor(isSelected ? .white.opacity(0.8) : .secondary)
-                .font(.system(size: 13))
-                .frame(width: 20)
-
-            Text(action.label)
-                .font(.system(size: 13))
-
-            Spacer()
-
-            if let shortcut = action.shortcut {
-                Text(shortcut)
-                    .font(.system(size: 11))
-                    .foregroundColor(isSelected ? .white.opacity(0.6) : .secondary)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Color.accentColor : Color.clear)
-                .padding(.horizontal, 4)
-        )
-        .foregroundColor(isSelected ? .white : .primary)
+    /// Runs a menu row and closes the menu, for both the mouse and the Return key.
+    private func runAction(_ index: Int) {
+        let actions = currentActions
+        guard index >= 0, index < actions.count else { return }
+        actions[index].handler()
+        menu.close()
     }
 
     // MARK: - Answer Section
@@ -585,23 +485,23 @@ struct OverlayView: View {
 
     private var bottomBar: some View {
         HStack(spacing: 16) {
-            if showActions {
-                keyboardHint(key: "\u{23CE}", label: "Select")
-                keyboardHint(key: "\u{2191}\u{2193}", label: "Navigate")
-                keyboardHint(key: "esc", label: "Back")
+            if menu.isOpen {
+                KeyboardHint(key: "\u{23CE}", label: "Select")
+                KeyboardHint(key: "\u{2191}\u{2193}", label: "Navigate")
+                KeyboardHint(key: "esc", label: "Back")
             } else {
                 if selectedIndex < results.count, results[selectedIndex].kind == .calculator {
-                    keyboardHint(key: "\u{23CE}", label: "Copy Answer")
+                    KeyboardHint(key: "\u{23CE}", label: "Copy Answer")
                 } else {
-                    keyboardHint(key: "\u{23CE}", label: "Open")
+                    KeyboardHint(key: "\u{23CE}", label: "Open")
                 }
-                keyboardHint(key: "\u{2318}K", label: "Actions")
+                KeyboardHint(key: "\u{2318}K", label: "Actions")
                 if selectedIndex < results.count, results[selectedIndex].meta["path"] != nil {
-                    keyboardHint(key: "\u{2318}\u{23CE}", label: "Reveal")
+                    KeyboardHint(key: "\u{2318}\u{23CE}", label: "Reveal")
                 }
-                keyboardHint(key: "\u{21E5}", label: "Next")
-                keyboardHint(key: "\u{2191}\u{2193}", label: "Navigate")
-                keyboardHint(key: "esc", label: "Close")
+                KeyboardHint(key: "\u{21E5}", label: "Next")
+                KeyboardHint(key: "\u{2191}\u{2193}", label: "Navigate")
+                KeyboardHint(key: "esc", label: "Close")
             }
             Spacer()
             if let selection = appState.currentSelection {
@@ -618,19 +518,6 @@ struct OverlayView: View {
         .padding(.vertical, 8)
         .font(.system(size: 11))
         .foregroundColor(.secondary)
-    }
-
-    private func keyboardHint(key: String, label: String) -> some View {
-        HStack(spacing: 4) {
-            Text(key)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 1)
-                .background(
-                    RoundedRectangle(cornerRadius: 3)
-                        .stroke(Color.secondary.opacity(0.5), lineWidth: 0.5)
-                )
-            Text(label)
-        }
     }
 
     // MARK: - Actions
@@ -710,7 +597,7 @@ struct OverlayView: View {
         }
         // Restore against the grouped array, which is what `selectedIndex` indexes into.
         selectedIndex = ResultSelection.restoredIndex(of: previousSelectionID, in: results)
-        showActions = false
+        menu.close()
     }
 
     private func kindLabel(for item: SearchItem) -> String {
@@ -823,7 +710,7 @@ struct OverlayView: View {
                 switch outputMode {
                 case .capture:
                     streamingTask?.cancel()
-                    showActions = false
+                    menu.close()
                     isGenerating = true
                     rawAnswer = ""
                     streamingTask = Task { @MainActor in
@@ -878,14 +765,14 @@ struct OverlayView: View {
     private func copyOutput() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(answer.trimmingCharacters(in: .whitespacesAndNewlines), forType: .string)
-        showActions = false
+        menu.close()
     }
 
     private func clearOutput() {
         streamingTask?.cancel()
         rawAnswer = ""
         isGenerating = false
-        showActions = false
+        menu.close()
     }
 
     /// Cmd+Return and the "Show in Finder" action. Only app results carry a file path; hints,
@@ -901,7 +788,7 @@ struct OverlayView: View {
 
     private func showInFinder() {
         revealSelectedInFinder()
-        showActions = false
+        menu.close()
     }
 
     /// Cmd+N: open the Nth row directly. Out-of-range caps are a no-op.
@@ -929,15 +816,6 @@ struct OverlayView: View {
         appState.frecency.removeItem(id: item.id)
         results.remove(at: selectedIndex)
         selectedIndex = min(selectedIndex, results.count - 1)
-        showActions = false
+        menu.close()
     }
-}
-
-// MARK: - Supporting Types
-
-private struct ItemAction {
-    let label: String
-    let icon: String
-    let shortcut: String?
-    let action: () -> Void
 }

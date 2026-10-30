@@ -19,63 +19,56 @@ private extension ClipboardTypeFilter {
         case .color: "paintpalette"
         }
     }
-
-    func title(isActive: Bool) -> String {
-        isActive ? "Clear Filter" : "Show \(label) Only"
-    }
 }
 
 struct ClipboardHistoryView: View {
     @Environment(AppState.self) private var appState
     @State private var model = ClipboardListModel()
-    @State private var showActions: Bool = false
-    @State private var actionIndex: Int = 0
+    @State private var menu = ActionSelection()
     @FocusState private var isFilterFocused: Bool
 
     private var previousAppName: String {
         appState.previousApp?.localizedName ?? "App"
     }
 
-    private var currentActions: [ClipAction] {
+    private var currentActions: [Action] {
         guard let entry = model.selectedEntry else { return [] }
-        var actions: [ClipAction] = [
-            ClipAction(label: "Paste to \(previousAppName)", icon: "doc.on.clipboard.fill", shortcut: "⏎") {
-                model.paste(entry)
-            },
-            ClipAction(label: "Copy to Clipboard", icon: "doc.on.clipboard", shortcut: "⌘⏎") {
-                model.copy(entry)
-            },
-        ]
-        if entry.contentType == ContentType.rtf || entry.contentType == ContentType.html {
-            actions.append(ClipAction(
-                label: "Paste Formatted to \(previousAppName)",
-                icon: "textformat", shortcut: "⌘⇧⏎"
-            ) {
-                model.paste(entry, formatted: true)
-            })
+        let isRichText = entry.contentType == ContentType.rtf || entry.contentType == ContentType.html
+        return PanelActions.clipboard(
+            previousAppName: previousAppName,
+            isRichText: isRichText,
+            isPinned: entry.isPinned,
+            activeFilter: model.typeFilter?.rawValue,
+            filters: filterDescriptors
+        ).map { descriptor in
+            Action(descriptor) {
+                switch descriptor.kind {
+                case .paste: model.paste(entry)
+                case .copyToClipboard: model.copy(entry)
+                case .pasteFormatted: model.paste(entry, formatted: true)
+                case .delete: model.delete(entry)
+                case .pin, .unpin: model.togglePin(entry)
+                case let .filter(rawValue):
+                    let filter = ClipboardTypeFilter(rawValue: rawValue)
+                    model.setTypeFilter(model.typeFilter == filter ? nil : filter)
+                default: break
+                }
+            }
         }
-        actions.append(ClipAction(label: "Delete", icon: "trash", shortcut: "⌫") {
-            model.delete(entry)
-        })
-        if entry.isPinned {
-            actions.append(ClipAction(label: "Unpin", icon: "pin.slash", shortcut: nil) {
-                model.togglePin(entry)
-            })
-        } else {
-            actions.append(ClipAction(label: "Pin", icon: "pin", shortcut: nil) {
-                model.togglePin(entry)
-            })
+    }
+
+    private var filterDescriptors: [ClipboardFilterDescriptor] {
+        ClipboardTypeFilter.allCases.map {
+            ClipboardFilterDescriptor(rawValue: $0.rawValue, label: $0.label, icon: $0.icon)
         }
-        for filterType in ClipboardTypeFilter.allCases {
-            let isActive = model.typeFilter == filterType
-            actions.append(ClipAction(
-                label: filterType.title(isActive: isActive), icon: filterType.icon, shortcut: nil
-            ) {
-                model.setTypeFilter(isActive ? nil : filterType)
-                showActions = false
-            })
-        }
-        return actions
+    }
+
+    /// Runs a menu row and closes the menu, for both the mouse and the Return key.
+    private func runAction(_ index: Int) {
+        let actions = currentActions
+        guard index >= 0, index < actions.count else { return }
+        actions[index].handler()
+        menu.close()
     }
 
     var body: some View {
@@ -133,8 +126,14 @@ struct ClipboardHistoryView: View {
         .frame(maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay {
-            if showActions {
-                actionsOverlay
+            if menu.isOpen {
+                ActionOverlay(
+                    actions: currentActions,
+                    selectedIndex: menu.index,
+                    width: 300,
+                    onSelect: runAction,
+                    header: { actionMenuHeader }
+                )
             }
         }
         .onAppear {
@@ -156,9 +155,7 @@ struct ClipboardHistoryView: View {
         .background {
             // Cmd+K to toggle actions
             Button("") {
-                guard model.selectedEntry != nil else { return }
-                actionIndex = 0
-                showActions.toggle()
+                menu.toggle(isAvailable: model.selectedEntry != nil)
             }
             .keyboardShortcut("k", modifiers: .command)
             .hidden()
@@ -495,10 +492,10 @@ struct ClipboardHistoryView: View {
             Spacer()
 
             if model.selectedEntry != nil {
-                keyboardHint(key: "⏎", label: "Paste to \(previousAppName)")
-                keyboardHint(key: "⌦", label: "Delete")
+                KeyboardHint(key: "⏎", label: "Paste to \(previousAppName)")
+                KeyboardHint(key: "⌦", label: "Delete")
             }
-            keyboardHint(key: "⌘K", label: "Actions")
+            KeyboardHint(key: "⌘K", label: "Actions")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -506,83 +503,23 @@ struct ClipboardHistoryView: View {
         .foregroundColor(.secondary)
     }
 
-    private func keyboardHint(key: String, label: String) -> some View {
-        HStack(spacing: 4) {
-            Text(key)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 1)
-                .background(
-                    RoundedRectangle(cornerRadius: 3)
-                        .stroke(Color.secondary.opacity(0.5), lineWidth: 0.5)
-                )
-            Text(label)
-        }
-    }
-
     // MARK: - Actions Overlay
 
-    private var actionsOverlay: some View {
-        VStack {
-            Spacer()
-            HStack {
+    @ViewBuilder
+    private var actionMenuHeader: some View {
+        if let entry = model.selectedEntry {
+            HStack(spacing: 6) {
+                Image(systemName: entryIcon(for: entry))
+                    .font(.system(size: 11))
+                Text(entryTitle(for: entry))
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
                 Spacer()
-                VStack(spacing: 0) {
-                    if let entry = model.selectedEntry {
-                        HStack(spacing: 6) {
-                            Image(systemName: entryIcon(for: entry))
-                                .font(.system(size: 11))
-                            Text(entryTitle(for: entry))
-                                .font(.system(size: 12, weight: .medium))
-                                .lineLimit(1)
-                            Spacer()
-                        }
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        Divider()
-                    }
-
-                    ForEach(Array(currentActions.enumerated()), id: \.offset) { index, action in
-                        HStack(spacing: 10) {
-                            Image(systemName: action.icon)
-                                .foregroundColor(index == actionIndex ? .white.opacity(0.8) : .secondary)
-                                .font(.system(size: 13))
-                                .frame(width: 20)
-                            Text(action.label)
-                                .font(.system(size: 13))
-                            Spacer()
-                            if let shortcut = action.shortcut {
-                                Text(shortcut)
-                                    .font(.system(size: 11))
-                                    .foregroundColor(index == actionIndex ? .white.opacity(0.6) : .secondary)
-                            }
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(index == actionIndex ? Color.accentColor : Color.clear)
-                                .padding(.horizontal, 4)
-                        )
-                        .foregroundColor(index == actionIndex ? .white : .primary)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            action.action()
-                            showActions = false
-                        }
-                    }
-                }
-                .padding(.vertical, 4)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(.ultraThickMaterial)
-                        .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .frame(width: 300)
-                .padding(.trailing, 8)
-                .padding(.bottom, 8)
             }
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            Divider()
         }
     }
 
@@ -591,8 +528,8 @@ struct ClipboardHistoryView: View {
     private func handleKeyPress(_ keyPress: KeyPress) -> KeyPress.Result {
         // Escape — clear filter first, close actions, then let panel dismiss
         if keyPress.key == .escape {
-            if showActions {
-                showActions = false
+            if menu.isOpen {
+                menu.close()
                 return .handled
             }
             if model.typeFilter != nil {
@@ -605,32 +542,28 @@ struct ClipboardHistoryView: View {
             }
             return .ignored
         }
-        // Arrow up — always navigates list (or actions overlay)
         if keyPress.key == .upArrow {
-            if showActions {
-                guard !currentActions.isEmpty else { return .ignored }
-                actionIndex = actionIndex <= 0 ? currentActions.count - 1 : actionIndex - 1
-            } else {
-                guard model.selectPrevious() else { return .ignored }
+            if menu.isOpen {
+                return menu.moveUp(count: currentActions.count) ? .handled : .ignored
             }
+            guard model.selectPrevious() else { return .ignored }
             return .handled
         }
         // Arrow down
         if keyPress.key == .downArrow {
-            if showActions {
-                guard !currentActions.isEmpty else { return .ignored }
-                actionIndex = actionIndex >= currentActions.count - 1 ? 0 : actionIndex + 1
-            } else {
-                guard model.selectNext() else { return .ignored }
+            if menu.isOpen {
+                return menu.moveDown(count: currentActions.count) ? .handled : .ignored
             }
+            guard model.selectNext() else { return .ignored }
             return .handled
         }
         // Enter
         if keyPress.key == .return {
-            if showActions {
-                guard actionIndex < currentActions.count else { return .ignored }
-                currentActions[actionIndex].action()
-                showActions = false
+            if menu.isOpen {
+                guard let index = menu.activationIndex(count: currentActions.count) else {
+                    return .ignored
+                }
+                runAction(index)
                 return .handled
             }
             guard let entry = model.selectedEntry else { return .ignored }
@@ -639,7 +572,7 @@ struct ClipboardHistoryView: View {
         }
         // Forward delete — delete selected entry
         if keyPress.key == .deleteForward {
-            if !showActions, let entry = model.selectedEntry {
+            if !menu.isOpen, let entry = model.selectedEntry {
                 model.delete(entry)
                 return .handled
             }
@@ -648,13 +581,4 @@ struct ClipboardHistoryView: View {
 
         return .ignored
     }
-}
-
-// MARK: - Supporting Types
-
-private struct ClipAction {
-    let label: String
-    let icon: String
-    let shortcut: String?
-    let action: () -> Void
 }

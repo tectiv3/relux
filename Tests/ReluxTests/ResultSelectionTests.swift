@@ -85,6 +85,24 @@ final class ResultSelectionTests: XCTestCase {
         XCTAssertEqual(ResultSelection.advanced(-1, count: 3), 0)
     }
 
+    // MARK: - retreated(_:count:)
+
+    func testRetreatedMovesBackward() {
+        XCTAssertEqual(ResultSelection.retreated(2, count: 3), 1)
+        XCTAssertEqual(ResultSelection.retreated(1, count: 3), 0)
+    }
+
+    func testRetreatedWrapsPastTheStart() {
+        XCTAssertEqual(ResultSelection.retreated(0, count: 3), 2)
+        XCTAssertEqual(ResultSelection.retreated(0, count: 1), 0)
+    }
+
+    func testRetreatedHandlesEmptyAndOutOfRange() {
+        XCTAssertEqual(ResultSelection.retreated(0, count: 0), 0)
+        XCTAssertEqual(ResultSelection.retreated(7, count: 3), 0)
+        XCTAssertEqual(ResultSelection.retreated(-1, count: 3), 0)
+    }
+
     // MARK: - rowIndex(forCommandKey:rowCount:)
 
     func testCommandKeyMapsOneBasedCapsToZeroBasedRows() {

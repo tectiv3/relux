@@ -8,8 +8,7 @@ private let log = Logger(subsystem: "com.relux.app", category: "jwt")
 struct JWTView: View {
     @Environment(AppState.self) private var appState
     @State private var inputText: String = ""
-    @State private var showActions: Bool = false
-    @State private var actionIndex: Int = 0
+    @State private var menu = ActionSelection()
     @FocusState private var isInputFocused: Bool
 
     private var tokenParts: JWTParts {
@@ -45,16 +44,17 @@ struct JWTView: View {
         return JWTParser.claims(ofToken: inputText)?.expiryBadge()
     }
 
-    private var currentActions: [JWTAction] {
+    private var currentActions: [Action] {
         guard isValidJWT else { return [] }
-        return [
-            JWTAction(label: "Copy Payload", icon: "doc.on.clipboard", shortcut: "\u{23CE}") {
-                copyPayload()
-            },
-            JWTAction(label: "Copy Token", icon: "key", shortcut: nil) {
-                copyToken()
-            },
-        ]
+        return PanelActions.jwt().map { descriptor in
+            Action(descriptor) {
+                switch descriptor.kind {
+                case .copyPayload: copyPayload()
+                case .copyToken: copyToken()
+                default: break
+                }
+            }
+        }
     }
 
     var body: some View {
@@ -84,8 +84,14 @@ struct JWTView: View {
         .frame(maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay {
-            if showActions {
-                actionsOverlay
+            if menu.isOpen {
+                ActionOverlay(
+                    actions: currentActions,
+                    selectedIndex: menu.index,
+                    width: 220,
+                    onSelect: runAction,
+                    header: { EmptyView() }
+                )
             }
         }
         .onAppear {
@@ -274,14 +280,14 @@ struct JWTView: View {
 extension JWTView {
     var bottomBar: some View {
         HStack(spacing: 16) {
-            if showActions {
-                keyboardHint(key: "\u{23CE}", label: "Select")
-                keyboardHint(key: "\u{2191}\u{2193}", label: "Navigate")
-                keyboardHint(key: "esc", label: "Back")
+            if menu.isOpen {
+                KeyboardHint(key: "\u{23CE}", label: "Select")
+                KeyboardHint(key: "\u{2191}\u{2193}", label: "Navigate")
+                KeyboardHint(key: "esc", label: "Back")
             } else {
-                keyboardHint(key: "\u{23CE}", label: "Copy Payload")
-                keyboardHint(key: "\u{2318}K", label: "Actions")
-                keyboardHint(key: "esc", label: "Back")
+                KeyboardHint(key: "\u{23CE}", label: "Copy Payload")
+                KeyboardHint(key: "\u{2318}K", label: "Actions")
+                KeyboardHint(key: "esc", label: "Back")
             }
             Spacer()
         }
@@ -291,67 +297,13 @@ extension JWTView {
         .foregroundColor(.secondary)
     }
 
-    var actionsOverlay: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(currentActions.enumerated()), id: \.offset) { index, action in
-                actionRow(action: action, isSelected: index == actionIndex)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        action.action()
-                        showActions = false
-                    }
-            }
+    func runAction(_ index: Int) {
+        let actions = currentActions
+        if index >= 0, index < actions.count {
+            actions[index].handler()
         }
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.vertical, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(.ultraThickMaterial)
-                .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .frame(width: 220)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        .padding(.trailing, 8)
-        .padding(.bottom, 8)
-    }
-
-    func actionRow(action: JWTAction, isSelected: Bool) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: action.icon)
-                .foregroundColor(isSelected ? .white.opacity(0.8) : .secondary)
-                .font(.system(size: 13))
-                .frame(width: 20)
-            Text(action.label)
-                .font(.system(size: 13))
-            Spacer()
-            if let shortcut = action.shortcut {
-                Text(shortcut)
-                    .font(.system(size: 11))
-                    .foregroundColor(isSelected ? .white.opacity(0.6) : .secondary)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Color.accentColor : Color.clear)
-                .padding(.horizontal, 4)
-        )
-        .foregroundColor(isSelected ? .white : .primary)
-    }
-
-    func keyboardHint(key: String, label: String) -> some View {
-        HStack(spacing: 4) {
-            Text(key)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 1)
-                .background(
-                    RoundedRectangle(cornerRadius: 3)
-                        .stroke(Color.secondary.opacity(0.5), lineWidth: 0.5)
-                )
-            Text(label)
-        }
+        // The JWT menu closes on Return even when the cursor has no row, matching the old handler.
+        menu.close()
     }
 
     func copyPayload() {
@@ -361,7 +313,7 @@ extension JWTView {
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(decodedPayload, forType: .string)
-        showActions = false
+        menu.close()
         saveToFrecency()
     }
 
@@ -370,7 +322,7 @@ extension JWTView {
         guard !token.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(token, forType: .string)
-        showActions = false
+        menu.close()
     }
 
     func saveToFrecency() {
@@ -392,14 +344,13 @@ extension JWTView {
 
     /// Only keys this view consumed are swallowed; everything else is passed on.
     private func handlePanelKey(_ event: NSEvent) -> NSEvent? {
-        if showActions {
+        if menu.isOpen {
             return handleActionsKey(event)
         }
 
         if event.modifierFlags.contains(.command) && event.characters == "k" {
             guard !currentActions.isEmpty else { return event }
-            actionIndex = 0
-            showActions.toggle()
+            menu.toggle(isAvailable: true)
             return nil
         }
 
@@ -420,22 +371,19 @@ extension JWTView {
     private func handleActionsKey(_ event: NSEvent) -> NSEvent? {
         let key = event.specialKey
         if key == .upArrow {
-            actionIndex = actionIndex <= 0 ? currentActions.count - 1 : actionIndex - 1
+            guard menu.moveUp(count: currentActions.count) else { return event }
             return nil
         }
         if key == .downArrow {
-            actionIndex = actionIndex >= currentActions.count - 1 ? 0 : actionIndex + 1
+            guard menu.moveDown(count: currentActions.count) else { return event }
             return nil
         }
         if key == .carriageReturn || key == .newline {
-            if actionIndex < currentActions.count {
-                currentActions[actionIndex].action()
-            }
-            showActions = false
+            runAction(menu.index)
             return nil
         }
         if event.keyCode == 53 {
-            showActions = false
+            menu.close()
             return nil
         }
         return event
@@ -453,13 +401,6 @@ private extension JWTExpiryTone {
             .red
         }
     }
-}
-
-struct JWTAction {
-    let label: String
-    let icon: String
-    let shortcut: String?
-    let action: () -> Void
 }
 
 // MARK: - Timestamp Tooltips

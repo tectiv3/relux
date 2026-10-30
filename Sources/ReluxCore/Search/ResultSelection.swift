@@ -26,6 +26,13 @@ public enum ResultSelection {
         return index >= count - 1 ? 0 : index + 1
     }
 
+    /// Previous row for Up/Shift-Tab-style backward movement, wrapping past the start. An empty
+    /// list or an out-of-range index falls back to 0 for the same reason as `advanced`.
+    public static func retreated(_ index: Int, count: Int) -> Int {
+        guard count > 0, index >= 0, index < count else { return 0 }
+        return index == 0 ? count - 1 : index - 1
+    }
+
     /// 0-based row for the Cmd+N shortcut: `number` is the 1-based key cap, only 1...9 exist,
     /// and a key beyond the last row is a no-op (`nil`).
     public static func rowIndex(forCommandKey number: Int, rowCount: Int) -> Int? {
