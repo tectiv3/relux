@@ -102,6 +102,30 @@ final class TranslateStoreTests: XCTestCase {
         XCTAssertNil(store.findByHash("missing"))
     }
 
+    /// Reads keep their "nothing there" contract on a broken database, but no longer fail silently.
+    @MainActor
+    func testReadsLogTheCauseWhenTheTableIsMissing() throws {
+        let (database, store) = try makeStore()
+        let capture: LogCapture
+        do {
+            capture = try LogCapture()
+        } catch {
+            throw XCTSkip("the unified log is unavailable to this process: \(error)")
+        }
+        try database.execute("DROP TABLE translation_history")
+
+        XCTAssertTrue(store.fetchAll().isEmpty)
+        XCTAssertNil(store.findByHash(TranslationEntry.hash(source: "x", target: "ja")))
+        XCTAssertTrue(
+            capture.waitForError(category: "translatestore", containing: "fetchAll"),
+            "a failed history read must not be silent"
+        )
+        XCTAssertTrue(
+            capture.waitForError(category: "translatestore", containing: "findByHash"),
+            "a failed lookup must not be silent either"
+        )
+    }
+
     @MainActor
     func testMissingContentHashFallsBackToComputedHash() throws {
         let (database, store) = try makeStore()

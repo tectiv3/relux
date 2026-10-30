@@ -121,6 +121,21 @@ final class SQLiteDatabaseTests: XCTestCase {
         XCTAssertEqual(select.columnInt64(0), huge)
     }
 
+    /// `Int` above `Int32.max` must survive: the count and size columns are bound through this
+    /// overload, and the old 32-bit conversion trapped instead of storing the value.
+    func testIntBindingKeepsValuesAboveInt32Max() throws {
+        let database = try makeDatabase()
+        try database.execute("CREATE TABLE sample (value INTEGER)")
+        let big = Int(Int32.max) + 1
+        let insert = try database.prepare("INSERT INTO sample VALUES (?)")
+        try insert.bind(1, big)
+        try insert.stepToCompletion()
+
+        let select = try database.prepare("SELECT value FROM sample")
+        XCTAssertTrue(try select.step())
+        XCTAssertEqual(select.columnInt64(0), Int64(big))
+    }
+
     func testLastInsertRowIDTracksInsertions() throws {
         let database = try makeDatabase()
         try database.execute("CREATE TABLE sample (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)")

@@ -9,7 +9,13 @@ final class TranslationService {
     /// Injected so tests can drive chunks without an API key; production passes
     /// `AnthropicService.translate(text:targetLanguage:)`, which yields errors as text
     /// chunks rather than throwing, so the stream itself has no failure channel.
-    typealias StreamProvider = @MainActor (_ text: String, _ targetLanguage: String) -> AsyncStream<String>
+    ///
+    /// Typed as `AsyncSequence` rather than `AsyncStream` because nothing here may assume that
+    /// cancelling the run ends iteration; only `AsyncStream` promises that.
+    typealias StreamProvider = @MainActor (
+        _ text: String,
+        _ targetLanguage: String
+    ) -> any AsyncSequence<String, Never>
 
     enum State: Equatable {
         case idle
@@ -29,6 +35,9 @@ final class TranslationService {
     private var job: Task<Void, Never>?
     /// A superseded run must not overwrite the state of the run that replaced it.
     private var runID = 0
+    /// Highest run that has written each row. A superseded run keeps the chunks its sequence still
+    /// delivers, so writes are ordered by run instead of by whichever run happens to finish last.
+    private var lastWriteRun: [Int64: Int] = [:]
 
     init(
         store: TranslateStore,
@@ -114,6 +123,7 @@ final class TranslationService {
 
     func delete(entryId: Int64) {
         try? store.delete(id: entryId)
+        lastWriteRun[entryId] = nil
         reload()
     }
 
@@ -147,8 +157,18 @@ final class TranslationService {
 
         // Cancellation ends the loop but keeps whatever arrived: the row is written either way,
         // so an aborted run leaves its partial text in history exactly as before.
+        //
+        // A superseded run may still finish its own row, but never a row a later run has already
+        // written: cancellation is advisory, so the older loop can end after the newer run's write.
+        // Checked right before the write with no suspension in between, so nothing can write the
+        // row between the check and our own write.
+        if let newer = lastWriteRun[entryId], newer > run {
+            return
+        }
+
         do {
             try store.updateTranslation(id: entryId, translatedText: full)
+            lastWriteRun[entryId] = run
         } catch {
             reload()
             guard run == runID else { return }

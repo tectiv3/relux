@@ -113,12 +113,26 @@ final class ClipboardStore {
         ORDER BY CASE WHEN pinned_at IS NOT NULL THEN 0 ELSE 1 END, pinned_at ASC, updated_at DESC \
         LIMIT ?
         """
-        guard let statement = try? database.prepare(sql) else { return [] }
-        try? statement.bind(1, limit)
+        let statement: Statement
+        do {
+            statement = try database.prepare(sql)
+        } catch {
+            // The list keeps its "no history" contract (a missing table would otherwise read as an
+            // empty history with no trace), but the cause is no longer swallowed.
+            log.error("fetchAll: could not prepare the history query: \(error)")
+            return []
+        }
 
         var entries: [ClipboardEntry] = []
-        while (try? statement.step()) == true {
-            entries.append(readRow(statement))
+        do {
+            try statement.bind(1, limit)
+            while try statement.step() {
+                entries.append(readRow(statement))
+            }
+        } catch {
+            // A read that fails mid-way still shows the rows it produced, as it did when the
+            // failure was swallowed; only the silence is gone.
+            log.error("fetchAll: history read stopped after \(entries.count) rows: \(error)")
         }
         return entries
     }
@@ -267,16 +281,22 @@ final class ClipboardStore {
             textContent: statement.columnText(2),
             rawData: statement.columnBlob(3),
             imagePath: statement.columnText(4),
-            imageWidth: statement.columnInt(5),
-            imageHeight: statement.columnInt(6),
-            imageSize: statement.columnInt(7),
+            imageWidth: intColumn(statement, 5),
+            imageHeight: intColumn(statement, 6),
+            imageSize: intColumn(statement, 7),
             sourceApp: statement.columnText(8),
             sourceName: statement.columnText(9),
-            charCount: statement.columnInt(10),
-            wordCount: statement.columnInt(11),
+            charCount: intColumn(statement, 10),
+            wordCount: intColumn(statement, 11),
             createdAt: Date(timeIntervalSince1970: createdAt),
             updatedAt: Date(timeIntervalSince1970: updatedRaw > 0 ? updatedRaw : createdAt),
             pinnedAt: statement.columnDouble(14).map { Date(timeIntervalSince1970: $0) }
         )
+    }
+
+    /// Counts and sizes are bound as 64-bit `INTEGER`s, so they are read back the same way:
+    /// `columnInt` truncates anything above `Int32.max`.
+    private func intColumn(_ statement: Statement, _ index: Int32) -> Int? {
+        statement.columnInt64(index).map(Int.init)
     }
 }

@@ -1,6 +1,32 @@
 import ReluxCore
 import XCTest
 
+/// An `AsyncSequence` whose iteration survives its consumer's cancellation: every `next()` awaits
+/// the underlying stream from a fresh unstructured task, which does not inherit the cancelled
+/// state. `AsyncSequence` never promised otherwise — only `AsyncStream` ends on cancellation — so a
+/// run that has been superseded can still be receiving chunks.
+private struct CancellationIgnoringSequence: AsyncSequence {
+    typealias Element = String
+
+    let base: AsyncStream<String>
+
+    struct Iterator: AsyncIteratorProtocol {
+        let base: AsyncStream<String>
+
+        mutating func next() async -> String? {
+            let stream = base
+            return await Task {
+                var iterator = stream.makeAsyncIterator()
+                return await iterator.next()
+            }.value
+        }
+    }
+
+    func makeAsyncIterator() -> Iterator {
+        Iterator(base: base)
+    }
+}
+
 /// `TranslationService` is compiled into the test bundle from the app target (see `project.yml`),
 /// so these tests drive the real store against `:memory:` with an injected chunk stream —
 /// no API key, no network, no view.
@@ -215,6 +241,52 @@ final class TranslationServiceTests: XCTestCase {
         XCTAssertEqual(service.entries.map(\.sourceText), ["second", "first"])
         XCTAssertEqual(service.entries.first?.translatedText, "two")
         XCTAssertEqual(store.fetchAll().first(where: { $0.sourceText == "first" })?.translatedText, "one")
+    }
+
+    /// Two runs on the *same* row: the superseded one may keep streaming after it is replaced, so
+    /// its accumulated text must not land on top of the text the later run already persisted.
+    @MainActor
+    func testSupersededRunCannotOverwriteTheSameRowsLaterText() async throws {
+        let first = ControlledStream()
+        let second = ControlledStream()
+        var calls = 0
+        let (_, store, service) = try makeService { _, _ in
+            calls += 1
+            if calls == 1 {
+                return CancellationIgnoringSequence(base: first.stream)
+            }
+            return second.stream
+        }
+        let id = try store.insert(
+            sourceText: "hello",
+            translatedText: "seeded",
+            sourceLang: "en",
+            targetLang: "ja",
+            model: "test-model"
+        )
+        service.reload()
+        let entry = try XCTUnwrap(service.entries.first)
+
+        let runOne = Task { await service.retranslate(entry) }
+        await waitUntil { service.state == .streaming(partial: "") && calls == 1 }
+        first.continuation.yield("old")
+        await waitUntil { service.state == .streaming(partial: "old") }
+
+        let runTwo = Task { await service.retranslate(entry) }
+        await waitUntil { service.state == .streaming(partial: "") && calls == 2 }
+        second.continuation.yield("new")
+        await waitUntil { service.state == .streaming(partial: "new") }
+        second.continuation.finish()
+        await runTwo.value
+        XCTAssertEqual(store.fetchAll().first?.translatedText, "new")
+
+        // The superseded run ends now, after the newer run already wrote the row.
+        first.continuation.finish()
+        await runOne.value
+
+        XCTAssertEqual(store.fetchAll().first?.translatedText, "new")
+        XCTAssertEqual(service.entries.first?.translatedText, "new")
+        XCTAssertEqual(service.state, .stored(entryId: id))
     }
 
     // MARK: - Failures

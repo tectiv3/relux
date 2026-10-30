@@ -94,6 +94,49 @@ final class ClipboardStoreTests: XCTestCase {
         XCTAssertNil(store.fetchRawData(id: 9999), "missing rows return nil, not an error")
     }
 
+    /// `char_count`/`image_size` are bound as 64-bit integers: the 32-bit conversion trapped above
+    /// `Int32.max`, and `columnInt` truncated the value on the way back.
+    @MainActor
+    func testLargeSizeColumnRoundTripsAboveInt32Max() throws {
+        let (_, store) = try makeStore()
+        let bigSize = Int(Int32.max) + 1
+        try store.insert(
+            contentType: ContentType.image,
+            textContent: nil,
+            rawData: nil,
+            imagePath: "huge.png",
+            imageWidth: 6000,
+            imageHeight: 4000,
+            imageSize: bigSize,
+            sourceApp: nil,
+            sourceName: nil
+        )
+
+        let entry = try XCTUnwrap(entries(in: store).first)
+        XCTAssertEqual(entry.imageSize, bigSize)
+        XCTAssertEqual(entry.imageWidth, 6000)
+        XCTAssertEqual(entry.imageHeight, 4000)
+    }
+
+    /// A dead database used to read as an empty history with no trace anywhere.
+    @MainActor
+    func testFetchAllLogsTheCauseWhenTheTableIsMissing() throws {
+        let (database, store) = try makeStore()
+        let capture: LogCapture
+        do {
+            capture = try LogCapture()
+        } catch {
+            throw XCTSkip("the unified log is unavailable to this process: \(error)")
+        }
+        try database.execute("DROP TABLE clipboard_history")
+
+        XCTAssertTrue(entries(in: store).isEmpty, "the read keeps its empty-history contract")
+        XCTAssertTrue(
+            capture.waitForError(category: "clipboardstore", containing: "fetchAll"),
+            "a failed history read must not be silent"
+        )
+    }
+
     // MARK: - Ordering
 
     @MainActor

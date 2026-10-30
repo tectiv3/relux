@@ -84,12 +84,26 @@ final class TranslateStore {
                 model, created_at, updated_at, content_hash
             FROM translation_history ORDER BY COALESCE(updated_at, created_at) DESC LIMIT ?
         """
-        guard let statement = try? database.prepare(sql) else { return [] }
-        try? statement.bind(1, limit)
+        let statement: Statement
+        do {
+            statement = try database.prepare(sql)
+        } catch {
+            // Keeps the "empty history" contract for the panel (a missing table used to read as no
+            // translations at all), but the cause is no longer swallowed.
+            log.error("fetchAll: could not prepare the history query: \(error)")
+            return []
+        }
 
         var entries: [TranslationEntry] = []
-        while (try? statement.step()) == true {
-            entries.append(readRow(statement))
+        do {
+            try statement.bind(1, limit)
+            while try statement.step() {
+                entries.append(readRow(statement))
+            }
+        } catch {
+            // A read that fails mid-way still shows the rows it produced, as it did when the
+            // failure was swallowed; only the silence is gone.
+            log.error("fetchAll: history read stopped after \(entries.count) rows: \(error)")
         }
         return entries
     }
@@ -100,11 +114,22 @@ final class TranslateStore {
                 model, created_at, updated_at, content_hash
             FROM translation_history WHERE content_hash = ? AND translated_text != '' LIMIT 1
         """
-        guard let statement = try? database.prepare(sql) else { return nil }
-        try? statement.bind(1, hash)
+        let statement: Statement
+        do {
+            statement = try database.prepare(sql)
+        } catch {
+            log.error("findByHash: could not prepare the lookup: \(error)")
+            return nil
+        }
 
-        guard (try? statement.step()) == true else { return nil }
-        return readRow(statement)
+        do {
+            try statement.bind(1, hash)
+            guard try statement.step() else { return nil }
+            return readRow(statement)
+        } catch {
+            log.error("findByHash: lookup failed: \(error)")
+            return nil
+        }
     }
 
     /// Fire-and-forget: a failed bump only costs ordering in the history list.
