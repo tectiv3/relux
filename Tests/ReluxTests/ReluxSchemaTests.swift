@@ -178,6 +178,216 @@ final class ReluxSchemaTests: XCTestCase {
         try insert.stepToCompletion()
     }
 
+    // MARK: - Freshly created shape
+
+    /// The `CREATE TABLE` statements exactly as `ReluxSchema.applyInitial` declares them. A fresh
+    /// install gets this shape, and it differs from the ALTER-era one in `content_hash`'s position
+    /// (declared 5th, before `target_lang`), not in nullability: `updated_at` is `REAL` — nullable —
+    /// in both tables, and no statement in `ReluxSchema` produces `NOT NULL`.
+    private static let freshClipboardCreateTable = """
+    CREATE TABLE IF NOT EXISTS clipboard_history (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        content_type  TEXT NOT NULL,
+        text_content  TEXT,
+        raw_data      BLOB,
+        image_path    TEXT,
+        image_width   INTEGER,
+        image_height  INTEGER,
+        image_size    INTEGER,
+        source_app    TEXT,
+        source_name   TEXT,
+        char_count    INTEGER,
+        word_count    INTEGER,
+        created_at    REAL NOT NULL,
+        updated_at    REAL,
+        pinned_at     REAL
+    )
+    """
+
+    private static let freshTranslationCreateTable = """
+    CREATE TABLE IF NOT EXISTS translation_history (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_text     TEXT NOT NULL,
+        translated_text TEXT NOT NULL,
+        source_lang     TEXT,
+        content_hash    TEXT,
+        target_lang     TEXT NOT NULL,
+        model           TEXT NOT NULL,
+        created_at      REAL NOT NULL,
+        updated_at      REAL
+    )
+    """
+
+    private struct MasterRow: Equatable {
+        let type: String
+        let name: String
+        let table: String
+        let rootPage: Int
+        let sql: String?
+    }
+
+    private struct TranslationRow {
+        let id: Int
+        let createdAt: Double
+        let updatedAt: Double?
+    }
+
+    private func makeFreshShapedDatabase() throws -> SQLiteDatabase {
+        let database = try SQLiteDatabase(path: ":memory:")
+        try database.execute(Self.freshClipboardCreateTable)
+        try database.execute(Self.freshTranslationCreateTable)
+        return database
+    }
+
+    private func masterRows(_ database: SQLiteDatabase) throws -> [MasterRow] {
+        let statement = try database.prepare(
+            "SELECT type, name, tbl_name, rootpage, sql FROM sqlite_master ORDER BY type, name"
+        )
+        var rows: [MasterRow] = []
+        while try statement.step() {
+            rows.append(MasterRow(
+                type: statement.columnText(0) ?? "",
+                name: statement.columnText(1) ?? "",
+                table: statement.columnText(2) ?? "",
+                rootPage: statement.columnInt(3) ?? -1,
+                sql: statement.columnText(4)
+            ))
+        }
+        return rows
+    }
+
+    private func translationOrder(of database: SQLiteDatabase, rows: [TranslationRow]) throws -> [Int] {
+        let insert = try database.prepare("""
+        INSERT INTO translation_history
+            (id, source_text, translated_text, target_lang, model, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """)
+        for row in rows {
+            try insert.bind(1, row.id)
+            try insert.bind(2, "source \(row.id)")
+            try insert.bind(3, "translated \(row.id)")
+            try insert.bind(4, "ja")
+            try insert.bind(5, "model")
+            try insert.bind(6, row.createdAt)
+            try insert.bind(7, row.updatedAt)
+            try insert.stepToCompletion()
+            try insert.reset()
+        }
+
+        let select = try database.prepare(Self.translationFetchAllSQL)
+        try select.bind(1, 100)
+        var ids: [Int] = []
+        while try select.step() {
+            ids.append(select.columnInt(0) ?? -1)
+        }
+        return ids
+    }
+
+    /// The shape the current `CREATE TABLE` produces is only ever exercised as migration *output*
+    /// by every other test. Here it is the migration *input*, which is what an upgraded-from-fresh
+    /// database looks like: the tables already exist, `user_version` is 0, and nothing may be
+    /// rebuilt, rewritten or backfilled.
+    func testFreshCreateTableShapeIsMigratedInPlace() throws {
+        let database = try makeFreshShapedDatabase()
+        try database.execute("""
+        INSERT INTO clipboard_history (id, content_type, created_at, updated_at, pinned_at)
+        VALUES (7, 'text', 1000, 2000, NULL)
+        """)
+        try database.execute("""
+        INSERT INTO translation_history
+            (id, source_text, translated_text, source_lang, content_hash, target_lang, model,
+             created_at, updated_at)
+        VALUES (42, 'source', 'translated', 'en', 'hash', 'ja', 'model', 1000, 2000)
+        """)
+
+        let before = try masterRows(database)
+
+        try ReluxSchema.migrate(database)
+
+        XCTAssertEqual(ReluxSchema.version, 1)
+        XCTAssertEqual(try database.userVersion, ReluxSchema.version)
+
+        let after = try masterRows(database)
+        // Lossless rebuild detection: a table's `rootpage` only changes when it is dropped and
+        // recreated, so comparing the table rows whole (sql *and* rootpage) also catches a rebuild
+        // that a `CREATE TABLE IF NOT EXISTS` would otherwise hide behind an identical schema text.
+        XCTAssertEqual(
+            after.filter { $0.type == "table" },
+            before.filter { $0.type == "table" },
+            "migration must not rebuild or rewrite either table"
+        )
+        XCTAssertEqual(
+            Set(after.map(\.name)).subtracting(before.map(\.name)),
+            ["idx_clipboard_history_order", "idx_translation_history_order"],
+            "migration must add exactly the two ordering indexes"
+        )
+        XCTAssertEqual(
+            try columnNames(of: "translation_history", database: database),
+            ["id", "source_text", "translated_text", "source_lang", "content_hash", "target_lang",
+             "model", "created_at", "updated_at"],
+            "the fresh shape keeps content_hash in its declared position"
+        )
+        XCTAssertEqual(
+            try isNullable("updated_at", in: "translation_history", database: database),
+            true,
+            "the fresh shape declares updated_at nullable, like the live database"
+        )
+
+        let clipboard = try database.prepare(
+            "SELECT id, content_type, created_at, updated_at, pinned_at FROM clipboard_history"
+        )
+        XCTAssertTrue(try clipboard.step())
+        XCTAssertEqual(clipboard.columnInt64(0), 7)
+        XCTAssertEqual(clipboard.columnText(1), "text")
+        XCTAssertEqual(clipboard.columnDouble(2), 1000)
+        XCTAssertEqual(clipboard.columnDouble(3), 2000, "backfill must not touch an existing updated_at")
+        XCTAssertTrue(clipboard.isNull(4))
+        XCTAssertFalse(try clipboard.step())
+
+        let translation = try database.prepare(
+            "SELECT id, source_text, updated_at, content_hash FROM translation_history"
+        )
+        XCTAssertTrue(try translation.step())
+        XCTAssertEqual(translation.columnInt64(0), 42)
+        XCTAssertEqual(translation.columnText(1), "source")
+        XCTAssertEqual(translation.columnDouble(2), 2000)
+        XCTAssertEqual(translation.columnText(3), "hash")
+        XCTAssertFalse(try translation.step())
+
+        try ReluxSchema.migrate(database)
+        XCTAssertEqual(try masterRows(database), after, "a second run must be a no-op")
+        XCTAssertEqual(try database.userVersion, ReluxSchema.version)
+    }
+
+    /// `TranslateStore.fetchAll` orders by `COALESCE(updated_at, created_at) DESC`. Both creation
+    /// paths — migration creating the tables, and the tables pre-existing in the fresh shape — must
+    /// order identically, including rows whose `updated_at` is NULL.
+    ///
+    /// Unreachable-query note: under a `NOT NULL updated_at` column (which no current `CREATE TABLE`
+    /// declares) the COALESCE could never fall back — it would degenerate to `updated_at DESC` and
+    /// the NULL branch asserted below would be dead. Nullability, not column position, is what the
+    /// ordering query actually depends on.
+    func testTranslationOrderingIsIdenticalForBothCreatePaths() throws {
+        let migrationCreated = try makeDatabase()
+        let preCreated = try makeFreshShapedDatabase()
+        try ReluxSchema.migrate(preCreated)
+
+        let rows = [
+            TranslationRow(id: 1, createdAt: 5000, updatedAt: nil),
+            TranslationRow(id: 2, createdAt: 1000, updatedAt: 1000),
+            TranslationRow(id: 3, createdAt: 2000, updatedAt: 4000),
+            TranslationRow(id: 4, createdAt: 9000, updatedAt: nil),
+        ]
+
+        let expected = try translationOrder(of: migrationCreated, rows: rows)
+        XCTAssertEqual(
+            expected,
+            [4, 1, 3, 2],
+            "COALESCE must fall back to created_at for rows without an update time"
+        )
+        XCTAssertEqual(try translationOrder(of: preCreated, rows: rows), expected)
+    }
+
     // MARK: - Indexes
 
     func testClipboardOrderIndexIsUsed() throws {

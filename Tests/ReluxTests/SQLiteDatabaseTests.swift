@@ -1,4 +1,5 @@
 import ReluxCore
+import SQLite3
 import XCTest
 
 final class SQLiteDatabaseTests: XCTestCase {
@@ -186,22 +187,80 @@ final class SQLiteDatabaseTests: XCTestCase {
         XCTAssertThrowsError(try select.stepToCompletion())
     }
 
-    /// Every statement that goes out of scope must finalize, otherwise later work on the same
-    /// connection starts failing.
-    func testStatementsAreFinalizedAfterDeinit() throws {
+    // MARK: - Statement finalization
+
+    private struct HandleUnavailable: Error {}
+
+    /// `SQLiteDatabase.handle` is private, the tests import `ReluxCore` plainly, and putting a
+    /// statement-count accessor in `ReluxCore`'s public API would be test-only observability in a
+    /// shipped framework. Reflection reaches the stored property instead; a rename fails loudly
+    /// here rather than letting the assertions below pass vacuously.
+    private func connectionHandle(
+        _ database: SQLiteDatabase,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> OpaquePointer {
+        guard let reflected = Mirror(reflecting: database).children
+            .first(where: { $0.label == "handle" })?.value as? OpaquePointer?,
+            let handle = reflected
+        else {
+            XCTFail("could not reach SQLiteDatabase.handle through reflection", file: file, line: line)
+            throw HandleUnavailable()
+        }
+        return handle
+    }
+
+    private func insert(_ value: Int, into database: SQLiteDatabase) throws {
+        let statement = try database.prepare("INSERT INTO sample VALUES (?)")
+        try statement.bind(1, value)
+        try statement.stepToCompletion()
+    }
+
+    /// A statement that reached `SQLITE_DONE` still belongs to the connection's statement list
+    /// until it is finalized: completion and finalization are different things. Detects deleting
+    /// `sqlite3_finalize` from `Statement.deinit` — the statements would run, the rows would land,
+    /// and only this check would notice.
+    func testNoPreparedStatementIsLeftOutstanding() throws {
         let database = try makeDatabase()
         try database.execute("CREATE TABLE sample (value INTEGER)")
-
         for value in 0 ..< 100 {
-            let insert = try database.prepare("INSERT INTO sample VALUES (?)")
-            let bound = value
-            try insert.bind(1, bound)
-            try insert.stepToCompletion()
+            try insert(value, into: database)
         }
 
+        let handle = try connectionHandle(database)
         XCTAssertEqual(try count(in: database, table: "sample"), 100)
-        try database.execute("CREATE INDEX idx_sample ON sample (value)")
-        XCTAssertEqual(try count(in: database, table: "sample"), 100)
+        XCTAssertTrue(
+            sqlite3_next_stmt(handle, nil) == nil,
+            "a prepared statement outlived its scope: Statement.deinit did not finalize it"
+        )
+    }
+
+    /// Negative direction for the check above: an unfinished statement still inside its scope must
+    /// be visible to `sqlite3_next_stmt`, otherwise the test above proves nothing about leaks.
+    func testOutstandingStatementIsVisibleToTheCheck() throws {
+        let database = try makeDatabase()
+        try database.execute("CREATE TABLE sample (value INTEGER)")
+        for value in 0 ..< 2 {
+            try insert(value, into: database)
+        }
+        let handle = try connectionHandle(database)
+
+        do {
+            let select = try database.prepare("SELECT value FROM sample")
+            XCTAssertTrue(try select.step())
+            XCTAssertTrue(
+                sqlite3_next_stmt(handle, nil) != nil,
+                "an open statement must be visible, otherwise the nil check cannot detect a leak"
+            )
+            // Keeps `select` alive across the probe: a second row is still available, so the
+            // statement is deliberately mid-iteration rather than completed.
+            XCTAssertTrue(try select.step())
+        }
+
+        XCTAssertTrue(
+            sqlite3_next_stmt(handle, nil) == nil,
+            "the statement left its scope, so nothing may remain outstanding"
+        )
     }
 
     // MARK: - Transactions
