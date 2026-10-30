@@ -50,12 +50,18 @@ targets:
       # so compiling them into the test bundle keeps the SQL layer covered without a test host.
       - path: Sources/Relux/Store
       - path: Sources/Relux/Translate/TranslateStore.swift
+      # The translate state machine is store-only (no SwiftUI, no AppState), so its streaming,
+      # dedup and cancellation paths run host-free with an injected chunk stream.
+      - path: Sources/Relux/Translate/TranslationService.swift
       # FrecencyTracker owns the ranking-time usage log; it depends only on ReluxCore
       # and Foundation, so its migration and persistence are covered host-free.
       - path: Sources/Relux/Search/FrecencyTracker.swift
       # The icon cache is AppKit-only (no SwiftUI, no AppState), so its fetch-once and
       # 48x48 downsample behaviour is testable without a test host.
       - path: Sources/Relux/AppIconCache.swift
+      # The clipboard list model is state over the store with its pasteboard side effects
+      # injected, so the panel's filtering/selection rules run host-free too.
+      - path: Sources/Relux/Clipboard/ClipboardListModel.swift
     dependencies:
       - target: ReluxCore
     settings:

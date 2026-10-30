@@ -541,7 +541,7 @@ struct SettingsView: View {
             Section("Monitoring") {
                 Toggle("Enable clipboard history", isOn: $clipboardEnabled)
                     .onChange(of: clipboardEnabled) { _, newValue in
-                        if let monitor = appState.clipboardMonitor {
+                        if let monitor = ClipboardServices.monitor(appState) {
                             monitor.isEnabled = newValue
                         } else {
                             UserDefaults.standard.set(newValue, forKey: "clipboardEnabled")
@@ -567,7 +567,7 @@ struct SettingsView: View {
                 .alert("Clear Clipboard History?", isPresented: $showClearConfirmation) {
                     Button("Cancel", role: .cancel) {}
                     Button("Clear", role: .destructive) {
-                        try? appState.clipboardStore?.clearAll()
+                        ClipboardServices.model(appState).deleteAll()
                     }
                 } message: {
                     Text("""
@@ -615,7 +615,7 @@ struct SettingsView: View {
     }
 
     private func loadDisabledApps() {
-        let bundleIds = appState.clipboardMonitor?.disabledApps ?? []
+        let bundleIds = ClipboardServices.monitor(appState)?.disabledApps ?? []
         disabledApps = bundleIds.compactMap { bundleId in
             guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else {
                 return DisabledApp(id: bundleId, name: bundleId, icon: nil)
@@ -637,12 +637,12 @@ struct SettingsView: View {
         guard let bundle = Bundle(url: url),
               let bundleId = bundle.bundleIdentifier else { return }
 
-        appState.clipboardMonitor?.disabledApps.insert(bundleId)
+        ClipboardServices.monitor(appState)?.disabledApps.insert(bundleId)
         loadDisabledApps()
     }
 
     private func removeDisabledApp(bundleId: String) {
-        appState.clipboardMonitor?.disabledApps.remove(bundleId)
+        ClipboardServices.monitor(appState)?.disabledApps.remove(bundleId)
         loadDisabledApps()
     }
 
