@@ -390,7 +390,6 @@ private struct AddShortcutButton: View {
 
     @State var manager: GestureBindingManager
     @State private var recording = false
-    @State private var monitor: Any?
 
     var body: some View {
         HStack {
@@ -403,43 +402,47 @@ private struct AddShortcutButton: View {
                 Button("Add Shortcut") { startRecording() }
             }
         }
-        .onDisappear { removeMonitor() }
+        .background(
+            PanelKeyMonitor(isActive: recording, onWindowLost: stopRecording, handler: record)
+        )
+        .onDisappear { stopRecording() }
     }
 
     private func startRecording() {
+        guard !recording else { return }
         recording = true
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let code = event.keyCode
-            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        GlobalHotkeySuspension.suspend()
+    }
 
-            if code == 53 {
-                stopRecording()
-                return nil
-            }
+    /// Every key is consumed while recording, exactly as before: a bare modifier-less
+    /// key is dropped, not passed on.
+    private func record(_ event: NSEvent) -> NSEvent? {
+        let code = event.keyCode
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
-            let isFunctionKey = Self.functionKeyCodes.contains(Int(code))
-            if !isFunctionKey {
-                guard !mods.intersection([.command, .option, .control]).isEmpty else {
-                    return nil
-                }
-            }
-
-            let combo = KeyCombo(keyCode: code, modifierRawValue: mods.rawValue)
-            manager.addShortcutBinding(trigger: combo, action: .system(.lockScreen))
+        if code == 53 {
             stopRecording()
             return nil
         }
-    }
 
-    private func stopRecording() {
-        recording = false
-        removeMonitor()
-    }
-
-    private func removeMonitor() {
-        if let existing = monitor {
-            NSEvent.removeMonitor(existing)
-            monitor = nil
+        let isFunctionKey = Self.functionKeyCodes.contains(Int(code))
+        if !isFunctionKey {
+            guard !mods.isDisjoint(with: [.command, .option, .control]) else {
+                return nil
+            }
         }
+
+        let combo = KeyCombo(keyCode: code, modifierRawValue: mods.rawValue)
+        manager.addShortcutBinding(trigger: combo, action: .system(.lockScreen))
+        stopRecording()
+        return nil
+    }
+
+    /// Single release point for the suspension; the `recording` guard makes the
+    /// escape/recorded-key/Cancel/teardown/window-close paths idempotent.
+    private func stopRecording() {
+        guard recording else { return }
+        recording = false
+        GlobalHotkeySuspension.resume()
     }
 }

@@ -10,7 +10,6 @@ struct JWTView: View {
     @State private var inputText: String = ""
     @State private var showActions: Bool = false
     @State private var actionIndex: Int = 0
-    @State private var keyMonitor: Any?
     @FocusState private var isInputFocused: Bool
 
     private var tokenParts: JWTParts {
@@ -99,7 +98,6 @@ struct JWTView: View {
                 log.info("JWT view opened with no selection")
             }
             isInputFocused = true
-            installKeyMonitor()
         }
         .onChange(of: appState.selectionCaptureID) { _, _ in
             // Selection captured asynchronously after the view appeared
@@ -109,9 +107,7 @@ struct JWTView: View {
                 saveToFrecency()
             }
         }
-        .onDisappear {
-            removeKeyMonitor()
-        }
+        .background(PanelKeyMonitor(handler: handlePanelKey))
     }
 
     // MARK: - Top Bar
@@ -394,32 +390,31 @@ extension JWTView {
         ))
     }
 
-    func installKeyMonitor() {
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            if showActions {
-                return handleActionsKey(event)
-            }
-
-            if event.modifierFlags.contains(.command) && event.characters == "k" {
-                guard !currentActions.isEmpty else { return event }
-                actionIndex = 0
-                showActions.toggle()
-                return nil
-            }
-
-            let key = event.specialKey
-            if key == .carriageReturn || key == .newline {
-                copyPayload()
-                return nil
-            }
-
-            if event.keyCode == 53 {
-                appState.panelMode = .search
-                return nil
-            }
-
-            return event
+    /// Only keys this view consumed are swallowed; everything else is passed on.
+    private func handlePanelKey(_ event: NSEvent) -> NSEvent? {
+        if showActions {
+            return handleActionsKey(event)
         }
+
+        if event.modifierFlags.contains(.command) && event.characters == "k" {
+            guard !currentActions.isEmpty else { return event }
+            actionIndex = 0
+            showActions.toggle()
+            return nil
+        }
+
+        let key = event.specialKey
+        if key == .carriageReturn || key == .newline {
+            copyPayload()
+            return nil
+        }
+
+        if event.keyCode == 53 {
+            appState.panelMode = .search
+            return nil
+        }
+
+        return event
     }
 
     private func handleActionsKey(_ event: NSEvent) -> NSEvent? {
@@ -444,13 +439,6 @@ extension JWTView {
             return nil
         }
         return event
-    }
-
-    func removeKeyMonitor() {
-        if let monitor = keyMonitor {
-            NSEvent.removeMonitor(monitor)
-            keyMonitor = nil
-        }
     }
 }
 
