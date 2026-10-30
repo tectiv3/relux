@@ -13,8 +13,8 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 ## Frecency System
 
 - Tracks query→item selections to rank results; the scoring lives in `ReluxCore/Search/AppRanking.swift` (`AppUsage`, `UsageBoost`) and `FuzzyMatch.score(query:name:)`
-- `usage` counts opens per stable identity (the app path for apps, the item id for everything else) — no per-query buckets. The value is now `{opens, lastUsed}`; it was a bare `Int` before the 2026-10-30 decay unit, see *Usage Recency Decay and Learned-Pick TTL* below
-- `learned` maps folded query → the last pick's identity (now `{path, at}`; `[String: String]` before the same unit, see below) so a pick can expire
+- `usage` counts opens per stable identity (the app path for apps, the item id for everything else) — no per-query buckets. The value is `{explicitOpens, ambientOpens, lastUsed}`; panel picks are explicit, launches/activations observed via `NSWorkspace` are ambient (weighted 1/5). Before the ambient unit it was `{opens, lastUsed}`, and before the decay unit a bare `Int` — see *Ambient Usage Signals* below
+- `learned` maps folded query → the last pick's identity (now `{path, at}`; `[String: String]` before the same unit, see below) so a pick can expire. Only explicit picks write it — ambient observations never do
 - Queries are normalised in exactly one place (`FrecencyTracker.normalizedQuery`: trimmed, case- and diacritic-folded) so recording and lookup cannot disagree
 - Web-search and calculator selections are never recorded (no stable identity)
 - Legacy `"<query prefix>:<item id>" → {count, lastUsed}` files are migrated once on load by summing counts per identity (app path for apps, item id for non-apps)
@@ -179,7 +179,7 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Non-app rows keep their searcher score and receive the same usage boost in `AppState`; frecency therefore still applies to apps, scripts, AND settings
 - Selection-aware script bonus: +200 to base score (replaces unconditional prepend)
 - App fuzzy tiers (higher is better): exact 1000, name prefix 900, initials prefix 800, word prefix 700, substring 500, in-order subsequence `max(1, 300 - gaps * 8)`. Tiers subtract a length penalty `min(name.count, 60)`; the subsequence tier does not
-- App usage boost, evaluated at read time: `min(200, 20 * opens) * 0.5^(age / 30 days)` plus 300 when the app was the last pick for that exact folded query **and** that pick is at most 90 days old. 300 > the widest adjacent tier gap (200), so learning can override the name ladder
+- App usage boost, evaluated at read time: `min(200, 20 * explicitOpens + 4 * ambientOpens) * 0.5^(age / 30 days)` plus 300 when the app was the last pick for that exact folded query **and** that pick is at most 90 days old. 300 > the widest adjacent tier gap (200), so learning can override the name ladder
 - Score bands (base score, before the +up to 500 usage boost): calculator 1050, JWT keyword 1000 / JWT-shaped content 900, apps 1000 (exact) down to 1 (the subsequence tier is `max(1, 300 - gaps * 8)`, so 500 is a tier value, not a floor) plus +50 newly detected, scripts exact 930, settings exact 850, web search URL open 500 / DuckDuckGo fallback 200, translate 100
 - See `docs/plans/2026-03-11-unified-search-scoring.md` for full scoring contract
 
@@ -253,3 +253,25 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Values that are *identities*, not names, keep the extension: `SearchItem.id` (`app:<path>`), `usage` keys and `learned` paths are bundle paths, so matching a rescan keeps working. Only `title` is normalised.
 - Recents are normalised on **read**, not migrated: `FrecencyTracker.displayTitle(kind:id:title:)` applies the helper in `recentItems()` (and when a pick is recorded), so `recents.json` is left byte-identical by a pure read. Rewriting 123 user entries to fix a cosmetic string was not worth an atomic write on launch, and the stale titles disappear as entries are re-picked.
 - The discriminator is `StoredItem.kind == "app"` **and** an `app:`-prefixed id, because both are stored on every entry. `kind` alone is not sufficient evidence — a script legitimately named `deploy.app` must keep its name — and the id prefix corroborates that the snapshot really came from the app searcher. No path-shape guessing (`/Applications` …) is used.
+
+## 2026-10-30: Ambient Usage Signals
+
+> **Status 2026-10-30**: implemented — `Sources/Relux/Search/AppActivityObserver.swift`, `Sources/ReluxCore/Search/AppRanking.swift` (`AppUsage`, `UsageBoost`), `Sources/Relux/Search/FrecencyTracker.swift`.
+
+**Context**: only panel picks taught the ranking (`FrecencyTracker.recordSelection`), so an app opened from the Dock, Finder or Spotlight — the majority of opens — taught nothing. Recording was also query-coupled: a pick both bumped a counter and taught a query, so there was no way to express "the app was used" without inventing a query.
+
+**Decision**:
+- `usage` is `[identity: { explicitOpens, ambientOpens, lastUsed }]`. `explicitOpens` counts panel picks, `ambientOpens` counts observed launches/activations, `lastUsed` is the single recency anchor for both.
+- Bonus: `min(200, 20 * explicitOpens + 4 * ambientOpens) * 0.5^((now - lastUsed) / 30 days)`. Ambient is exactly **1/5** of an explicit open (`UsageBoost.perAmbientOpen = 4`): an observation says the app was used, not that it beat the alternative the panel offered. The weights are summed **before** the shared 200 cap, so mixed usage saturates without either counter drowning the other (5 explicit + 25 ambient = 200). Half-life stays 30 days.
+- **`learned` stays explicit-only.** An ambient event carries no query; inferring one ("the app is named `rem`") would let a background launch outvote a real pick. `recordAmbient` cannot write `learned`, and a test pins that.
+- `Sources/Relux/Search/AppActivityObserver.swift` watches `NSWorkspace.didLaunchApplicationNotification` and `didActivateApplicationNotification`. Filters, all required:
+  1. `bundleURL == nil`, `activationPolicy != .regular`, and Relux's own bundle id are ignored (Spotlight/Dock-launched helpers and the panel itself are not usage).
+  2. **Coalescing** (10 s): a launch followed by the same app activating is one visit. `lastCommitAt[path]` plus a single pending event per path.
+  3. **Dwell** (3 s): an activation commits only if the app is still `NSWorkspace.shared.frontmostApplication` when the timer fires; an activation superseded by another app's activation inside the window has its timer cancelled.
+  4. **Self-suppression** (5 s): `AppState.recordSelection` calls `suppress(path:)` for app rows, cancelling the pending event and ignoring ambient events for that path — the panel already counted it.
+  5. **Boot guard** (60 s): nothing observed in the first minute after start counts; login-item auto-launches are system startup, not usage.
+- All timing is injected: `clock`, `ActivityScheduler` (a one-shot timer seam), `AppActivitySource` (the `NSWorkspace` notification center) and `frontmostPath`. No `Date()` or `Task.sleep` in the decision path, so the tests drive every window. `stop()` unregisters both notification observers and cancels pending timers.
+- Persistence: ambient commits are debounced to **one `frecency.json` write per 60 s** (`FrecencyTracker.ambientSaveInterval`), decided from the injected `now`; ambient writes never touch `recents.json`. `flush(now:)` forces the pending write and runs on terminate (`AppDelegate.applicationWillTerminate` → `AppState.shutdown()`), and an explicit pick writes immediately anyway.
+- **Migration**: the pre-ambient `{opens, lastUsed}` entry decodes as `explicitOpens = opens, ambientOpens = 0` inside `UsageEntry.init(from:)`, so nothing is lost and no file is rewritten just to rename a key. The old `PreviousUsage` and legacy prefix shapes migrate as before. A file that matches no schema is still never rewritten.
+
+**Verification**: 124 entries of the live `frecency.json`, migrated on a copy — 0 mismatches, explicit sum preserved (1506), 5 learned picks preserved, file byte-identical on load, new shape on the first ambient write. The `NSWorkspace` plumbing was exercised by posting real notifications: a non-regular app counted 0, a regular app counted 1 after the 3 s dwell through the real `RunLoopActivityScheduler`, and a back-to-back launch was coalesced. No real app launch was observed.

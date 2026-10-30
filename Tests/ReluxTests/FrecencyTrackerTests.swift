@@ -17,7 +17,8 @@ final class FrecencyTrackerTests: XCTestCase {
     }
 
     private struct StoredUsage: Decodable {
-        var opens: Int
+        var explicitOpens: Int
+        var ambientOpens: Int
         var lastUsed: Date
     }
 
@@ -134,28 +135,28 @@ final class FrecencyTrackerTests: XCTestCase {
 
         let tracker = FrecencyTracker(directory: dir, now: Self.now)
 
-        XCTAssertEqual(tracker.appUsage(query: "rem", path: Self.remoteDesktopPath, now: Self.now).opens, 25)
-        XCTAssertEqual(tracker.appUsage(query: "rem", path: Self.remindersPath, now: Self.now).opens, 2)
+        XCTAssertEqual(tracker.appUsage(query: "rem", path: Self.remoteDesktopPath, now: Self.now).explicitOpens, 25)
+        XCTAssertEqual(tracker.appUsage(query: "rem", path: Self.remindersPath, now: Self.now).explicitOpens, 2)
         // Legacy entries carry no query -> identity preference.
         XCTAssertFalse(tracker.appUsage(query: "rem", path: Self.remoteDesktopPath, now: Self.now).lastPick)
 
         let stored = try storedState(in: dir)
 
         // Timestamps are preserved as reference dates, not stamped "now".
-        XCTAssertEqual(stored.usage[Self.remoteDesktopPath]?.opens, 25)
+        XCTAssertEqual(stored.usage[Self.remoteDesktopPath]?.explicitOpens, 25)
         let preservedLastUsed = try XCTUnwrap(stored.usage[Self.remoteDesktopPath]?.lastUsed)
         XCTAssertEqual(
             preservedLastUsed.timeIntervalSinceReferenceDate,
             newest.timeIntervalSinceReferenceDate,
             accuracy: 1e-6
         )
-        XCTAssertEqual(stored.usage[Self.remindersPath]?.opens, 2)
+        XCTAssertEqual(stored.usage[Self.remindersPath]?.explicitOpens, 2)
 
         // Non-app ids survive under their item id rather than being dropped.
-        XCTAssertEqual(stored.usage[Self.settingsID]?.opens, 1)
-        XCTAssertEqual(stored.usage[Self.scriptID]?.opens, 7)
+        XCTAssertEqual(stored.usage[Self.settingsID]?.explicitOpens, 1)
+        XCTAssertEqual(stored.usage[Self.scriptID]?.explicitOpens, 7)
         XCTAssertEqual(stored.usage.count, 4)
-        XCTAssertEqual(stored.usage.values.reduce(0) { $0 + $1.opens }, 35)
+        XCTAssertEqual(stored.usage.values.reduce(0) { $0 + $1.explicitOpens }, 35)
         XCTAssertTrue(stored.learned.isEmpty)
 
         // A migration must not clobber recents.json before it has been read.
@@ -175,7 +176,7 @@ final class FrecencyTrackerTests: XCTestCase {
         let tracker = FrecencyTracker(directory: dir, now: Self.now)
         let state = tracker.appUsage(query: "rem", path: Self.remoteDesktopPath, now: Self.now)
 
-        XCTAssertEqual(state.opens, 3)
+        XCTAssertEqual(state.explicitOpens, 3)
         XCTAssertEqual(state.lastUsed, Self.now)
         XCTAssertTrue(state.lastPick)
         XCTAssertEqual(
@@ -185,7 +186,7 @@ final class FrecencyTrackerTests: XCTestCase {
 
         // Rewritten once in the new shape, with the only timestamp available.
         let stored = try storedState(in: dir)
-        XCTAssertEqual(stored.usage[Self.remoteDesktopPath]?.opens, 3)
+        XCTAssertEqual(stored.usage[Self.remoteDesktopPath]?.explicitOpens, 3)
         let migratedLastUsed = try XCTUnwrap(stored.usage[Self.remoteDesktopPath]?.lastUsed)
         XCTAssertEqual(
             migratedLastUsed.timeIntervalSinceReferenceDate,
@@ -318,7 +319,7 @@ final class FrecencyTrackerTests: XCTestCase {
         // Trailing whitespace and case are normalised in one place.
         XCTAssertTrue(tracker.appUsage(query: "rem", path: Self.remoteDesktopPath, now: Self.now).lastPick)
         XCTAssertTrue(tracker.appUsage(query: " REM ", path: Self.remoteDesktopPath, now: Self.now).lastPick)
-        XCTAssertEqual(tracker.appUsage(query: "RÉM", path: Self.remoteDesktopPath, now: Self.now).opens, 1)
+        XCTAssertEqual(tracker.appUsage(query: "RÉM", path: Self.remoteDesktopPath, now: Self.now).explicitOpens, 1)
         XCTAssertFalse(tracker.appUsage(query: "remo", path: Self.remoteDesktopPath, now: Self.now).lastPick)
         XCTAssertFalse(tracker.appUsage(query: "rem", path: Self.remindersPath, now: Self.now).lastPick)
 
@@ -344,7 +345,7 @@ final class FrecencyTrackerTests: XCTestCase {
         let second = FrecencyTracker(directory: dir, now: Self.now)
 
         let state = second.appUsage(query: "rem", path: Self.remoteDesktopPath, now: Self.now)
-        XCTAssertEqual(state.opens, 2)
+        XCTAssertEqual(state.explicitOpens, 2)
         XCTAssertEqual(state.lastUsed, firstUsed)
         XCTAssertTrue(second.appUsage(query: "remote", path: Self.remoteDesktopPath, now: Self.now).lastPick)
         XCTAssertTrue(second.appUsage(query: "rem", path: Self.remoteDesktopPath, now: Self.now).lastPick)
@@ -356,7 +357,7 @@ final class FrecencyTrackerTests: XCTestCase {
         )
 
         let stored = try storedState(in: dir)
-        XCTAssertEqual(stored.usage[Self.remoteDesktopPath]?.opens, 2)
+        XCTAssertEqual(stored.usage[Self.remoteDesktopPath]?.explicitOpens, 2)
         let roundTrippedLastUsed = try XCTUnwrap(stored.usage[Self.remoteDesktopPath]?.lastUsed)
         XCTAssertEqual(
             roundTrippedLastUsed.timeIntervalSinceReferenceDate,
@@ -385,7 +386,7 @@ final class FrecencyTrackerTests: XCTestCase {
                 as? [String: Any]
         )
         let usage = try XCTUnwrap(stored["usage"] as? [String: [String: Any]])
-        XCTAssertEqual(usage[Self.remindersPath]?["opens"] as? Int, 1)
+        XCTAssertEqual(usage[Self.remindersPath]?["explicitOpens"] as? Int, 1)
         let storedLastUsed = try XCTUnwrap(usage[Self.remindersPath]?["lastUsed"] as? Double)
         XCTAssertEqual(storedLastUsed, Self.now.timeIntervalSinceReferenceDate, accuracy: 1e-6)
         let learned = try XCTUnwrap(stored["learned"] as? [String: [String: Any]])
@@ -401,7 +402,7 @@ final class FrecencyTrackerTests: XCTestCase {
 
         tracker.removeItem(id: "app:\(Self.remoteDesktopPath)", now: Self.now)
 
-        XCTAssertEqual(tracker.appUsage(query: "rem", path: Self.remoteDesktopPath, now: Self.now).opens, 0)
+        XCTAssertEqual(tracker.appUsage(query: "rem", path: Self.remoteDesktopPath, now: Self.now).explicitOpens, 0)
         XCTAssertFalse(tracker.appUsage(query: "rem", path: Self.remoteDesktopPath, now: Self.now).lastPick)
     }
 
@@ -456,7 +457,7 @@ final class FrecencyTrackerTests: XCTestCase {
 
         let tracker = FrecencyTracker(directory: dir, now: Self.now)
         // The session stays usable: it ranks from empty state rather than refusing to run.
-        XCTAssertEqual(tracker.appUsage(query: "rem", path: Self.remoteDesktopPath, now: Self.now).opens, 0)
+        XCTAssertEqual(tracker.appUsage(query: "rem", path: Self.remoteDesktopPath, now: Self.now).explicitOpens, 0)
 
         tracker.recordSelection(
             query: "rem",
@@ -465,7 +466,7 @@ final class FrecencyTrackerTests: XCTestCase {
         )
 
         // Recording still works in memory for this session...
-        XCTAssertEqual(tracker.appUsage(query: "rem", path: Self.remoteDesktopPath, now: Self.now).opens, 1)
+        XCTAssertEqual(tracker.appUsage(query: "rem", path: Self.remoteDesktopPath, now: Self.now).explicitOpens, 1)
         XCTAssertEqual(tracker.recentItems().map(\.id), ["app:\(Self.remoteDesktopPath)"])
         // ...but the bytes nobody could read are left exactly as they were.
         XCTAssertEqual(try Data(contentsOf: path), corrupt)
@@ -495,7 +496,7 @@ final class FrecencyTrackerTests: XCTestCase {
         // The session still shows what it recorded, so recents are not blind for the whole run.
         XCTAssertEqual(tracker.recentItems().map(\.id), ["app:/Applications/Ghostty.app"])
         // `frecency.json` was absent, so it is still maintained as usual.
-        XCTAssertEqual(try storedState(in: dir).usage["/Applications/Ghostty.app"]?.opens, 1)
+        XCTAssertEqual(try storedState(in: dir).usage["/Applications/Ghostty.app"]?.explicitOpens, 1)
     }
 
     /// The partially valid case: one bad entry fails the whole-file decode. Salvaging the readable
@@ -504,7 +505,7 @@ final class FrecencyTrackerTests: XCTestCase {
         let dir = makeDirectory()
         defer { try? FileManager.default.removeItem(at: dir) }
         let path = dir.appendingPathComponent("frecency.json")
-        // Two entries of the current schema, one of which has a non-numeric `opens`.
+        // Two entries of the pre-ambient schema, one of which has a non-numeric `opens`.
         let payload: [String: Any] = [
             "usage": [
                 "/Applications/Good.app": ["opens": 4, "lastUsed": Self.now.timeIntervalSinceReferenceDate],
@@ -516,7 +517,7 @@ final class FrecencyTrackerTests: XCTestCase {
         try corrupt.write(to: path)
 
         let tracker = FrecencyTracker(directory: dir, now: Self.now)
-        XCTAssertEqual(tracker.appUsage(query: "rem", path: "/Applications/Good.app", now: Self.now).opens, 0)
+        XCTAssertEqual(tracker.appUsage(query: "rem", path: "/Applications/Good.app", now: Self.now).explicitOpens, 0)
 
         tracker.recordSelection(
             query: "gho",
@@ -599,5 +600,152 @@ final class FrecencyTrackerTests: XCTestCase {
         )
         XCTAssertEqual(stored["app:/Applications/Ghostty.app"]?["title"] as? String, "Ghostty")
         XCTAssertEqual(recentTitles(in: dir, limit: 8), ["Ghostty"])
+    }
+
+    // MARK: - Ambient usage
+
+    /// The shape every entry had before ambient observation existed: `{ opens, lastUsed }`.
+    /// It loads as explicit opens with no ambient, without rewriting the file for the sake
+    /// of the rename.
+    func testPreAmbientEntryLoadsAsExplicitOpens() throws {
+        let dir = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let lastUsed = Self.now.addingTimeInterval(-Self.days(45))
+        // Byte-for-byte the live reference: a reference-date double and a bare count.
+        let payload: [String: Any] = [
+            "usage": [
+                Self.remoteDesktopPath: ["opens": 7, "lastUsed": lastUsed.timeIntervalSinceReferenceDate],
+                Self.remindersPath: ["opens": 0, "lastUsed": lastUsed.timeIntervalSinceReferenceDate],
+            ],
+            "learned": [String: String](),
+        ]
+        let original = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        let path = dir.appendingPathComponent("frecency.json")
+        try original.write(to: path)
+
+        let tracker = FrecencyTracker(directory: dir, now: Self.now)
+        let state = tracker.appUsage(query: "rem", path: Self.remoteDesktopPath, now: Self.now)
+
+        XCTAssertEqual(state.explicitOpens, 7)
+        XCTAssertEqual(state.ambientOpens, 0)
+        XCTAssertEqual(state.lastUsed, lastUsed)
+        // A pure load never rewrites the user's file.
+        XCTAssertEqual(try Data(contentsOf: path), original)
+
+        // 7 * 20 = 140, halved once for the 45 days.
+        XCTAssertEqual(
+            tracker.usageBoost(query: "rem", itemId: "app:\(Self.remoteDesktopPath)", now: Self.now),
+            140 * pow(0.5, 1.5),
+            accuracy: 1e-9
+        )
+    }
+
+    /// Ambient events carry no query, so they must never set or move a learned pick —
+    /// otherwise a background launch would outvote the panel choice for that query.
+    func testAmbientRecordNeverTouchesLearned() throws {
+        let dir = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let remote = appItem(path: Self.remoteDesktopPath, title: "Microsoft Remote Desktop")
+        let tracker = FrecencyTracker(directory: dir, now: Self.now)
+        tracker.recordSelection(query: "rem", item: remote, now: Self.now)
+
+        tracker.recordAmbient(path: Self.remindersPath, now: Self.now.addingTimeInterval(1))
+        tracker.recordAmbient(path: Self.remoteDesktopPath, now: Self.now.addingTimeInterval(2))
+        tracker.flush(now: Self.now.addingTimeInterval(2))
+
+        let stored = try storedState(in: dir)
+        XCTAssertEqual(stored.learned.keys.sorted(), ["rem"])
+        XCTAssertEqual(stored.learned["rem"]?.path, Self.remoteDesktopPath)
+        XCTAssertEqual(stored.learned["rem"]?.pickedAt, Self.now)
+
+        // Still a live pick for the explicitly chosen app, and never a pick for the ambient one.
+        XCTAssertTrue(tracker.appUsage(query: "rem", path: Self.remoteDesktopPath, now: Self.now).lastPick)
+        XCTAssertFalse(tracker.appUsage(query: "rem", path: Self.remindersPath, now: Self.now).lastPick)
+
+        let reminders = tracker.appUsage(query: "rem", path: Self.remindersPath, now: Self.now)
+        XCTAssertEqual(reminders.explicitOpens, 0)
+        XCTAssertEqual(reminders.ambientOpens, 1)
+    }
+
+    /// `frecency.json` is not rewritten per activation: at most one write per
+    /// `ambientSaveInterval`, and `flush` is what gets the rest onto disk.
+    func testAmbientWritesAreDebouncedAndFlushed() throws {
+        let dir = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("frecency.json")
+        let tracker = FrecencyTracker(directory: dir, now: Self.now)
+
+        tracker.recordAmbient(path: Self.remindersPath, now: Self.now)
+        XCTAssertEqual(try storedState(in: dir).usage[Self.remindersPath]?.ambientOpens, 1)
+        XCTAssertEqual(
+            try XCTUnwrap(try storedState(in: dir).usage[Self.remindersPath]?.lastUsed),
+            Self.now
+        )
+        // Ambient observations do not create recents snapshots.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("recents.json").path))
+
+        let later = Self.now.addingTimeInterval(FrecencyTracker.ambientSaveInterval / 2)
+        tracker.recordAmbient(path: Self.remindersPath, now: later)
+        // Inside the window: memory moved, the file did not.
+        XCTAssertEqual(try storedState(in: dir).usage[Self.remindersPath]?.ambientOpens, 1)
+        XCTAssertEqual(
+            try XCTUnwrap(try storedState(in: dir).usage[Self.remindersPath]?.lastUsed),
+            Self.now
+        )
+        XCTAssertEqual(
+            tracker.appUsage(query: "rem", path: Self.remindersPath, now: later).ambientOpens,
+            2
+        )
+
+        tracker.flush(now: later)
+        XCTAssertEqual(try storedState(in: dir).usage[Self.remindersPath]?.ambientOpens, 2)
+        XCTAssertEqual(try storedState(in: dir).usage[Self.remindersPath]?.lastUsed, later)
+        // A full interval after the last write, the next observation writes immediately.
+        let muchLater = later.addingTimeInterval(FrecencyTracker.ambientSaveInterval + 1)
+        tracker.recordAmbient(path: Self.remindersPath, now: muchLater)
+        XCTAssertEqual(try storedState(in: dir).usage[Self.remindersPath]?.ambientOpens, 3)
+        XCTAssertEqual(try Data(contentsOf: path).count > 0, true)
+    }
+
+    /// An explicit pick flushes whatever ambient state was held back, so the file the
+    /// user's next launch reads contains both.
+    func testExplicitRecordFlushesPendingAmbientState() throws {
+        let dir = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let tracker = FrecencyTracker(directory: dir, now: Self.now)
+
+        tracker.recordAmbient(path: Self.remindersPath, now: Self.now)
+        let held = Self.now.addingTimeInterval(10)
+        tracker.recordAmbient(path: Self.remindersPath, now: held)
+        tracker.recordSelection(
+            query: "gho",
+            item: appItem(path: "/Applications/Ghostty.app", title: "Ghostty"),
+            now: held
+        )
+
+        let stored = try storedState(in: dir)
+        XCTAssertEqual(stored.usage[Self.remindersPath]?.ambientOpens, 2)
+        XCTAssertEqual(stored.usage[Self.remindersPath]?.lastUsed, held)
+        XCTAssertEqual(stored.usage["/Applications/Ghostty.app"]?.explicitOpens, 1)
+    }
+
+    /// Migration must not turn the write guard off: an undecodable file stays untouched
+    /// even when the only activity in the session is ambient.
+    func testUndecodableFileSurvivesAnAmbientOnlySession() throws {
+        let dir = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("frecency.json")
+        let corrupt = Data(#"{"usage":{"\/Applications\/X.app":{"explicitOpens":"many"}},"learned":{}}"#.utf8)
+        try corrupt.write(to: path)
+
+        let tracker = FrecencyTracker(directory: dir, now: Self.now)
+        tracker.recordAmbient(path: Self.remindersPath, now: Self.now)
+        tracker.flush(now: Self.now.addingTimeInterval(120))
+
+        XCTAssertEqual(try Data(contentsOf: path), corrupt)
+        XCTAssertEqual(
+            tracker.appUsage(query: "rem", path: Self.remindersPath, now: Self.now).ambientOpens,
+            1
+        )
     }
 }

@@ -56,6 +56,10 @@ targets:
       # FrecencyTracker owns the ranking-time usage log; it depends only on ReluxCore
       # and Foundation, so its migration and persistence are covered host-free.
       - path: Sources/Relux/Search/FrecencyTracker.swift
+      # The ambient activity observer's filters (boot guard, coalescing, dwell,
+      # self-suppression) are decisions over an injected clock, scheduler, frontmost
+      # probe and event source, so they are covered without a running workspace.
+      - path: Sources/Relux/Search/AppActivityObserver.swift
       # The icon cache is AppKit-only (no SwiftUI, no AppState), so its fetch-once and
       # 48x48 downsample behaviour is testable without a test host.
       - path: Sources/Relux/AppIconCache.swift

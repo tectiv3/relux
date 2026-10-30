@@ -10,55 +10,99 @@ final class AppRankingTests: XCTestCase {
         count * 86400
     }
 
-    private func boost(opens: Int, ageDays: Double, lastPick: Bool = false) -> Double {
+    private func boost(
+        explicitOpens: Int,
+        ambientOpens: Int = 0,
+        ageDays: Double,
+        lastPick: Bool = false
+    ) -> Double {
         UsageBoost.value(
-            for: AppUsage(opens: opens, lastUsed: Self.now.addingTimeInterval(-Self.days(ageDays)), lastPick: lastPick),
+            for: AppUsage(
+                explicitOpens: explicitOpens,
+                ambientOpens: ambientOpens,
+                lastUsed: Self.now.addingTimeInterval(-Self.days(ageDays)),
+                lastPick: lastPick
+            ),
             now: Self.now
         )
     }
 
     func testUsageBoostCapsOpensBeforeDecay() {
-        XCTAssertEqual(UsageBoost.value(for: AppUsage(opens: 0), now: Self.now), 0)
-        XCTAssertEqual(UsageBoost.value(for: AppUsage(opens: 9, lastUsed: Self.now), now: Self.now), 180)
-        XCTAssertEqual(UsageBoost.value(for: AppUsage(opens: 10, lastUsed: Self.now), now: Self.now), 200)
-        XCTAssertEqual(UsageBoost.value(for: AppUsage(opens: 50, lastUsed: Self.now), now: Self.now), 200)
+        XCTAssertEqual(UsageBoost.value(for: AppUsage(explicitOpens: 0), now: Self.now), 0)
+        XCTAssertEqual(UsageBoost.value(for: AppUsage(explicitOpens: 9, lastUsed: Self.now), now: Self.now), 180)
+        XCTAssertEqual(UsageBoost.value(for: AppUsage(explicitOpens: 10, lastUsed: Self.now), now: Self.now), 200)
+        XCTAssertEqual(UsageBoost.value(for: AppUsage(explicitOpens: 50, lastUsed: Self.now), now: Self.now), 200)
         XCTAssertEqual(
-            UsageBoost.value(for: AppUsage(opens: 2, lastUsed: Self.now, lastPick: true), now: Self.now),
+            UsageBoost.value(for: AppUsage(explicitOpens: 2, lastUsed: Self.now, lastPick: true), now: Self.now),
             40 + 300
         )
         // No timestamp means no age information: nothing to decay.
-        XCTAssertEqual(UsageBoost.value(for: AppUsage(opens: 50), now: Self.now), 200)
+        XCTAssertEqual(UsageBoost.value(for: AppUsage(explicitOpens: 50), now: Self.now), 200)
     }
 
     /// A saturated entry keeps the same curve whether it got there via 10 or 139 opens.
     func testSaturatedEntriesHalveEveryHalfLife() {
         for opens in [10, 139] {
-            XCTAssertEqual(boost(opens: opens, ageDays: 0), 200, accuracy: 1e-9)
-            XCTAssertEqual(boost(opens: opens, ageDays: 30), 100, accuracy: 1e-9)
-            XCTAssertEqual(boost(opens: opens, ageDays: 60), 50, accuracy: 1e-9)
-            XCTAssertEqual(boost(opens: opens, ageDays: 90), 25, accuracy: 1e-9)
+            XCTAssertEqual(boost(explicitOpens: opens, ageDays: 0), 200, accuracy: 1e-9)
+            XCTAssertEqual(boost(explicitOpens: opens, ageDays: 30), 100, accuracy: 1e-9)
+            XCTAssertEqual(boost(explicitOpens: opens, ageDays: 60), 50, accuracy: 1e-9)
+            XCTAssertEqual(boost(explicitOpens: opens, ageDays: 90), 25, accuracy: 1e-9)
         }
     }
 
     func testUncappedOpensDecayProportionally() {
-        XCTAssertEqual(boost(opens: 5, ageDays: 0), 100, accuracy: 1e-9)
-        XCTAssertEqual(boost(opens: 5, ageDays: 30), 50, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 5, ageDays: 0), 100, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 5, ageDays: 30), 50, accuracy: 1e-9)
 
-        XCTAssertEqual(boost(opens: 1, ageDays: 0), 20, accuracy: 1e-9)
-        XCTAssertEqual(boost(opens: 1, ageDays: 30), 10, accuracy: 1e-9)
-        XCTAssertEqual(boost(opens: 1, ageDays: 60), 5, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 1, ageDays: 0), 20, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 1, ageDays: 30), 10, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 1, ageDays: 60), 5, accuracy: 1e-9)
+    }
+
+    /// An ambient observation is worth a fifth of an explicit pick, and the two
+    /// counters are weighted before the cap, not after it.
+    func testAmbientUsageIsWeightedOneFifthOfAnExplicitPick() {
+        XCTAssertEqual(UsageBoost.value(for: AppUsage(ambientOpens: 1, lastUsed: Self.now), now: Self.now), 4)
+        XCTAssertEqual(UsageBoost.value(for: AppUsage(ambientOpens: 5, lastUsed: Self.now), now: Self.now), 20)
+        XCTAssertEqual(UsageBoost.value(for: AppUsage(explicitOpens: 1, lastUsed: Self.now), now: Self.now), 20)
+        XCTAssertEqual(
+            UsageBoost.value(
+                for: AppUsage(explicitOpens: 2, ambientOpens: 5, lastUsed: Self.now),
+                now: Self.now
+            ),
+            40 + 20
+        )
+    }
+
+    func testBothCountersSaturateTheSameCap() {
+        XCTAssertEqual(boost(explicitOpens: 9, ageDays: 0), 180, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 10, ageDays: 0), 200, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 49, ageDays: 0), 196, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 50, ageDays: 0), 200, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 500, ageDays: 0), 200, accuracy: 1e-9)
+        // 5 * 20 + 25 * 4 = 200 exactly: mixed usage reaches the cap without one
+        // counter drowning the other.
+        XCTAssertEqual(boost(explicitOpens: 5, ambientOpens: 25, ageDays: 0), 200, accuracy: 1e-9)
+    }
+
+    func testAmbientBonusDecaysByTheSameCurve() {
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 50, ageDays: 30), 100, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 10, ageDays: 30), 20, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 10, ageDays: 90), 5, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 50, ageDays: 0), 200, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 50, ageDays: 60), 50, accuracy: 1e-9)
     }
 
     func testLearnedPickDoesNotDecay() {
         // Old usage loses its opens bonus but the learned pick keeps its full weight.
-        XCTAssertEqual(boost(opens: 10, ageDays: 90, lastPick: true), 25 + 300, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 10, ageDays: 90, lastPick: true), 25 + 300, accuracy: 1e-9)
     }
 
     func testFutureTimestampIsTreatedAsAgeZero() {
-        XCTAssertEqual(UsageBoost.value(for: AppUsage(opens: 10, lastUsed: Self.now), now: Self.now), 200)
+        XCTAssertEqual(UsageBoost.value(for: AppUsage(explicitOpens: 10, lastUsed: Self.now), now: Self.now), 200)
         XCTAssertEqual(
             UsageBoost.value(
-                for: AppUsage(opens: 10, lastUsed: Self.now.addingTimeInterval(Self.days(5))),
+                for: AppUsage(explicitOpens: 10, lastUsed: Self.now.addingTimeInterval(Self.days(5))),
                 now: Self.now
             ),
             200
@@ -107,19 +151,19 @@ final class AppRankingTests: XCTestCase {
         let reminders = try XCTUnwrap(AppRanking.score(
             query: "rem",
             name: "Reminders",
-            usage: AppUsage(opens: 2, lastUsed: Self.now, lastPick: false),
+            usage: AppUsage(explicitOpens: 2, lastUsed: Self.now, lastPick: false),
             now: Self.now
         ))
         let remoteWithoutLearning = try XCTUnwrap(AppRanking.score(
             query: "rem",
             name: "Microsoft Remote Desktop",
-            usage: AppUsage(opens: 11, lastUsed: Self.now, lastPick: false),
+            usage: AppUsage(explicitOpens: 11, lastUsed: Self.now, lastPick: false),
             now: Self.now
         ))
         let remoteWithLearning = try XCTUnwrap(AppRanking.score(
             query: "rem",
             name: "Microsoft Remote Desktop",
-            usage: AppUsage(opens: 11, lastUsed: Self.now, lastPick: true),
+            usage: AppUsage(explicitOpens: 11, lastUsed: Self.now, lastPick: true),
             now: Self.now
         ))
 
@@ -141,19 +185,19 @@ final class AppRankingTests: XCTestCase {
         let reminders = try XCTUnwrap(AppRanking.score(
             query: "rem",
             name: "Reminders",
-            usage: AppUsage(opens: 2, lastUsed: monthAgo, lastPick: false),
+            usage: AppUsage(explicitOpens: 2, lastUsed: monthAgo, lastPick: false),
             now: Self.now
         ))
         let remoteWithoutLearning = try XCTUnwrap(AppRanking.score(
             query: "rem",
             name: "Microsoft Remote Desktop",
-            usage: AppUsage(opens: 11, lastUsed: monthAgo, lastPick: false),
+            usage: AppUsage(explicitOpens: 11, lastUsed: monthAgo, lastPick: false),
             now: Self.now
         ))
         let remoteWithLearning = try XCTUnwrap(AppRanking.score(
             query: "rem",
             name: "Microsoft Remote Desktop",
-            usage: AppUsage(opens: 11, lastUsed: monthAgo, lastPick: true),
+            usage: AppUsage(explicitOpens: 11, lastUsed: monthAgo, lastPick: true),
             now: Self.now
         ))
 
@@ -164,7 +208,7 @@ final class AppRankingTests: XCTestCase {
     }
 
     func testEqualInputsTieAndTheRankerKnowsNothingAboutItemKind() throws {
-        let usage = AppUsage(opens: 2, lastUsed: Self.now)
+        let usage = AppUsage(explicitOpens: 2, lastUsed: Self.now)
         let first = try XCTUnwrap(AppRanking.score(query: "rem", name: "Reminders", usage: usage, now: Self.now))
         let second = try XCTUnwrap(AppRanking.score(query: "rem", name: "Reminders", usage: usage, now: Self.now))
         XCTAssertEqual(first, second)

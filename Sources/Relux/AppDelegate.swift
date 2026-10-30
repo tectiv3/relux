@@ -42,6 +42,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         showPanel()
     }
 
+    func applicationWillTerminate(_: Notification) {
+        appState.shutdown()
+    }
+
     func setupPanel() {
         guard let screen = NSScreen.main else { return }
         let panelWidth: CGFloat = 750

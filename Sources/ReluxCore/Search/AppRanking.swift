@@ -2,17 +2,27 @@ import Foundation
 
 /// What the usage log knows about one app at ranking time.
 public struct AppUsage: Sendable, Equatable {
-    /// Total opens of the app, independent of query.
-    public var opens: Int
-    /// When the app was last opened. `nil` means the log has no record, so
+    /// Opens the user chose in the panel. Independent of query.
+    public var explicitOpens: Int
+    /// Launches and activations observed in the background. Weighted a fifth
+    /// of an explicit open: an observation says the app was used, not that the
+    /// user picked it over the alternative the panel offered.
+    public var ambientOpens: Int
+    /// When the app was last used. `nil` means the log has no record, so
     /// nothing is decayed.
     public var lastUsed: Date?
     /// The app was the last pick for this exact folded query and that pick is
     /// still inside `UsageBoost.lastPickTTLDays`.
     public var lastPick: Bool
 
-    public init(opens: Int = 0, lastUsed: Date? = nil, lastPick: Bool = false) {
-        self.opens = opens
+    public init(
+        explicitOpens: Int = 0,
+        ambientOpens: Int = 0,
+        lastUsed: Date? = nil,
+        lastPick: Bool = false
+    ) {
+        self.explicitOpens = explicitOpens
+        self.ambientOpens = ambientOpens
         self.lastUsed = lastUsed
         self.lastPick = lastPick
     }
@@ -21,7 +31,11 @@ public struct AppUsage: Sendable, Equatable {
 /// Additive usage weights applied on top of the fuzzy score. The opens bonus
 /// decays with recency; the learned pick is either live or expired.
 public enum UsageBoost {
-    public static let perOpen = 20
+    public static let perExplicitOpen = 20
+    /// One fifth of an explicit open, exactly: ambient events are noisier
+    /// (an app can be launched by a login item or another app) and were never
+    /// rejected in favour of something else.
+    public static let perAmbientOpen = 4
     public static let openCap = 200
     public static let lastPick = 300
 
@@ -50,7 +64,9 @@ public enum UsageBoost {
     }
 
     public static func value(for usage: AppUsage, now: Date) -> Double {
-        let capped = Double(min(openCap, max(0, usage.opens) * perOpen))
+        let weighted = max(0, usage.explicitOpens) * perExplicitOpen
+            + max(0, usage.ambientOpens) * perAmbientOpen
+        let capped = Double(min(openCap, weighted))
         let opensBonus = capped * decay(lastUsed: usage.lastUsed, now: now)
         return opensBonus + (usage.lastPick ? Double(lastPick) : 0)
     }

@@ -18,6 +18,8 @@ final class AppState {
     let appSearcher = AppSearcher()
     let scriptSearcher = ScriptSearcher()
     let frecency = FrecencyTracker(now: Date())
+    /// Teaches `frecency` from launches/activations the panel never saw; created in `setup()`.
+    private(set) var activityObserver: AppActivityObserver?
     let extensionRegistry = ExtensionRegistry()
     private let calculatorService = CalculatorService()
     let systemSettingsSearcher = SystemSettingsSearcher()
@@ -83,6 +85,10 @@ final class AppState {
         }
 
         calculatorService.warmUp()
+
+        let observer = AppActivityObserver(tracker: frecency)
+        observer.start()
+        activityObserver = observer
 
         extensionRegistry.register(
             id: "translate", name: "Translate", icon: "character.book.closed",
@@ -250,6 +256,18 @@ final class AppState {
 
     func recordSelection(query: String, item: SearchItem) {
         frecency.recordSelection(query: query, item: item, now: Date())
+        // Opening an app from the panel is also a launch + activation the observer will
+        // see; it already counted, so the ambient event must not add a second one.
+        if item.kind == .app, let path = item.meta["path"] {
+            activityObserver?.suppress(path: path)
+        }
+    }
+
+    /// Persist debounced ambient usage and stop observing. Called on terminate.
+    func shutdown() {
+        activityObserver?.stop()
+        activityObserver = nil
+        frecency.flush(now: Date())
     }
 
     func recentItems() -> [SearchItem] {
