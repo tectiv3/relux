@@ -29,6 +29,8 @@ final class AppState {
     var clipboardStore: ClipboardStore?
     var clipboardMonitor: ClipboardMonitor?
     var translateStore: TranslateStore?
+    /// Owns every translate-panel store write; the view only renders it.
+    var translationService: TranslationService?
     let anthropicService = AnthropicService()
     var panelMode: PanelMode = .search
     var panelClosedAt: Date = .distantPast
@@ -55,7 +57,17 @@ final class AppState {
         clipboardMonitor = monitor
         monitor.start()
 
-        translateStore = TranslateStore(db: database)
+        let translations = TranslateStore(db: database)
+        translateStore = translations
+        // Bind the service locally so the closures hold AnthropicService, not AppState.
+        let anthropic = anthropicService
+        translationService = TranslationService(
+            store: translations,
+            model: { anthropic.model },
+            stream: { text, targetLanguage in
+                anthropic.translate(text: text, targetLanguage: targetLanguage)
+            }
+        )
 
         // Clean up expired clipboard entries
         let retentionMonths = UserDefaults.standard.object(forKey: "clipboardRetentionMonths") as? Int ?? 3
@@ -65,10 +77,9 @@ final class AppState {
 
         calculatorService.warmUp()
 
-        let anthro = anthropicService
         extensionRegistry.register(
             id: "translate", name: "Translate", icon: "character.book.closed",
-            defaultEnabled: true, availabilityCheck: { anthro.hasApiKey }
+            defaultEnabled: true, availabilityCheck: { anthropic.hasApiKey }
         )
         extensionRegistry.register(
             id: "calculator", name: "Calculator", icon: "equal.circle", defaultEnabled: true
