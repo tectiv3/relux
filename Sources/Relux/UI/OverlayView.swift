@@ -76,7 +76,7 @@ struct OverlayView: View {
                 ItemAction(label: "Launch", icon: "arrow.up.forward.app", shortcut: "⏎") {
                     openSelectedItem()
                 },
-                ItemAction(label: "Show in Finder", icon: "folder", shortcut: nil) {
+                ItemAction(label: "Show in Finder", icon: "folder", shortcut: "\u{2318}\u{23CE}") {
                     showInFinder()
                 },
                 ItemAction(label: "Remove from history", icon: "trash", shortcut: nil) {
@@ -193,14 +193,10 @@ struct OverlayView: View {
                 query = ""
             }
             searchTrigger = UUID()
-            isSearchFocused = true
+            focusSearchField()
         }
         .onAppear {
-            isSearchFocused = true
-            // Delayed fallback for when view appears after a mode swap
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                isSearchFocused = true
-            }
+            focusSearchField()
         }
         .onKeyPress(.upArrow) {
             if showActions {
@@ -242,14 +238,44 @@ struct OverlayView: View {
             }
             return .ignored
         }
-        .background {
-            // Cmd+K to toggle actions menu
-            Button("") {
-                guard !results.isEmpty, selectedIndex < results.count else { return }
-                actionIndex = 0
-                showActions.toggle()
+        .onKeyPress(.tab) {
+            // Tab means "next row", not "complete": no result kind carries a completable keyword
+            // (the DuckDuckGo hint's query already equals the text field), so completing would be
+            // a no-op and stealing Tab for it would break the expected forward-movement behaviour.
+            if showActions {
+                let actions = currentActions
+                guard !actions.isEmpty else { return .ignored }
+                actionIndex = actionIndex >= actions.count - 1 ? 0 : actionIndex + 1
+                return .handled
             }
-            .keyboardShortcut("k", modifiers: .command)
+            guard !results.isEmpty else { return .ignored }
+            selectedIndex = ResultSelection.advanced(selectedIndex, count: results.count)
+            return .handled
+        }
+        .background {
+            Group {
+                // Cmd+K to toggle actions menu
+                Button("") {
+                    guard !results.isEmpty, selectedIndex < results.count else { return }
+                    actionIndex = 0
+                    showActions.toggle()
+                }
+                .keyboardShortcut("k", modifiers: .command)
+
+                // Cmd+Return: secondary action, reveal the selected result's file in Finder.
+                Button("") {
+                    revealSelectedInFinder()
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+
+                // Cmd+1...Cmd+9: open the Nth row directly.
+                ForEach(1 ... 9, id: \.self) { number in
+                    Button("") {
+                        openRow(number)
+                    }
+                    .keyboardShortcut(KeyEquivalent(Character(String(number))), modifiers: .command)
+                }
+            }
             .hidden()
         }
     }
@@ -344,8 +370,7 @@ struct OverlayView: View {
 
     @ViewBuilder
     private func itemIcon(for item: SearchItem) -> some View {
-        if item.kind == .app, let path = item.meta["path"] {
-            let nsImage = NSWorkspace.shared.icon(forFile: path)
+        if item.kind == .app, let path = item.meta["path"], let nsImage = AppIconCache.icon(forPath: path) {
             let isRunning = runningAppPaths.contains(path)
             Image(nsImage: nsImage)
                 .resizable()
@@ -571,6 +596,10 @@ struct OverlayView: View {
                     keyboardHint(key: "\u{23CE}", label: "Open")
                 }
                 keyboardHint(key: "\u{2318}K", label: "Actions")
+                if selectedIndex < results.count, results[selectedIndex].meta["path"] != nil {
+                    keyboardHint(key: "\u{2318}\u{23CE}", label: "Reveal")
+                }
+                keyboardHint(key: "\u{21E5}", label: "Next")
                 keyboardHint(key: "\u{2191}\u{2193}", label: "Navigate")
                 keyboardHint(key: "esc", label: "Close")
             }
@@ -607,6 +636,9 @@ struct OverlayView: View {
     // MARK: - Actions
 
     private func performSearch(_ text: String) {
+        // Captured before the results array is replaced so the refresh can restore the highlight
+        // by identity: every keystroke otherwise snapped the selection back to the first row.
+        let previousSelectionID = selectedIndex < results.count ? results[selectedIndex].id : nil
         runningAppPaths = Set(
             NSWorkspace.shared.runningApplications.compactMap { $0.bundleURL?.path }
         )
@@ -676,7 +708,8 @@ struct OverlayView: View {
             // Group by kind so display order matches navigation order
             results = ResultGrouping.groupByKind(results)
         }
-        selectedIndex = 0
+        // Restore against the grouped array, which is what `selectedIndex` indexes into.
+        selectedIndex = ResultSelection.restoredIndex(of: previousSelectionID, in: results)
         showActions = false
     }
 
@@ -855,13 +888,39 @@ struct OverlayView: View {
         showActions = false
     }
 
+    /// Cmd+Return and the "Show in Finder" action. Only app results carry a file path; hints,
+    /// web searches, scripts, calculator and settings rows have nothing to reveal, so they no-op.
+    private func revealSelectedInFinder() {
+        guard selectedIndex < results.count,
+              let path = results[selectedIndex].meta["path"],
+              FileManager.default.fileExists(atPath: path)
+        else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+        dismissPanel()
+    }
+
     private func showInFinder() {
-        guard selectedIndex < results.count else { return }
-        let item = results[selectedIndex]
-        if let path = item.meta["path"] {
-            NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
-        }
+        revealSelectedInFinder()
         showActions = false
+    }
+
+    /// Cmd+N: open the Nth row directly. Out-of-range caps are a no-op.
+    private func openRow(_ number: Int) {
+        guard let index = ResultSelection.rowIndex(forCommandKey: number, rowCount: results.count)
+        else { return }
+        selectedIndex = index
+        openSelectedItem()
+    }
+
+    /// `@FocusState` written inside the key-change notification lands before the window finishes
+    /// activating, so the field editor starts out unfocused. One run-loop turn is enough; the old
+    /// 50 ms timer was a guess at the same thing.
+    /// Mode swaps need no extra hook: PanelRootView rebuilds this view on the way back to `.search`,
+    /// so `onAppear` runs even though the window never stops being key.
+    private func focusSearchField() {
+        DispatchQueue.main.async {
+            isSearchFocused = true
+        }
     }
 
     private func removeFromHistory() {
