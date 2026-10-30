@@ -1,5 +1,6 @@
 import AppKit
 import os
+import ReluxCore
 import SwiftUI
 
 private let log = Logger(subsystem: "com.relux.app", category: "appstate")
@@ -16,7 +17,7 @@ enum PanelMode {
 final class AppState {
     let appSearcher = AppSearcher()
     let scriptSearcher = ScriptSearcher()
-    let frecency = FrecencyTracker()
+    let frecency = FrecencyTracker(now: Date())
     let extensionRegistry = ExtensionRegistry()
     private let calculatorService = CalculatorService()
     let systemSettingsSearcher = SystemSettingsSearcher()
@@ -41,14 +42,20 @@ final class AppState {
     }
 
     func setup() throws {
-        let clipStore = try ClipboardStore()
+        let fileManager = FileManager.default
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = appSupport.appendingPathComponent("Relux", isDirectory: true)
+        try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        let database = try SQLiteDatabase(path: dir.appendingPathComponent("relux.db").path)
+        try ReluxSchema.migrate(database)
+
+        let clipStore = try ClipboardStore(db: database)
         clipboardStore = clipStore
         let monitor = ClipboardMonitor(store: clipStore)
         clipboardMonitor = monitor
         monitor.start()
 
-        let transStore = try TranslateStore()
-        translateStore = transStore
+        translateStore = TranslateStore(db: database)
 
         // Clean up expired clipboard entries
         let retentionMonths = UserDefaults.standard.object(forKey: "clipboardRetentionMonths") as? Int ?? 3
@@ -107,7 +114,15 @@ final class AppState {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
 
         var all: [SearchItem] = []
-        all += appSearcher.search(trimmed, limit: limit)
+        let tracker = frecency
+        // One instant for the whole query, so every row decays against the same clock.
+        let now = Date()
+        all += appSearcher.search(
+            trimmed,
+            limit: AppSearcher.candidateLimit,
+            usage: { path in tracker.appUsage(query: trimmed, path: path, now: now) },
+            now: now
+        )
         all += scriptSearcher.search(trimmed, limit: limit, stdinValue: stdinValue)
         all += systemSettingsSearcher.search(trimmed, limit: limit)
         all += syntheticItems(query: trimmed, selection: stdinValue)
@@ -119,9 +134,10 @@ final class AppState {
             }
         }
 
-        // Frecency boost applied to ALL items
-        for idx in all.indices {
-            all[idx].score += frecency.boost(query: trimmed, itemId: all[idx].id)
+        // App rows are already ranked with usage by AppSearcher; other kinds get
+        // the usage boost here because they have no fuzzy app ladder.
+        for idx in all.indices where all[idx].kind != .app {
+            all[idx].score += tracker.usageBoost(query: trimmed, itemId: all[idx].id, now: now)
         }
 
         all.sort { $0.score > $1.score }
@@ -215,7 +231,7 @@ final class AppState {
     }
 
     func recordSelection(query: String, item: SearchItem) {
-        frecency.recordSelection(query: query, item: item)
+        frecency.recordSelection(query: query, item: item, now: Date())
     }
 
     func recentItems() -> [SearchItem] {

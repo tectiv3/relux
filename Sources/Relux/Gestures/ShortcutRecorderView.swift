@@ -4,7 +4,6 @@ import SwiftUI
 struct ShortcutRecorderView: View {
     @Binding var keyCombo: KeyCombo?
     @State private var isRecording = false
-    @State private var monitor: Any?
 
     var body: some View {
         Button {
@@ -27,38 +26,43 @@ struct ShortcutRecorderView: View {
                     .frame(minWidth: 100)
             }
         }
+        .background(
+            PanelKeyMonitor(isActive: isRecording, onWindowLost: stopRecording, handler: record)
+        )
         .onDisappear {
-            removeMonitor()
+            stopRecording()
         }
     }
 
     private func startRecording() {
+        guard !isRecording else { return }
         isRecording = true
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let code = event.keyCode
-            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        GlobalHotkeySuspension.suspend()
+    }
 
-            // Escape cancels recording without changing the binding
-            if code == 53 {
-                stopRecording()
-                return nil
-            }
+    /// While recording, every key is consumed (as before) — nothing may reach the
+    /// responder chain or a global hotkey.
+    private func record(_ event: NSEvent) -> NSEvent? {
+        let code = event.keyCode
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
-            keyCombo = KeyCombo(keyCode: code, modifierRawValue: mods.rawValue)
+        // Escape cancels recording without changing the binding
+        if code == 53 {
             stopRecording()
             return nil
         }
+
+        keyCombo = KeyCombo(keyCode: code, modifierRawValue: mods.rawValue)
+        stopRecording()
+        return nil
     }
 
+    /// The only place the suspension is released: the escape/recorded-key paths, the
+    /// button, `.onDisappear` and window close all funnel through here, and the
+    /// `isRecording` guard makes repeats no-ops.
     private func stopRecording() {
+        guard isRecording else { return }
         isRecording = false
-        removeMonitor()
-    }
-
-    private func removeMonitor() {
-        if let m = monitor {
-            NSEvent.removeMonitor(m)
-            monitor = nil
-        }
+        GlobalHotkeySuspension.resume()
     }
 }

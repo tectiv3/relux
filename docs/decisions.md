@@ -4,25 +4,29 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 
 ## Search Architecture
 
-- `SourceNote` replaced with generic `SearchItem` supporting `.note` and `.app` kinds — all future result types extend this
-- Search is instant, as-you-type — keyword matching on VectorStore cache + app name fuzzy matching. No embedding needed for basic search.
-- LLM generation is opt-in only, behind Cmd+K → "Ask AI" action. Never auto-triggers.
+- `SourceNote` replaced with generic `SearchItem` supporting `.note` and `.app` kinds — all future result types extend this *(`.note` removed 2026-10-30 with the notes extension; current kinds are `.app`, `.webSearch`, `.script`, `.translate`, `.calculator`, `.jwt`, `.systemSettings`)*
+- Search is instant, as-you-type — keyword matching plus app name fuzzy matching. No embedding needed for basic search. *(Embeddings/vector search removed 2026-10-30: code removed; docs lagged.)*
+- LLM generation is opt-in only, behind Cmd+K → "Ask AI" action. Never auto-triggers. *(Removed 2026-10-30 alongside the MLX dependencies below: code removed; docs lagged.)*
 - App search uses configurable Spotlight scopes (default includes `/Applications`, Utilities, `/System/Library/CoreServices/Applications`, `~/Applications`); live re-indexes via `NSMetadataQueryDidUpdate`
 - Do NOT use `Bundle(url:)` to read app bundles — triggers App Management permission. Only use `FileManager` + path inspection.
 
 ## Frecency System
 
-- Tracks query→item selections (frequency + recency) to rank results
-- Query normalized to first 4 chars for grouping similar queries
+- Tracks query→item selections to rank results; the scoring lives in `ReluxCore/Search/AppRanking.swift` (`AppUsage`, `UsageBoost`) and `FuzzyMatch.score(query:name:)`
+- `usage: [String: Int]` counts opens per stable identity (the app path for apps, the item id for everything else) — no per-query buckets
+- `learned: [String: String]` maps folded query → identity of the last pick for that query
+- Queries are normalised in exactly one place (`FrecencyTracker.normalizedQuery`: trimmed, case- and diacritic-folded) so recording and lookup cannot disagree
+- Web-search and calculator selections are never recorded (no stable identity)
+- Legacy `"<query prefix>:<item id>" → {count, lastUsed}` files are migrated once on load by summing counts per app path
 - Stores full SearchItem data so recents can be displayed on empty query
-- Data persisted in `~/Library/Application Support/Relux/` (frecency.json, recents.json)
+- Data persisted atomically in `~/Library/Application Support/Relux/` (frecency.json, recents.json)
 
 ## UI Behavior
 
 - Actions menu (Cmd+K) floats as overlay over results (ZStack, bottom-trailing), does NOT replace them
 - Empty query shows up to 8 recently used items
 - Keyboard layout can be forced on panel open (setting in General tab, uses `TISSelectInputSource`)
-- App icons via `NSWorkspace.shared.icon(forFile:)`, notes use SF Symbol `doc.text`
+- App icons via `NSWorkspace.shared.icon(forFile:)`
 
 ## Keyboard Navigation
 
@@ -33,12 +37,15 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 ## Extension Registry
 
 - `ExtensionRegistry` tracks which extensions (search sources) are enabled/disabled, backed by UserDefaults (key pattern: `extension.<id>.enabled`)
-- "Models" settings tab renamed to "Notes" — models are an implementation detail of the notes extension
-- When notes disabled: models fully unloaded (`unloadAll` clears containers + model refs + GPU cache), note search skipped in `performSearch`, `restoreModels` no-ops
-- When notes enabled: models restored via `restoreModels()` (same as app startup)
+- Registration happens inline in `AppState.setup()` with plain string ids — currently `translate`, `calculator`, `jwt`, `gestures`, `volumeHUD`
+- "Models" settings tab renamed to "Notes" — models are an implementation detail of the notes extension *(Notes extension removed 2026-10-30: code removed; docs lagged.)*
+- When notes disabled: models fully unloaded (`unloadAll` clears containers + model refs + GPU cache), note search skipped in `performSearch`, `restoreModels` no-ops *(Removed 2026-10-30: notes/MLX code removed; docs lagged.)*
+- When notes enabled: models restored via `restoreModels()` (same as app startup) *(Removed 2026-10-30: notes/MLX code removed; docs lagged.)*
 - Pattern is general-purpose — scripts, clipboard, apps can register in the same registry for their own toggle
 
-## Model Lifecycle
+## Model Lifecycle (removed)
+
+> **Removed 2026-10-30**: MLX models and the notes extension were deleted from the codebase; docs lagged. Kept for history only.
 
 - Models are NOT loaded at startup — only loaded on first use (lazy loading)
 - After 10 minutes of inactivity, models are unloaded from memory (set containers to nil)
@@ -61,7 +68,7 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Stored in `AppState.currentSelection`, cleared on panel close
 - Scripts opt in via `inputMode: InputMode` (.none/.stdin/.argument) — stdin pipes to process, argument appends shell-escaped value to command
 - Web search uses selection as query when search bar is empty
-- Ask AI prepends selection as context to the LLM prompt
+- Ask AI prepends selection as context to the LLM prompt *(Removed 2026-10-30 with the MLX/LLM code: code removed; docs lagged.)*
 - Bottom bar shows truncated selection preview when captured
 - Requires Accessibility permission (prompted on first launch)
 - Pattern for selection-aware features: any search result item that needs selected text appears only when `currentSelection != nil` (scripts with `inputMode != .none`, translate extension, etc.). The selected text is NOT placed in the search bar — only an indicator is shown. The text is passed to the feature when the user explicitly selects the item.
@@ -164,19 +171,22 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - `SearchItem` carries a `score: Double` field populated by every searcher and synthetic item generator
 - All searchers (AppSearcher, ScriptSearcher, SystemSettingsSearcher) produce scores on a shared global scale (0-1050)
 - Synthetic items (calculator, JWT, translate, web search) are created in `AppState.syntheticItems()` with explicit scores
-- `AppState.performSearch` merges all sources, applies frecency boost additively to ALL item kinds, sorts by score descending, then truncates
+- `AppState.performSearch` merges all sources, sorts by score descending, then truncates
 - No positional manipulation in OverlayView — the view receives a pre-ranked list and renders it
-- Frecency applies to apps, scripts, AND settings (previously settings were excluded)
+- App rows are ranked by `AppSearcher` through the pure `AppRanking.score`: fuzzy tier + newly-detected bonus + usage boost. `AppSearcher` returns up to 50 candidates so usage can promote an app below the visible cut; `AppState` applies the final `prefix(maxSearchResults)`. Both the model and the tracker take an injected `now: Date`; `AppState.performSearch` captures one `Date()` per query so every row ranks against the same instant
+- Non-app rows keep their searcher score and receive the same usage boost in `AppState`; frecency therefore still applies to apps, scripts, AND settings
 - Selection-aware script bonus: +200 to base score (replaces unconditional prepend)
-- Score bands: calculator 1050, JWT keyword 1000, apps exact 950, scripts exact 930, settings exact 850, web search fallback 200, translate 100
+- App fuzzy tiers (higher is better): exact 1000, name prefix 900, initials prefix 800, word prefix 700, substring 500, in-order subsequence `max(1, 300 - gaps * 8)`. Tiers subtract a length penalty `min(name.count, 60)`; the subsequence tier does not
+- App usage boost, evaluated at read time: `min(200, 20 * opens) * 0.5^(age / 30 days)` plus 300 when the app was the last pick for that exact folded query **and** that pick is at most 90 days old. 300 > the widest adjacent tier gap (200), so learning can override the name ladder
+- Score bands: calculator 1050, JWT keyword 1000, apps 1000–500 by fuzzy tier (+50 newly detected, +usage ≤500), scripts exact 930, settings exact 850, web search fallback 200, translate 100
 - See `docs/plans/2026-03-11-unified-search-scoring.md` for full scoring contract
 
 ## Instant Space Switching (4-Finger Swipes)
 
-- Vendored `Sources/ISS/ISS.c` and `ISS.h` from github.com/jurplel/InstantSpaceSwitcher (MIT) unmodified
+- Vendored Space-switching code lives in `Sources/Relux/SpaceSwitch/SpaceSwitch.m|.h` (originally `Sources/ISS/ISS.c|.h` from github.com/jurplel/InstantSpaceSwitcher, MIT)
 - Swift mixed-language support via `Relux-Bridging-Header.h` and `SWIFT_OBJC_BRIDGING_HEADER` setting in project.yml
-- `iss_switch(ISSDirection)` posts synthetic dock-swipe CGEvents with high velocity to skip the macOS space-switch animation
-- Uses private CGS symbols (`CGSMainConnectionID`, `CGSGetActiveSpace`, `CGSCopyManagedDisplaySpaces`) via weak_import for bounds checking
+- `ReluxSwitchSpace(int delta)` requests the switch; the current implementation drives SkyLight's WMBridge sequence instead of synthetic dock-swipe events
+- Uses private SkyLight symbols (`CGSMainConnectionID`, `CGSCopyManagedDisplaySpaces`, `SLSBridgedShowSpacesOperation`/`HideSpaces`/`ManagedDisplaySetCurrentSpaceOperation`) resolved with `dlsym` for bounds checking
 - 4-finger horizontal swipes added to `GestureEngine` alongside existing 3-finger tracking, with separate state machines
 - Default bindings: 4-finger swipe left → `switchSpaceLeft`, right → `switchSpaceRight` (via `SystemAction` enum)
 
@@ -187,7 +197,28 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Float division by zero returns `inf` which is caught by `.isFinite` guard
 - Also fixes the correctness bug where `800/500` evaluated to `1` instead of `1.6`
 
-## 2026-10-06: Volume HUD (planned)
+## Usage Recency Decay and Learned-Pick TTL
+
+> **Status 2026-10-30**: implemented — `Sources/ReluxCore/Search/AppRanking.swift` (`UsageBoost`), `Sources/Relux/Search/FrecencyTracker.swift`.
+
+**Context**: the previous unit stored bare open counts, so usage saturated and never forgot: an app opened 10 times stayed at the full `+200` forever, and a learned pick stayed authoritative forever.
+
+**Decision**:
+- `usage` is `[identity: { opens: Int, lastUsed: Date }]`; `opens += 1` and `lastUsed = now` on every recorded selection.
+- The bonus is computed at read time, the whole bonus decaying as one unit: `min(200, 20 * opens) * 0.5^((now - lastUsed) / 30 days)`. Only the opens bonus decays; the learned pick is binary (`+300` while live).
+- Half-life is **30 days**, a single named constant (`UsageBoost.halfLifeDays`). Rationale: because the whole bonus decays rather than a per-event counter, a 14-day half-life halves everything every fortnight, which forgets a weekly-used app too eagerly; 30 days keeps a weekly app near full weight while letting an abandoned app fade over a quarter.
+- `learned` is `[foldedQuery: { path: String, at: Date }]` with a **hard 90-day TTL**: a pick older than 90 days is ignored at read time and pruned from the file on load and on every write. The boundary is inclusive — exactly 90 days old still applies.
+- Every model function (`UsageBoost.value`, `UsageBoost.decay`, `UsageBoost.isLive`, `AppRanking.score`) and every tracker read (`appUsage`, `usageBoost`) takes an injected `now: Date`; only `AppState` calls `Date()`, so the arithmetic is exactly testable.
+
+**Migration** (all three on-disk shapes load):
+- **Legacy** `["<query prefix>:<itemId>": { count, lastUsed }]` -> group by item id, `opens = sum(count)`, `lastUsed = max(lastUsed)` per identity. The reference-date timestamps are real, so they are preserved rather than replaced with `now`. `learned` starts empty: a 4-character query prefix is not a full folded query, so a prefix -> path record could never match. Non-app ids (`script:`, `settings:`, `translate-selection`) are kept under their item id instead of being dropped.
+- **Previous unit** `{ usage: [identity: Int], learned: [query: String] }` -> `opens` carried over, `lastUsed = now`, each learned pick gets `at = now` (no timestamp was ever stored).
+- **Current shape** loads directly.
+- Written atomically; a migration rewrites only after `recents.json` has been read, so it does not clobber recents.
+
+## 2026-10-06: Volume HUD
+
+> **Status 2026-10-30**: implemented — `Sources/Relux/VolumeHUD/` (`VolumeMonitor`, `VolumeHUDController`, `VolumeHUDView`), registered as `volumeHUD` in `ExtensionRegistry`.
 
 **Context**: macOS 26 moved the volume indicator to a small top-right popover. Hudlum/volumeHUD restore a large overlay; Relux should offer the same.
 

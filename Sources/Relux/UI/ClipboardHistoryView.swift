@@ -1,3 +1,4 @@
+import ReluxCore
 import SwiftUI
 
 private enum ClipboardContentType: String, CaseIterable {
@@ -64,9 +65,10 @@ struct ClipboardHistoryView: View {
         cachedFilteredEntries = result.filter { entry in
             let text = entry.textContent ?? ""
             let firstLine = String(text.split(separator: "\n", maxSplits: 1).first ?? "")
+            let maxSpan = query.count * 2
             return text.lowercased().contains(query)
-                || fuzzyMatch(query: query, target: firstLine)
-                || fuzzyMatch(query: query, target: entry.sourceName ?? "")
+                || FuzzyMatch.matches(query, in: firstLine.lowercased(), maxSpan: maxSpan)
+                || FuzzyMatch.matches(query, in: (entry.sourceName ?? "").lowercased(), maxSpan: maxSpan)
         }.sorted { $0.updatedAt > $1.updatedAt }
     }
 
@@ -281,7 +283,9 @@ struct ClipboardHistoryView: View {
         }
 
         for (index, entry) in items.enumerated() {
-            if !isFiltering, entry.isPinned { continue }
+            if !isFiltering, entry.isPinned {
+                continue
+            }
 
             let label: String = if calendar.isDateInToday(entry.updatedAt) {
                 "Today"
@@ -412,7 +416,11 @@ struct ClipboardHistoryView: View {
         guard !query.isEmpty else { return result }
 
         let titleLower = title.lowercased()
-        guard let matchedIndices = fuzzyMatchIndices(query: query, target: titleLower) else {
+        guard let matchedIndices = FuzzyMatch.matchedIndices(
+            of: query,
+            in: titleLower,
+            maxSpan: query.count * 2
+        ) else {
             return result
         }
 
@@ -426,45 +434,6 @@ struct ClipboardHistoryView: View {
         }
 
         return result
-    }
-
-    /// Returns matched character indices for the tightest fuzzy match, or nil if no match.
-    /// Tries exact substring first, then fuzzy with span limit.
-    private func fuzzyMatchIndices(query: String, target: String) -> [String.Index]? {
-        // Exact substring
-        if let range = target.range(of: query) {
-            return Array(target[range].indices)
-        }
-        // Fuzzy: try each occurrence of the first char, pick tightest
-        let queryChars = Array(query)
-        guard let firstChar = queryChars.first else { return nil }
-        let maxSpan = query.count * 2
-        var bestIndices: [String.Index]?
-        var bestSpan = Int.max
-
-        var startSearch = target.startIndex
-        while let anchor = target[startSearch...].firstIndex(of: firstChar) {
-            var indices = [anchor]
-            var idx = target.index(after: anchor)
-            var matched = true
-            for char in queryChars.dropFirst() {
-                guard let found = target[idx...].firstIndex(of: char) else {
-                    matched = false
-                    break
-                }
-                indices.append(found)
-                idx = target.index(after: found)
-            }
-            if matched {
-                let span = target.distance(from: anchor, to: indices.last!) + 1
-                if span <= maxSpan, span < bestSpan {
-                    bestSpan = span
-                    bestIndices = indices
-                }
-            }
-            startSearch = target.index(after: anchor)
-        }
-        return bestIndices
     }
 
     // MARK: - Preview Panel
@@ -544,7 +513,7 @@ struct ClipboardHistoryView: View {
                     infoRow(label: "Dimensions") { Text("\(width)×\(height)") }
                 }
                 if let size = entry.imageSize {
-                    infoRow(label: "Image size") { Text(formatBytes(size)) }
+                    infoRow(label: "Image size") { Text(Formatting.bytes(size)) }
                 }
             } else {
                 if let count = entry.charCount {
@@ -556,7 +525,7 @@ struct ClipboardHistoryView: View {
             }
 
             infoRow(label: "Copied") {
-                Text(formatTime(entry.createdAt))
+                Text(Formatting.time(entry.createdAt))
             }
         }
         .font(.system(size: 12))
@@ -801,67 +770,6 @@ struct ClipboardHistoryView: View {
         typeFilter = nil
         recomputeFilteredEntries()
         selectedIndex = cachedFilteredEntries.firstIndex(where: { !$0.isPinned }) ?? 0
-    }
-
-    // MARK: - Helpers
-
-    /// Fuzzy subsequence match with span limit.
-    /// Tries every occurrence of the first query char as a starting point
-    /// and returns true if any produces a tight enough match.
-    private func fuzzyMatch(query: String, target: String) -> Bool {
-        let target = target.lowercased()
-        let queryChars = Array(query)
-        guard let firstChar = queryChars.first else { return false }
-        let maxSpan = query.count * 2
-
-        var startSearch = target.startIndex
-        while let anchor = target[startSearch...].firstIndex(of: firstChar) {
-            var idx = target.index(after: anchor)
-            var matched = true
-            for char in queryChars.dropFirst() {
-                guard let found = target[idx...].firstIndex(of: char) else {
-                    matched = false
-                    break
-                }
-                idx = target.index(after: found)
-            }
-            if matched {
-                let lastIdx = target.index(before: idx)
-                let span = target.distance(from: anchor, to: lastIdx) + 1
-                if span <= maxSpan { return true }
-            }
-            startSearch = target.index(after: anchor)
-        }
-        return false
-    }
-
-    private func formatBytes(_ bytes: Int) -> String {
-        let kilobytes = Double(bytes) / 1024
-        if kilobytes < 1024 {
-            return String(format: "%.0f KB", kilobytes)
-        }
-        return String(format: "%.1f MB", kilobytes / 1024)
-    }
-
-    private static let todayTimeFormatter: DateFormatter = {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "'Today at' HH:mm:ss"
-        return fmt
-    }()
-
-    private static let dateTimeFormatter: DateFormatter = {
-        let fmt = DateFormatter()
-        fmt.dateStyle = .medium
-        fmt.timeStyle = .short
-        return fmt
-    }()
-
-    private func formatTime(_ date: Date) -> String {
-        if Calendar.current.isDateInToday(date) {
-            Self.todayTimeFormatter.string(from: date)
-        } else {
-            Self.dateTimeFormatter.string(from: date)
-        }
     }
 }
 
