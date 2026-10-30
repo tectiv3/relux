@@ -47,6 +47,7 @@ struct SettingsView: View {
             availableInputSources = Self.getKeyboardLayouts()
             showMaxResults = appState.settings.maxSearchResults
             searchPaths = appState.appSearcher.searchPaths
+            scriptsModel.attach(appState.scriptSearcher)
         }
     }
 
@@ -180,8 +181,7 @@ struct SettingsView: View {
 
     // MARK: - Scripts Tab
 
-    @State private var expandedScriptId: String?
-    @State private var editingScript: ScriptItem?
+    @State private var scriptsModel = ScriptsSettingsModel()
 
     private var scriptsTab: some View {
         Form {
@@ -189,7 +189,7 @@ struct SettingsView: View {
                 Text("Scripts")
                 Spacer()
                 Button {
-                    appState.scriptSearcher.load()
+                    scriptsModel.reload()
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 11))
@@ -197,27 +197,22 @@ struct SettingsView: View {
                 .buttonStyle(.borderless)
                 .help("Reload scripts from disk")
             }) {
-                if appState.scriptSearcher.scripts.isEmpty {
+                if scriptsModel.scripts.isEmpty {
                     Text("No scripts added yet")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(appState.scriptSearcher.scripts) { script in
+                    ForEach(scriptsModel.scripts) { script in
                         scriptRow(script)
                     }
                 }
 
                 // Show draft row for unsaved new script
-                if let draft = editingScript,
-                   !appState.scriptSearcher.scripts.contains(where: { $0.id == draft.id })
-                {
+                if let draft = scriptsModel.editingScript, !scriptsModel.isPersisted(draft) {
                     scriptRow(draft)
                 }
 
                 Button {
-                    commitEditing()
-                    let draft = ScriptItem(title: "", command: "")
-                    expandedScriptId = draft.id
-                    editingScript = draft
+                    scriptsModel.beginAdding()
                 } label: {
                     Label("Add Script", systemImage: "plus")
                 }
@@ -225,15 +220,15 @@ struct SettingsView: View {
             }
 
             Section {
-                ForEach(appState.scriptSearcher.envVars) { envVar in
+                ForEach(scriptsModel.envVars) { envVar in
                     EnvVarRow(envVar: envVar) { updated in
-                        appState.scriptSearcher.updateEnvVar(updated)
+                        scriptsModel.updateEnvVar(updated)
                     } onDelete: {
-                        appState.scriptSearcher.removeEnvVar(id: envVar.id)
+                        scriptsModel.removeEnvVar(id: envVar.id)
                     }
                 }
                 Button {
-                    appState.scriptSearcher.addEnvVar()
+                    scriptsModel.addEnvVar()
                 } label: {
                     Label("Add Variable", systemImage: "plus")
                 }
@@ -244,12 +239,12 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
-        .onDisappear { commitEditing() }
+        .onDisappear { scriptsModel.commitEditing() }
     }
 
     @ViewBuilder
     private func scriptRow(_ script: ScriptItem) -> some View {
-        let isExpanded = expandedScriptId == script.id
+        let isExpanded = scriptsModel.expandedScriptId == script.id
 
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -275,13 +270,7 @@ struct SettingsView: View {
                 }
 
                 Button(role: .destructive) {
-                    if appState.scriptSearcher.scripts.contains(where: { $0.id == script.id }) {
-                        appState.scriptSearcher.remove(id: script.id)
-                    }
-                    if expandedScriptId == script.id {
-                        expandedScriptId = nil
-                        editingScript = nil
-                    }
+                    scriptsModel.remove(script)
                 } label: {
                     Image(systemName: "trash")
                 }
@@ -290,18 +279,11 @@ struct SettingsView: View {
             .contentShape(Rectangle())
             .onTapGesture {
                 withAnimation(.easeInOut(duration: 0.15)) {
-                    commitEditing()
-                    if isExpanded {
-                        expandedScriptId = nil
-                        editingScript = nil
-                    } else {
-                        expandedScriptId = script.id
-                        editingScript = script
-                    }
+                    scriptsModel.toggleExpansion(of: script)
                 }
             }
 
-            if isExpanded, editingScript != nil {
+            if isExpanded, scriptsModel.editingScript != nil {
                 Divider()
                     .padding(.vertical, 6)
 
@@ -334,20 +316,20 @@ struct SettingsView: View {
 
     @ViewBuilder
     private func scriptEditForm() -> some View {
-        if editingScript != nil {
+        if scriptsModel.editingScript != nil {
             VStack(alignment: .leading, spacing: 12) {
                 scriptFieldRow("Title") {
                     TextField("", text: Binding(
-                        get: { editingScript?.title ?? "" },
-                        set: { editingScript?.title = $0 }
+                        get: { scriptsModel.editingScript?.title ?? "" },
+                        set: { scriptsModel.editingScript?.title = $0 }
                     ), prompt: Text("Script title").foregroundStyle(.tertiary))
                         .textFieldStyle(.roundedBorder)
                 }
 
                 scriptFieldRow("Command") {
                     TextField("", text: Binding(
-                        get: { editingScript?.command ?? "" },
-                        set: { editingScript?.command = $0 }
+                        get: { scriptsModel.editingScript?.command ?? "" },
+                        set: { scriptsModel.editingScript?.command = $0 }
                     ), prompt: Text("Shell command").foregroundStyle(.tertiary))
                         .font(.system(size: 12, design: .monospaced))
                         .textFieldStyle(.roundedBorder)
@@ -384,8 +366,8 @@ struct SettingsView: View {
                 .textCase(.uppercase)
 
             Picker("", selection: Binding(
-                get: { editingScript?.inputMode ?? .none },
-                set: { editingScript?.inputMode = $0 }
+                get: { scriptsModel.editingScript?.inputMode ?? .none },
+                set: { scriptsModel.editingScript?.inputMode = $0 }
             )) {
                 ForEach(InputMode.allCases, id: \.self) { mode in
                     Text(mode.label).tag(mode)
@@ -394,12 +376,15 @@ struct SettingsView: View {
             .pickerStyle(.segmented)
             .frame(width: 220)
 
-            if editingScript?.inputMode.acceptsInput == true {
+            if scriptsModel.editingScript?.inputMode.acceptsInput == true {
                 Picker("Filter", selection: Binding(
-                    get: { editingScript?.inputFilter.tag ?? "any" },
+                    get: { scriptsModel.editingScript?.inputFilter.tag ?? "any" },
                     set: { newValue in
-                        let pattern = editingScript?.inputFilter.regexPattern
-                        editingScript?.inputFilter = InputFilter.fromTag(newValue, existingPattern: pattern)
+                        let pattern = scriptsModel.editingScript?.inputFilter.regexPattern
+                        scriptsModel.editingScript?.inputFilter = InputFilter.fromTag(
+                            newValue,
+                            existingPattern: pattern
+                        )
                     }
                 )) {
                     Text("Any").tag("any")
@@ -412,11 +397,11 @@ struct SettingsView: View {
                 }
                 .frame(width: 220)
 
-                if editingScript?.inputFilter.regexPattern != nil {
+                if scriptsModel.editingScript?.inputFilter.regexPattern != nil {
                     scriptFieldRow("Pattern") {
                         TextField("", text: Binding(
-                            get: { editingScript?.inputFilter.regexPattern ?? "" },
-                            set: { editingScript?.inputFilter = .regex($0) }
+                            get: { scriptsModel.editingScript?.inputFilter.regexPattern ?? "" },
+                            set: { scriptsModel.editingScript?.inputFilter = .regex($0) }
                         ), prompt: Text("Regular expression").foregroundStyle(.tertiary))
                             .font(.system(size: 11, design: .monospaced))
                             .textFieldStyle(.roundedBorder)
@@ -434,8 +419,8 @@ struct SettingsView: View {
                 .textCase(.uppercase)
 
             Picker("", selection: Binding(
-                get: { editingScript?.outputMode ?? .none },
-                set: { editingScript?.outputMode = $0 }
+                get: { scriptsModel.editingScript?.outputMode ?? .none },
+                set: { scriptsModel.editingScript?.outputMode = $0 }
             )) {
                 ForEach(ScriptOutputMode.allCases, id: \.self) { mode in
                     Text(mode.label).tag(mode)
@@ -443,20 +428,6 @@ struct SettingsView: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 220)
-        }
-    }
-
-    private func commitEditing() {
-        guard let editing = editingScript else { return }
-        let exists = appState.scriptSearcher.scripts.contains { $0.id == editing.id }
-        if editing.title.isEmpty, editing.command.isEmpty {
-            if exists {
-                appState.scriptSearcher.remove(id: editing.id)
-            }
-        } else if exists {
-            appState.scriptSearcher.update(editing)
-        } else {
-            appState.scriptSearcher.insert(editing)
         }
     }
 

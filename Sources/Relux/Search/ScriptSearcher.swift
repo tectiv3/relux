@@ -208,13 +208,19 @@ final class ScriptSearcher {
     private let storePath: URL
     private let envPath: URL
 
-    init() {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = support.appendingPathComponent("Relux", isDirectory: true)
+    /// `directory` defaults to `~/Library/Application Support/Relux`; tests pass a temporary
+    /// directory so they never touch the real script store.
+    init(directory: URL? = nil) {
+        let dir = directory ?? Self.defaultDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         storePath = dir.appendingPathComponent("scripts.json")
         envPath = dir.appendingPathComponent("env.json")
         load()
+    }
+
+    private static var defaultDirectory: URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return support.appendingPathComponent("Relux", isDirectory: true)
     }
 
     // MARK: - Script Mutations

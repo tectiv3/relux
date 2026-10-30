@@ -231,3 +231,23 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - `AppState` owns the controller. Feature code lives in `Sources/Relux/VolumeHUD/`; display selection is factored into `Sources/Relux/Util/DisplaySelection.swift`, extracted from `AppDelegate.movePanelToActiveDisplay()` so the panel and HUD share it. New directories are auto-globbed by XcodeGen (no `project.yml` change).
 - Brightness, retro style, native HUD suppression, and configurable position/duration are explicit non-goals.
 - Full spec: `docs/plans/2026-10-06-volume-hud-design.md`
+
+## 2026-10-30: Scripts settings logic moved out of `SettingsView`
+
+**Context**: the Scripts tab did its CRUD directly against `AppState.scriptSearcher` across ~11 call sites, interleaved with the draft state, so the commit ordering was untestable.
+
+**Decision**: `Sources/Relux/Search/ScriptsSettingsModel.swift` (`@MainActor @Observable`) owns the draft (`editingScript`), the expanded row, the env-var mutations and the commit rule; `SettingsView` keeps only the form bindings and calls the model. The model was added to the `ReluxTests` sources in `project.yml`, so it had to stay SwiftUI-free.
+
+- `ScriptSearcher.init(directory: URL? = nil)` — the default is still `~/Library/Application Support/Relux`, but tests inject a temp directory instead of writing to the real store.
+- Behaviour preserved exactly, including the one rule (`commitEditing`): empty title **and** empty command discards the draft, or deletes the script if it was already persisted. Titles stay unconstrained (an empty title renders as "Untitled") and duplicates stay allowed. An earlier draft of this unit added title/duplicate validation; it was reverted because it changed behaviour and would have stopped an existing "Untitled" script from being re-saved.
+- No reorder and no per-script enabled toggle were added: the view has neither, and adding them was out of scope.
+
+## 2026-10-30: App display name is normalised where a name is stored and where recents are read
+
+**Context**: `AppSearcher` ranked and displayed Spotlight's `kMDItemDisplayName`, which keeps the extension (`"Microsoft Remote Desktop.app"`). Rows disagreed depending on which source found the app, and the ranker scored a 4-character-longer string than the user sees, which shifts the `min(name.count, 60)` length penalty and puts the exact-name tier out of reach for every app. Live `recents.json` also held the old titles, so the recents list kept showing `.app` after the scan was fixed.
+
+**Decision**:
+- `ReluxCore` `AppDisplayName.from(bundleName:)` is the single implementation: it strips one trailing `.app` case-insensitively and passes everything else through. `AppItem.init` applies it, and so does `FrecencyTracker` on both sides of its snapshot store.
+- Values that are *identities*, not names, keep the extension: `SearchItem.id` (`app:<path>`), `usage` keys and `learned` paths are bundle paths, so matching a rescan keeps working. Only `title` is normalised.
+- Recents are normalised on **read**, not migrated: `FrecencyTracker.displayTitle(kind:id:title:)` applies the helper in `recentItems()` (and when a pick is recorded), so `recents.json` is left byte-identical by a pure read. Rewriting 123 user entries to fix a cosmetic string was not worth an atomic write on launch, and the stale titles disappear as entries are re-picked.
+- The discriminator is `StoredItem.kind == "app"` **and** an `app:`-prefixed id, because both are stored on every entry. `kind` alone is not sufficient evidence — a script legitimately named `deploy.app` must keep its name — and the id prefix corroborates that the snapshot really came from the app searcher. No path-shape guessing (`/Applications` …) is used.
