@@ -45,6 +45,8 @@ else
     -scheme "$SCHEME" \
     -destination 'generic/platform=macOS' \
     -archivePath "$ARCHIVE_PATH" \
+    -skipPackageUpdates -skipMacroValidation \
+    OTHER_SWIFT_FLAGS='$(inherited) -Xfrontend -disable-sandbox' \
     CODE_SIGN_IDENTITY="$IDENTITY" \
     DEVELOPMENT_TEAM="$TEAM_ID" \
     CODE_SIGN_STYLE=Manual \

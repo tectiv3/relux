@@ -28,6 +28,10 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.relux.core
         PRODUCT_NAME: ReluxCore
+        # Without this the framework is installed as a second product inside the
+        # archive, which makes xcodebuild omit ApplicationProperties and breaks
+        # Developer ID export (IDEDistribution sees an empty method set).
+        SKIP_INSTALL: "YES"
         DYLIB_INSTALL_NAME_BASE: "@rpath"
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks @loader_path/Frameworks"
         MARKETING_VERSION: "1.11.0"
