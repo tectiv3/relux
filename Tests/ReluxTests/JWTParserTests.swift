@@ -276,6 +276,90 @@ final class JWTParserTests: XCTestCase {
                        "Expired · \(compactInstant(expiry))")
     }
 
+    // MARK: - Badge refresh schedule
+
+    func testNoTransitionWithoutTemporalClaims() {
+        let claims = JWTClaims(issuedAt: Date(timeIntervalSince1970: 1000))
+        XCTAssertNil(claims.nextStateTransition(after: Date(timeIntervalSince1970: 2000)))
+        XCTAssertNil(claims.badgeRefreshDelay(after: Date(timeIntervalSince1970: 2000)))
+        XCTAssertNil(JWTClaims().badgeRefreshDelay(after: Date(timeIntervalSince1970: 2000)))
+    }
+
+    func testNoTransitionOnceExpired() {
+        let claims = JWTClaims(expiresAt: Date(timeIntervalSince1970: 1000))
+        XCTAssertNil(claims.nextStateTransition(after: Date(timeIntervalSince1970: 1000)))
+        XCTAssertNil(claims.badgeRefreshDelay(after: Date(timeIntervalSince1970: 1500)))
+    }
+
+    func testNoTransitionOnceNotBeforePassed() {
+        let claims = JWTClaims(notBefore: Date(timeIntervalSince1970: 1000))
+        XCTAssertEqual(claims.nextStateTransition(after: Date(timeIntervalSince1970: 999)),
+                       Date(timeIntervalSince1970: 1000))
+        XCTAssertNil(claims.badgeRefreshDelay(after: Date(timeIntervalSince1970: 1001)))
+    }
+
+    func testTransitionDelayToExpiry() {
+        let claims = JWTClaims(expiresAt: Date(timeIntervalSince1970: 1060))
+        XCTAssertEqual(claims.badgeRefreshDelay(after: Date(timeIntervalSince1970: 1000)), 60)
+    }
+
+    func testTransitionSchedulesNotBeforeFirst() {
+        let claims = JWTClaims(
+            notBefore: Date(timeIntervalSince1970: 1030),
+            expiresAt: Date(timeIntervalSince1970: 1060)
+        )
+        XCTAssertEqual(claims.badgeRefreshDelay(after: Date(timeIntervalSince1970: 1000)), 30)
+        // After `nbf` passes the only boundary left is `exp`.
+        XCTAssertEqual(claims.badgeRefreshDelay(after: Date(timeIntervalSince1970: 1031)), 29)
+        XCTAssertNil(claims.badgeRefreshDelay(after: Date(timeIntervalSince1970: 1060)))
+    }
+
+    func testTransitionSchedulesNotBeforeEvenWhenExpiryAlreadyPassed() {
+        let claims = JWTClaims(
+            notBefore: Date(timeIntervalSince1970: 2000),
+            expiresAt: Date(timeIntervalSince1970: 1000)
+        )
+        XCTAssertEqual(claims.nextStateTransition(after: Date(timeIntervalSince1970: 1500)),
+                       Date(timeIntervalSince1970: 2000))
+    }
+
+    /// The state flip the panel relies on: the badge says `Valid` before the
+    /// scheduled wake and `Expired` at it, with no user interaction in between.
+    func testBadgeFlipsFromValidToExpiredAtScheduledTransition() throws {
+        let expiry = Date(timeIntervalSince1970: 1_516_242_622)
+        let claims = JWTClaims(expiresAt: expiry)
+        let openedAt = expiry.addingTimeInterval(-60)
+
+        let delay = try XCTUnwrap(claims.badgeRefreshDelay(after: openedAt))
+        XCTAssertEqual(delay, 60)
+        XCTAssertEqual(badge(claims, at: openedAt)?.text,
+                       "Valid · expires \(compactInstant(expiry))")
+
+        let wake = expiry
+        XCTAssertEqual(badge(claims, at: wake)?.text, "Expired · \(compactInstant(expiry))")
+        XCTAssertEqual(badge(claims, at: wake)?.tone, .critical)
+        XCTAssertNil(claims.badgeRefreshDelay(after: wake))
+    }
+
+    /// A token that is not yet valid schedules its own transition and then
+    /// keeps only the `exp` boundary.
+    func testBadgeFlipsFromNotYetValidToValidAtScheduledTransition() throws {
+        let notBefore = Date(timeIntervalSince1970: 1_516_242_622)
+        let claims = JWTClaims(
+            notBefore: notBefore,
+            expiresAt: notBefore.addingTimeInterval(3600)
+        )
+        let openedAt = notBefore.addingTimeInterval(-30)
+
+        let delay = try XCTUnwrap(claims.badgeRefreshDelay(after: openedAt))
+        XCTAssertEqual(delay, 30)
+        let wake = notBefore
+        XCTAssertEqual(badge(claims, at: openedAt)?.tone, .warning)
+        XCTAssertEqual(badge(claims, at: wake)?.text,
+                       "Valid · expires \(compactInstant(notBefore.addingTimeInterval(3600)))")
+        XCTAssertEqual(claims.badgeRefreshDelay(after: wake), 3600)
+    }
+
     // MARK: - Timestamp tooltips
 
     func testTimestampTooltipForIntegerSeconds() {

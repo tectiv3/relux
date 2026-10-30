@@ -8,6 +8,9 @@ private let log = Logger(subsystem: "com.relux.app", category: "jwt")
 struct JWTView: View {
     @Environment(AppState.self) private var appState
     @State private var inputText: String = ""
+    /// The instant the badge is rendered for. Advanced by the boundary-scheduled
+    /// refresh below, so a token can expire while the panel is open.
+    @State private var badgeInstant = Date()
     @State private var menu = ActionSelection()
     @FocusState private var isInputFocused: Bool
 
@@ -39,9 +42,13 @@ struct JWTView: View {
         tokenParts.isValid
     }
 
-    private var expiryBadge: JWTExpiryBadge? {
+    private var claims: JWTClaims? {
         guard isValidJWT else { return nil }
-        return JWTParser.claims(ofToken: inputText)?.expiryBadge()
+        return JWTParser.claims(ofToken: inputText)
+    }
+
+    private var expiryBadge: JWTExpiryBadge? {
+        claims?.expiryBadge(at: badgeInstant)
     }
 
     private var currentActions: [Action] {
@@ -114,6 +121,25 @@ struct JWTView: View {
             }
         }
         .background(PanelKeyMonitor(handler: handlePanelKey))
+        // One task per token. It sleeps until the next `nbf`/`exp` boundary,
+        // refreshes the badge, and exits once the claims have no transition
+        // left. Re-keyed on the token and cancelled by SwiftUI when the view
+        // leaves the hierarchy, so no timer outlives the panel.
+        .task(id: inputText) {
+            badgeInstant = Date()
+            while let claims,
+                  let delay = claims.badgeRefreshDelay(after: Date())
+            {
+                do {
+                    // Waking a hair early is self-correcting: the next pass
+                    // sees a smaller positive delay and sleeps again.
+                    try await Task.sleep(for: .seconds(delay))
+                } catch {
+                    return
+                }
+                badgeInstant = Date()
+            }
+        }
     }
 
     // MARK: - Top Bar
