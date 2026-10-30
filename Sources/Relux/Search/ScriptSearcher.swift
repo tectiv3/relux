@@ -1,5 +1,6 @@
 import Foundation
 import os
+import ReluxCore
 
 private let logger = Logger(subsystem: "com.relux.app", category: "ScriptSearcher")
 
@@ -57,7 +58,9 @@ enum InputFilter: Codable, Equatable {
     }
 
     var regexPattern: String? {
-        if case let .regex(pattern) = self { return pattern }
+        if case let .regex(pattern) = self {
+            return pattern
+        }
         return nil
     }
 
@@ -279,7 +282,7 @@ final class ScriptSearcher {
                 scored.append((script, 780))
             } else if name.contains(lowercasedQuery) {
                 scored.append((script, 580))
-            } else if fuzzyMatch(query: lowercasedQuery, target: name) {
+            } else if FuzzyMatch.matches(lowercasedQuery, in: name) {
                 scored.append((script, 330))
             } else if script.inputMode.acceptsInput {
                 if script.inputFilter.matches(query) {
@@ -340,14 +343,5 @@ final class ScriptSearcher {
     private func saveEnv() {
         guard let data = try? JSONEncoder().encode(envVars) else { return }
         try? data.write(to: envPath, options: .atomic)
-    }
-
-    private func fuzzyMatch(query: String, target: String) -> Bool {
-        var targetIdx = target.startIndex
-        for char in query {
-            guard let found = target[targetIdx...].firstIndex(of: char) else { return false }
-            targetIdx = target.index(after: found)
-        }
-        return true
     }
 }

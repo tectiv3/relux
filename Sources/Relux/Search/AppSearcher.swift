@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ReluxCore
 
 struct AppItem {
     let name: String
@@ -183,7 +184,7 @@ final class AppSearcher {
                 scored.append((app, 800 + bonus))
             } else if name.contains(lowercasedQuery) {
                 scored.append((app, 600 + bonus))
-            } else if fuzzyMatch(query: lowercasedQuery, target: name) {
+            } else if FuzzyMatch.matches(lowercasedQuery, in: name) {
                 scored.append((app, 350 + bonus))
             }
         }
@@ -201,14 +202,5 @@ final class AppSearcher {
                 score: item.score
             )
         }
-    }
-
-    private func fuzzyMatch(query: String, target: String) -> Bool {
-        var targetIdx = target.startIndex
-        for char in query {
-            guard let found = target[targetIdx...].firstIndex(of: char) else { return false }
-            targetIdx = target.index(after: found)
-        }
-        return true
     }
 }

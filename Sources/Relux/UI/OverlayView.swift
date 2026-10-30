@@ -1,3 +1,4 @@
+import ReluxCore
 import SwiftUI
 
 struct PanelRootView: View {
@@ -420,9 +421,15 @@ struct OverlayView: View {
 
     private func relativeTime(_ date: Date) -> String {
         let seconds = Int(-date.timeIntervalSinceNow)
-        if seconds < 60 { return "Updated just now" }
-        if seconds < 3600 { return "Updated \(seconds / 60)m ago" }
-        if seconds < 86400 { return "Updated \(seconds / 3600)h ago" }
+        if seconds < 60 {
+            return "Updated just now"
+        }
+        if seconds < 3600 {
+            return "Updated \(seconds / 60)m ago"
+        }
+        if seconds < 86400 {
+            return "Updated \(seconds / 3600)h ago"
+        }
         return "Updated \(seconds / 86400)d ago"
     }
 
@@ -639,7 +646,9 @@ struct OverlayView: View {
                 // 2. Filter recents
                 recents.removeAll { item in
                     // Remove if it's already in matching list (to avoid duplicates and ensure promotion)
-                    if matchingIds.contains(item.id) { return true }
+                    if matchingIds.contains(item.id) {
+                        return true
+                    }
 
                     // Remove if it's a script that accepts selection but doesn't match the current one
                     // (Using fresh script definition instead of stale meta)
@@ -653,9 +662,9 @@ struct OverlayView: View {
                     return false
                 }
 
-                results = groupByKind(matching + selectionItems + recents)
+                results = ResultGrouping.groupByKind(matching + selectionItems + recents)
             } else {
-                results = groupByKind(selectionItems + recents)
+                results = ResultGrouping.groupByKind(selectionItems + recents)
             }
         } else {
             results = appState.performSearch(query: trimmed, stdinValue: appState.currentSelection)
@@ -665,22 +674,10 @@ struct OverlayView: View {
             results = results.filter { seen.insert($0.id).inserted }
 
             // Group by kind so display order matches navigation order
-            results = groupByKind(results)
+            results = ResultGrouping.groupByKind(results)
         }
         selectedIndex = 0
         showActions = false
-    }
-
-    private func groupByKind(_ items: [SearchItem]) -> [SearchItem] {
-        var kindOrder: [SearchItemKind] = []
-        var buckets: [SearchItemKind: [SearchItem]] = [:]
-        for item in items {
-            if buckets[item.kind] == nil {
-                kindOrder.append(item.kind)
-            }
-            buckets[item.kind, default: []].append(item)
-        }
-        return kindOrder.flatMap { buckets[$0] ?? [] }
     }
 
     private func kindLabel(for item: SearchItem) -> String {

@@ -1,5 +1,6 @@
 import AppKit
 import os
+import ReluxCore
 import SwiftUI
 
 private let log = Logger(subsystem: "com.relux.app", category: "appstate")

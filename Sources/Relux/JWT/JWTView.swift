@@ -1,5 +1,6 @@
 import AppKit
 import os
+import ReluxCore
 import SwiftUI
 
 private let log = Logger(subsystem: "com.relux.app", category: "jwt")
@@ -12,32 +13,32 @@ struct JWTView: View {
     @State private var keyMonitor: Any?
     @FocusState private var isInputFocused: Bool
 
-    private var tokenParts: [String] {
-        inputText.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: ".")
+    private var tokenParts: JWTParts {
+        JWTParser.parts(of: inputText)
     }
 
     private var headerPart: String {
-        tokenParts.indices.contains(0) ? tokenParts[0] : ""
+        tokenParts.header
     }
 
     private var payloadPart: String {
-        tokenParts.indices.contains(1) ? tokenParts[1] : ""
+        tokenParts.payload
     }
 
     private var signaturePart: String {
-        tokenParts.indices.contains(2) ? tokenParts[2] : ""
+        tokenParts.signature
     }
 
     private var decodedHeader: String {
-        decodeBase64(headerPart)
+        JWTParser.decodedSegment(headerPart)
     }
 
     private var decodedPayload: String {
-        decodeBase64(payloadPart)
+        JWTParser.decodedSegment(payloadPart)
     }
 
     private var isValidJWT: Bool {
-        tokenParts.count >= 2 && !headerPart.isEmpty && !payloadPart.isEmpty
+        tokenParts.isValid
     }
 
     private var currentActions: [JWTAction] {
@@ -427,32 +428,6 @@ extension JWTView {
             keyMonitor = nil
         }
     }
-
-    func decodeBase64(_ string: String) -> String {
-        var base64 = string
-            .replacingOccurrences(of: "-", with: "+")
-            .replacingOccurrences(of: "_", with: "/")
-
-        let length = Double(base64.lengthOfBytes(using: .utf8))
-        let requiredLength = 4 * ceil(length / 4.0)
-        let paddingLength = requiredLength - length
-        if paddingLength > 0 {
-            base64 += "".padding(toLength: Int(paddingLength), withPad: "=", startingAt: 0)
-        }
-
-        guard let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters),
-              let json = try? JSONSerialization.jsonObject(with: data, options: []),
-              let prettyData = try? JSONSerialization.data(
-                  withJSONObject: json,
-                  options: [.prettyPrinted, .sortedKeys]
-              ),
-              let prettyString = String(data: prettyData, encoding: .utf8)
-        else {
-            return ""
-        }
-
-        return prettyString
-    }
 }
 
 struct JWTAction {
@@ -468,22 +443,10 @@ private struct TimestampAnnotatedText: View {
     let text: String
     let color: Color
 
-    /// Unix timestamps between 2001-01-01 and 2100-01-01
-    private static let timestampRange: ClosedRange<Double> = 978_307_200 ... 4_102_444_800
-
-    private static let dateFormatter: DateFormatter = {
-        let fmt = DateFormatter()
-        fmt.dateStyle = .full
-        fmt.timeStyle = .long
-        return fmt
-    }()
-
-    private static let timestampPattern = /:\s*(\d{10,13})\b/
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(text.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
-                if let tooltip = Self.timestampTooltip(for: line) {
+                if let tooltip = JWTParser.timestampTooltip(forLine: line) {
                     Text(line)
                         .help(tooltip)
                 } else {
@@ -494,18 +457,5 @@ private struct TimestampAnnotatedText: View {
         .font(.system(size: 13, design: .monospaced))
         .foregroundColor(color)
         .textSelection(.enabled)
-    }
-
-    private static func timestampTooltip(for line: String) -> String? {
-        guard let match = line.firstMatch(of: timestampPattern),
-              let value = Double(match.1)
-        else { return nil }
-
-        // Support both seconds (10 digits) and milliseconds (13 digits)
-        let seconds = value > 9_999_999_999 ? value / 1000 : value
-        guard timestampRange.contains(seconds) else { return nil }
-
-        let date = Date(timeIntervalSince1970: seconds)
-        return dateFormatter.string(from: date)
     }
 }

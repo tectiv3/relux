@@ -6,21 +6,62 @@ options:
   xcodeVersion: "16.3"
   generateEmptyDirectories: true
 
+# Debug is active-arch only: the KeyboardShortcuts package is built for the active
+# arch, so a universal Debug app build cannot resolve its x86_64 module.
+settings:
+  configs:
+    Debug:
+      ONLY_ACTIVE_ARCH: "YES"
+
 packages:
   KeyboardShortcuts:
     url: https://github.com/sindresorhus/KeyboardShortcuts
     from: 2.0.0
 
 targets:
+  ReluxCore:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/ReluxCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.relux.core
+        PRODUCT_NAME: ReluxCore
+        DYLIB_INSTALL_NAME_BASE: "@rpath"
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks @loader_path/Frameworks"
+        MARKETING_VERSION: "1.11.0"
+        CURRENT_PROJECT_VERSION: 1
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: "YES"
+
+  ReluxTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/ReluxTests
+    dependencies:
+      - target: ReluxCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.relux.tests
+        PRODUCT_NAME: ReluxTests
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @loader_path/../Frameworks @executable_path/../Frameworks"
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: "YES"
+
   Relux:
     type: application
     platform: macOS
     sources:
       - path: Sources/Relux
-        excludes:
-          - Calculator/CalculatorServiceTests.swift
     dependencies:
       - package: KeyboardShortcuts
+      - target: ReluxCore
     settings:
       base:
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
@@ -41,3 +82,24 @@ targets:
       path: Sources/Relux/Relux.entitlements
       properties:
         com.apple.security.automation.apple-events: true
+
+schemes:
+  Relux:
+    build:
+      targets:
+        Relux: all
+        ReluxCore: all
+        ReluxTests:
+          - test
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - ReluxTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

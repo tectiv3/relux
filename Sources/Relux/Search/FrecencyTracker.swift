@@ -1,4 +1,5 @@
 import Foundation
+import ReluxCore
 
 /// Tracks which search results the user selects, boosting frequently/recently chosen items.
 @MainActor
