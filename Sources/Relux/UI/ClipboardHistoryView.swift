@@ -1,12 +1,7 @@
 import ReluxCore
 import SwiftUI
 
-private enum ClipboardContentType: String, CaseIterable {
-    case text
-    case image
-    case richText
-    case color
-
+private extension ClipboardTypeFilter {
     var label: String {
         switch self {
         case .text: "Text"
@@ -25,71 +20,30 @@ private enum ClipboardContentType: String, CaseIterable {
         }
     }
 
-    func matches(_ contentType: String) -> Bool {
-        switch self {
-        case .text: contentType == ContentType.text
-        case .image: contentType == ContentType.image
-        case .richText: contentType == ContentType.rtf || contentType == ContentType.html
-        case .color: contentType == ContentType.color
-        }
+    func title(isActive: Bool) -> String {
+        isActive ? "Clear Filter" : "Show \(label) Only"
     }
 }
 
 struct ClipboardHistoryView: View {
     @Environment(AppState.self) private var appState
-    @State private var filter: String = ""
-    @State private var entries: [ClipboardEntry] = []
-    @State private var selectedIndex: Int = 0
+    @State private var model = ClipboardListModel()
     @State private var showActions: Bool = false
     @State private var actionIndex: Int = 0
-    @State private var typeFilter: ClipboardContentType?
-    @State private var cachedFilteredEntries: [ClipboardEntry] = []
     @FocusState private var isFilterFocused: Bool
-
-    private var filteredEntries: [ClipboardEntry] {
-        cachedFilteredEntries
-    }
-
-    private func recomputeFilteredEntries() {
-        var result = entries
-        let hasTypeFilter = typeFilter != nil
-        if let typeFilter {
-            result = result.filter { typeFilter.matches($0.contentType) }
-        }
-        let query = filter.trimmingCharacters(in: .whitespaces).lowercased()
-        if query.isEmpty {
-            cachedFilteredEntries = hasTypeFilter
-                ? result.sorted { $0.updatedAt > $1.updatedAt } : result
-            return
-        }
-        cachedFilteredEntries = result.filter { entry in
-            let text = entry.textContent ?? ""
-            let firstLine = String(text.split(separator: "\n", maxSplits: 1).first ?? "")
-            let maxSpan = query.count * 2
-            return text.lowercased().contains(query)
-                || FuzzyMatch.matches(query, in: firstLine.lowercased(), maxSpan: maxSpan)
-                || FuzzyMatch.matches(query, in: (entry.sourceName ?? "").lowercased(), maxSpan: maxSpan)
-        }.sorted { $0.updatedAt > $1.updatedAt }
-    }
-
-    private var selectedEntry: ClipboardEntry? {
-        let items = filteredEntries
-        guard selectedIndex >= 0, selectedIndex < items.count else { return nil }
-        return items[selectedIndex]
-    }
 
     private var previousAppName: String {
         appState.previousApp?.localizedName ?? "App"
     }
 
     private var currentActions: [ClipAction] {
-        guard let entry = selectedEntry else { return [] }
+        guard let entry = model.selectedEntry else { return [] }
         var actions: [ClipAction] = [
             ClipAction(label: "Paste to \(previousAppName)", icon: "doc.on.clipboard.fill", shortcut: "⏎") {
-                pasteEntry(entry, formatted: false)
+                model.paste(entry)
             },
             ClipAction(label: "Copy to Clipboard", icon: "doc.on.clipboard", shortcut: "⌘⏎") {
-                copyEntry(entry)
+                model.copy(entry)
             },
         ]
         if entry.contentType == ContentType.rtf || entry.contentType == ContentType.html {
@@ -97,28 +51,27 @@ struct ClipboardHistoryView: View {
                 label: "Paste Formatted to \(previousAppName)",
                 icon: "textformat", shortcut: "⌘⇧⏎"
             ) {
-                pasteEntry(entry, formatted: true)
+                model.paste(entry, formatted: true)
             })
         }
         actions.append(ClipAction(label: "Delete", icon: "trash", shortcut: "⌫") {
-            deleteEntry(entry)
+            model.delete(entry)
         })
         if entry.isPinned {
             actions.append(ClipAction(label: "Unpin", icon: "pin.slash", shortcut: nil) {
-                togglePin(entry)
+                model.togglePin(entry)
             })
         } else {
             actions.append(ClipAction(label: "Pin", icon: "pin", shortcut: nil) {
-                togglePin(entry)
+                model.togglePin(entry)
             })
         }
-        for filterType in ClipboardContentType.allCases {
+        for filterType in ClipboardTypeFilter.allCases {
+            let isActive = model.typeFilter == filterType
             actions.append(ClipAction(
-                label: typeFilter == filterType ? "Clear Filter" : "Show \(filterType.label) Only",
-                icon: filterType.icon, shortcut: nil
+                label: filterType.title(isActive: isActive), icon: filterType.icon, shortcut: nil
             ) {
-                typeFilter = typeFilter == filterType ? nil : filterType
-                selectedIndex = 0
+                model.setTypeFilter(isActive ? nil : filterType)
                 showActions = false
             })
         }
@@ -131,7 +84,7 @@ struct ClipboardHistoryView: View {
             topBar
             Divider()
 
-            if let typeFilter {
+            if let typeFilter = model.typeFilter {
                 HStack(spacing: 4) {
                     Image(systemName: typeFilter.icon)
                         .font(.system(size: 11))
@@ -145,18 +98,17 @@ struct ClipboardHistoryView: View {
                 .padding(.vertical, 4)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.15)))
                 .onTapGesture {
-                    self.typeFilter = nil
-                    selectedIndex = 0
+                    model.setTypeFilter(nil)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16)
                 .padding(.top, 6)
             }
 
-            if filteredEntries.isEmpty {
-                let message = if entries.isEmpty {
+            if model.filteredEntries.isEmpty {
+                let message = if model.entries.isEmpty {
                     "No clipboard history"
-                } else if let typeFilter {
+                } else if let typeFilter = model.typeFilter {
                     "No \(typeFilter.label.lowercased()) in history"
                 } else {
                     "No matches"
@@ -186,7 +138,8 @@ struct ClipboardHistoryView: View {
             }
         }
         .onAppear {
-            loadEntries()
+            model.attach(to: appState)
+            model.reload()
             isFilterFocused = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 isFilterFocused = true
@@ -194,7 +147,7 @@ struct ClipboardHistoryView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             guard appState.panelMode == .clipboard else { return }
-            loadEntries()
+            model.reload()
             isFilterFocused = true
         }
         .onKeyPress { keyPress in
@@ -203,7 +156,7 @@ struct ClipboardHistoryView: View {
         .background {
             // Cmd+K to toggle actions
             Button("") {
-                guard selectedEntry != nil else { return }
+                guard model.selectedEntry != nil else { return }
                 actionIndex = 0
                 showActions.toggle()
             }
@@ -212,8 +165,8 @@ struct ClipboardHistoryView: View {
 
             // Cmd+Enter to copy to clipboard
             Button("") {
-                guard let entry = selectedEntry else { return }
-                copyEntry(entry)
+                guard let entry = model.selectedEntry else { return }
+                model.copy(entry)
             }
             .keyboardShortcut(.return, modifiers: .command)
             .hidden()
@@ -239,20 +192,13 @@ struct ClipboardHistoryView: View {
             .buttonStyle(.plain)
             .focusable(false)
 
-            TextField("Type to filter entries...", text: $filter)
-                .textFieldStyle(.plain)
-                .font(.system(size: 16))
-                .focused($isFilterFocused)
-                .onChange(of: filter) { _, _ in
-                    recomputeFilteredEntries()
-                    selectedIndex = 0
-                }
-                .onChange(of: typeFilter) { _, _ in
-                    recomputeFilteredEntries()
-                }
-                .onChange(of: entries) { _, _ in
-                    recomputeFilteredEntries()
-                }
+            TextField("Type to filter entries...", text: Binding(
+                get: { model.searchText },
+                set: { model.searchText = $0 }
+            ))
+            .textFieldStyle(.plain)
+            .font(.system(size: 16))
+            .focused($isFilterFocused)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -261,9 +207,9 @@ struct ClipboardHistoryView: View {
     // MARK: - List Panel
 
     private var groupedEntries: [(label: String, items: [(index: Int, entry: ClipboardEntry)])] {
-        let items = filteredEntries
+        let items = model.filteredEntries
         let calendar = Calendar.current
-        let isFiltering = !filter.trimmingCharacters(in: .whitespaces).isEmpty || typeFilter != nil
+        let isFiltering = model.isFiltering
 
         var groups: [(label: String, items: [(index: Int, entry: ClipboardEntry)])] = []
         var currentLabel = ""
@@ -325,22 +271,22 @@ struct ClipboardHistoryView: View {
                             .padding(.bottom, 2)
 
                         ForEach(section.items, id: \.entry.id) { index, entry in
-                            entryRow(entry: entry, isSelected: index == selectedIndex)
+                            entryRow(entry: entry, isSelected: index == model.selectedIndex)
                                 .id(entry.id)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
-                                    selectedIndex = index
+                                    model.select(row: index)
                                 }
                                 .onTapGesture(count: 2) {
-                                    selectedIndex = index
-                                    pasteEntry(entry, formatted: false)
+                                    model.select(row: index)
+                                    model.paste(entry)
                                 }
                         }
                     }
                 }
             }
-            .onChange(of: selectedIndex) { _, newIndex in
-                let items = filteredEntries
+            .onChange(of: model.selectedIndex) { _, newIndex in
+                let items = model.filteredEntries
                 if newIndex >= 0, newIndex < items.count {
                     withAnimation {
                         proxy.scrollTo(items[newIndex].id, anchor: .center)
@@ -412,18 +358,11 @@ struct ClipboardHistoryView: View {
     private func highlightedTitle(for entry: ClipboardEntry, isSelected: Bool) -> AttributedString {
         let title = entryTitle(for: entry)
         var result = AttributedString(title)
-        let query = filter.lowercased()
-        guard !query.isEmpty else { return result }
-
-        let titleLower = title.lowercased()
-        guard let matchedIndices = FuzzyMatch.matchedIndices(
-            of: query,
-            in: titleLower,
-            maxSpan: query.count * 2
-        ) else {
+        guard let matchedIndices = model.matchedIndices(in: title) else {
             return result
         }
 
+        let titleLower = title.lowercased()
         let highlightColor: Color = isSelected ? .white.opacity(0.5) : .accentColor
         for idx in matchedIndices {
             let offset = titleLower.distance(from: titleLower.startIndex, to: idx)
@@ -440,7 +379,7 @@ struct ClipboardHistoryView: View {
 
     private var previewPanel: some View {
         VStack(spacing: 0) {
-            if let entry = selectedEntry {
+            if let entry = model.selectedEntry {
                 if let text = entry.textContent, let nsColor = ColorParser.parse(text) {
                     let color = Color(nsColor: nsColor)
                     VStack(spacing: 16) {
@@ -457,8 +396,7 @@ struct ClipboardHistoryView: View {
                 } else {
                     ScrollView {
                         VStack(alignment: .leading) {
-                            if entry.contentType == ContentType.image, let imagePath = entry.imagePath {
-                                let url = appState.clipboardStore!.imageDir.appendingPathComponent(imagePath)
+                            if entry.contentType == ContentType.image, let url = model.imageURL(for: entry) {
                                 if let nsImage = NSImage(contentsOf: url) {
                                     Image(nsImage: nsImage)
                                         .resizable()
@@ -556,7 +494,7 @@ struct ClipboardHistoryView: View {
 
             Spacer()
 
-            if selectedEntry != nil {
+            if model.selectedEntry != nil {
                 keyboardHint(key: "⏎", label: "Paste to \(previousAppName)")
                 keyboardHint(key: "⌦", label: "Delete")
             }
@@ -589,7 +527,7 @@ struct ClipboardHistoryView: View {
             HStack {
                 Spacer()
                 VStack(spacing: 0) {
-                    if let entry = selectedEntry {
+                    if let entry = model.selectedEntry {
                         HStack(spacing: 6) {
                             Image(systemName: entryIcon(for: entry))
                                 .font(.system(size: 11))
@@ -657,14 +595,12 @@ struct ClipboardHistoryView: View {
                 showActions = false
                 return .handled
             }
-            if typeFilter != nil {
-                typeFilter = nil
-                selectedIndex = 0
+            if model.typeFilter != nil {
+                model.setTypeFilter(nil)
                 return .handled
             }
-            if !filter.isEmpty {
-                filter = ""
-                selectedIndex = 0
+            if !model.searchText.isEmpty {
+                model.resetSearch()
                 return .handled
             }
             return .ignored
@@ -675,9 +611,7 @@ struct ClipboardHistoryView: View {
                 guard !currentActions.isEmpty else { return .ignored }
                 actionIndex = actionIndex <= 0 ? currentActions.count - 1 : actionIndex - 1
             } else {
-                let items = filteredEntries
-                guard !items.isEmpty else { return .ignored }
-                selectedIndex = selectedIndex <= 0 ? items.count - 1 : selectedIndex - 1
+                guard model.selectPrevious() else { return .ignored }
             }
             return .handled
         }
@@ -687,9 +621,7 @@ struct ClipboardHistoryView: View {
                 guard !currentActions.isEmpty else { return .ignored }
                 actionIndex = actionIndex >= currentActions.count - 1 ? 0 : actionIndex + 1
             } else {
-                let items = filteredEntries
-                guard !items.isEmpty else { return .ignored }
-                selectedIndex = selectedIndex >= items.count - 1 ? 0 : selectedIndex + 1
+                guard model.selectNext() else { return .ignored }
             }
             return .handled
         }
@@ -701,75 +633,20 @@ struct ClipboardHistoryView: View {
                 showActions = false
                 return .handled
             }
-            guard let entry = selectedEntry else { return .ignored }
-            pasteEntry(entry, formatted: false)
+            guard let entry = model.selectedEntry else { return .ignored }
+            model.paste(entry)
             return .handled
         }
         // Forward delete — delete selected entry
         if keyPress.key == .deleteForward {
-            if !showActions, let entry = selectedEntry {
-                deleteEntry(entry)
+            if !showActions, let entry = model.selectedEntry {
+                model.delete(entry)
                 return .handled
             }
             return .ignored
         }
 
         return .ignored
-    }
-
-    // MARK: - Actions
-
-    private func pasteEntry(_ entry: ClipboardEntry, formatted: Bool) {
-        appState.clipboardStore?.bumpTimestamp(id: entry.id)
-        if entry.contentType == ContentType.image, let imagePath = entry.imagePath {
-            let url = appState.clipboardStore!.imageDir.appendingPathComponent(imagePath)
-            PasteService.pasteImage(at: url, monitor: appState.clipboardMonitor)
-        } else if let text = entry.textContent {
-            let rtfData = formatted ? appState.clipboardStore?.fetchRawData(id: entry.id) : nil
-            PasteService.pasteText(text, asRichText: rtfData, monitor: appState.clipboardMonitor)
-        }
-    }
-
-    private func copyEntry(_ entry: ClipboardEntry) {
-        appState.clipboardStore?.bumpTimestamp(id: entry.id)
-        if let text = entry.textContent {
-            let rtfData = appState.clipboardStore?.fetchRawData(id: entry.id)
-            PasteService.copyToClipboard(text, asRichText: rtfData, monitor: appState.clipboardMonitor)
-        }
-        NSApp.keyWindow?.close()
-    }
-
-    private func deleteEntry(_ entry: ClipboardEntry) {
-        try? appState.clipboardStore?.delete(id: entry.id)
-        entries.removeAll { $0.id == entry.id }
-        recomputeFilteredEntries()
-        selectedIndex = min(selectedIndex, max(0, filteredEntries.count - 1))
-        showActions = false
-    }
-
-    private func togglePin(_ entry: ClipboardEntry) {
-        if entry.isPinned {
-            appState.clipboardStore?.unpin(id: entry.id)
-        } else {
-            appState.clipboardStore?.pin(id: entry.id)
-        }
-        let entryId = entry.id
-        entries = appState.clipboardStore?.fetchAll() ?? []
-        recomputeFilteredEntries()
-        if let newIndex = filteredEntries.firstIndex(where: { $0.id == entryId }) {
-            selectedIndex = newIndex
-        } else {
-            selectedIndex = min(selectedIndex, max(0, filteredEntries.count - 1))
-        }
-        showActions = false
-    }
-
-    private func loadEntries() {
-        entries = appState.clipboardStore?.fetchAll() ?? []
-        filter = ""
-        typeFilter = nil
-        recomputeFilteredEntries()
-        selectedIndex = cachedFilteredEntries.firstIndex(where: { !$0.isPinned }) ?? 0
     }
 }
 

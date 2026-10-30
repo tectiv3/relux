@@ -4,15 +4,26 @@ import SwiftUI
 struct TranslateView: View {
     @Environment(AppState.self) private var appState
     @State private var inputText: String = ""
-    @State private var entries: [TranslationEntry] = []
     @State private var selectedIndex: Int = 0
     @State private var showActions: Bool = false
     @State private var actionIndex: Int = 0
-    @State private var isTranslating: Bool = false
-    @State private var streamedText: String = ""
-    @State private var streamingTask: Task<Void, Never>?
-    @State private var activeEntryId: Int64?
     @FocusState private var isInputFocused: Bool
+
+    private var service: TranslationService? {
+        appState.translationService
+    }
+
+    private var entries: [TranslationEntry] {
+        service?.entries ?? []
+    }
+
+    private var isTranslating: Bool {
+        service?.isTranslating ?? false
+    }
+
+    private var streamedText: String {
+        service?.streamedText ?? ""
+    }
 
     private var languages: [String] {
         let stored = UserDefaults.standard.stringArray(forKey: "translateLanguages") ?? ["English"]
@@ -47,7 +58,7 @@ struct TranslateView: View {
             topBar
             Divider()
 
-            if entries.isEmpty, !isTranslating {
+            if entries.isEmpty, !isTranslating, service?.failureMessage == nil {
                 Text("No translation history")
                     .font(.system(size: 13))
                     .foregroundColor(.secondary)
@@ -76,7 +87,7 @@ struct TranslateView: View {
             if selectedLanguage.isEmpty {
                 selectedLanguage = languages.first ?? "English"
             }
-            loadEntries()
+            service?.reload()
             if let selection = appState.currentSelection, !selection.isEmpty {
                 inputText = selection
                 appState.currentSelection = nil
@@ -130,7 +141,7 @@ struct TranslateView: View {
     private var topBar: some View {
         HStack(spacing: 8) {
             Button {
-                streamingTask?.cancel()
+                service?.cancel()
                 appState.panelMode = .search
             } label: {
                 Image(systemName: "arrow.left")
@@ -277,6 +288,16 @@ struct TranslateView: View {
     private var previewPanel: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                if let failure = service?.failureMessage, !isTranslating {
+                    Text(failure)
+                        .textSelection(.enabled)
+                        .font(.system(size: 13))
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Divider().padding(.vertical, 4)
+                }
+
                 if isTranslating, selectedIndex == 0 {
                     if streamedText.isEmpty {
                         HStack(spacing: 6) {
@@ -296,7 +317,7 @@ struct TranslateView: View {
                     Divider().padding(.vertical, 4)
                     infoRow(label: "Source", content: inputText)
                     infoRow(label: "To", content: selectedLanguage)
-                    infoRow(label: "Model", content: appState.anthropicService.model)
+                    infoRow(label: "Model", content: service?.model ?? "")
                 } else if let entry = selectedEntry {
                     Text(entry.translatedText)
                         .textSelection(.enabled)
@@ -483,52 +504,10 @@ struct TranslateView: View {
 
     private func translateCurrent() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty, let service else { return }
 
-        let lang = selectedLanguage
-        let hash = TranslationEntry.hash(source: text, target: lang)
-
-        // Reuse existing translation if available
-        if let store = appState.translateStore,
-           let existing = store.findByHash(hash)
-        {
-            store.bumpTimestamp(id: existing.id)
-            loadEntries()
-            selectedIndex = 0
-            return
-        }
-
-        streamingTask?.cancel()
-        isTranslating = true
-        streamedText = ""
         selectedIndex = 0
-
-        let model = appState.anthropicService.model
-
-        if let store = appState.translateStore,
-           let id = try? store.insert(
-               sourceText: text, translatedText: "",
-               sourceLang: nil, targetLang: lang, model: model
-           )
-        {
-            activeEntryId = id
-        }
-
-        streamingTask = Task { @MainActor in
-            var full = ""
-            for await chunk in appState.anthropicService.translate(text: text, targetLanguage: lang) {
-                full += chunk
-                streamedText = full
-            }
-
-            if let id = activeEntryId, let store = appState.translateStore {
-                try? store.updateTranslation(id: id, translatedText: full)
-            }
-
-            isTranslating = false
-            activeEntryId = nil
-            loadEntries()
-        }
+        Task { await service.translate(text, targetLanguage: selectedLanguage) }
     }
 
     private func retranslate(_ entry: TranslationEntry) {
@@ -536,29 +515,8 @@ struct TranslateView: View {
         inputText = entry.sourceText
         selectedLanguage = entry.targetLang
 
-        streamingTask?.cancel()
-        isTranslating = true
-        streamedText = ""
-        activeEntryId = entry.id
-
-        streamingTask = Task { @MainActor in
-            var full = ""
-            for await chunk in appState.anthropicService.translate(
-                text: entry.sourceText,
-                targetLanguage: entry.targetLang
-            ) {
-                full += chunk
-                streamedText = full
-            }
-
-            if let store = appState.translateStore {
-                try? store.updateTranslation(id: entry.id, translatedText: full)
-            }
-
-            isTranslating = false
-            activeEntryId = nil
-            loadEntries()
-        }
+        guard let service else { return }
+        Task { await service.retranslate(entry) }
     }
 
     private func copyTranslation(_ entry: TranslationEntry) {
@@ -568,16 +526,11 @@ struct TranslateView: View {
     }
 
     private func deleteEntry(_ entry: TranslationEntry) {
-        try? appState.translateStore?.delete(id: entry.id)
-        entries.removeAll { $0.id == entry.id }
+        service?.delete(entryId: entry.id)
         if selectedIndex >= entries.count {
             selectedIndex = max(0, entries.count - 1)
         }
         showActions = false
-    }
-
-    private func loadEntries() {
-        entries = appState.translateStore?.fetchAll() ?? []
     }
 
     private func formatTime(_ date: Date) -> String {
