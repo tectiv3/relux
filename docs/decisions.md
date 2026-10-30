@@ -4,9 +4,9 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 
 ## Search Architecture
 
-- `SourceNote` replaced with generic `SearchItem` supporting `.note` and `.app` kinds — all future result types extend this
-- Search is instant, as-you-type — keyword matching on VectorStore cache + app name fuzzy matching. No embedding needed for basic search.
-- LLM generation is opt-in only, behind Cmd+K → "Ask AI" action. Never auto-triggers.
+- `SourceNote` replaced with generic `SearchItem` supporting `.note` and `.app` kinds — all future result types extend this *(`.note` removed 2026-10-30 with the notes extension; current kinds are `.app`, `.webSearch`, `.script`, `.translate`, `.calculator`, `.jwt`, `.systemSettings`)*
+- Search is instant, as-you-type — keyword matching plus app name fuzzy matching. No embedding needed for basic search. *(Embeddings/vector search removed 2026-10-30: code removed; docs lagged.)*
+- LLM generation is opt-in only, behind Cmd+K → "Ask AI" action. Never auto-triggers. *(Removed 2026-10-30 alongside the MLX dependencies below: code removed; docs lagged.)*
 - App search uses configurable Spotlight scopes (default includes `/Applications`, Utilities, `/System/Library/CoreServices/Applications`, `~/Applications`); live re-indexes via `NSMetadataQueryDidUpdate`
 - Do NOT use `Bundle(url:)` to read app bundles — triggers App Management permission. Only use `FileManager` + path inspection.
 
@@ -22,7 +22,7 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Actions menu (Cmd+K) floats as overlay over results (ZStack, bottom-trailing), does NOT replace them
 - Empty query shows up to 8 recently used items
 - Keyboard layout can be forced on panel open (setting in General tab, uses `TISSelectInputSource`)
-- App icons via `NSWorkspace.shared.icon(forFile:)`, notes use SF Symbol `doc.text`
+- App icons via `NSWorkspace.shared.icon(forFile:)`
 
 ## Keyboard Navigation
 
@@ -33,12 +33,15 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 ## Extension Registry
 
 - `ExtensionRegistry` tracks which extensions (search sources) are enabled/disabled, backed by UserDefaults (key pattern: `extension.<id>.enabled`)
-- "Models" settings tab renamed to "Notes" — models are an implementation detail of the notes extension
-- When notes disabled: models fully unloaded (`unloadAll` clears containers + model refs + GPU cache), note search skipped in `performSearch`, `restoreModels` no-ops
-- When notes enabled: models restored via `restoreModels()` (same as app startup)
+- Registration happens inline in `AppState.setup()` with plain string ids — currently `translate`, `calculator`, `jwt`, `gestures`, `volumeHUD`
+- "Models" settings tab renamed to "Notes" — models are an implementation detail of the notes extension *(Notes extension removed 2026-10-30: code removed; docs lagged.)*
+- When notes disabled: models fully unloaded (`unloadAll` clears containers + model refs + GPU cache), note search skipped in `performSearch`, `restoreModels` no-ops *(Removed 2026-10-30: notes/MLX code removed; docs lagged.)*
+- When notes enabled: models restored via `restoreModels()` (same as app startup) *(Removed 2026-10-30: notes/MLX code removed; docs lagged.)*
 - Pattern is general-purpose — scripts, clipboard, apps can register in the same registry for their own toggle
 
-## Model Lifecycle
+## Model Lifecycle (removed)
+
+> **Removed 2026-10-30**: MLX models and the notes extension were deleted from the codebase; docs lagged. Kept for history only.
 
 - Models are NOT loaded at startup — only loaded on first use (lazy loading)
 - After 10 minutes of inactivity, models are unloaded from memory (set containers to nil)
@@ -61,7 +64,7 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Stored in `AppState.currentSelection`, cleared on panel close
 - Scripts opt in via `inputMode: InputMode` (.none/.stdin/.argument) — stdin pipes to process, argument appends shell-escaped value to command
 - Web search uses selection as query when search bar is empty
-- Ask AI prepends selection as context to the LLM prompt
+- Ask AI prepends selection as context to the LLM prompt *(Removed 2026-10-30 with the MLX/LLM code: code removed; docs lagged.)*
 - Bottom bar shows truncated selection preview when captured
 - Requires Accessibility permission (prompted on first launch)
 - Pattern for selection-aware features: any search result item that needs selected text appears only when `currentSelection != nil` (scripts with `inputMode != .none`, translate extension, etc.). The selected text is NOT placed in the search bar — only an indicator is shown. The text is passed to the feature when the user explicitly selects the item.
@@ -173,10 +176,10 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 
 ## Instant Space Switching (4-Finger Swipes)
 
-- Vendored `Sources/ISS/ISS.c` and `ISS.h` from github.com/jurplel/InstantSpaceSwitcher (MIT) unmodified
+- Vendored Space-switching code lives in `Sources/Relux/SpaceSwitch/SpaceSwitch.m|.h` (originally `Sources/ISS/ISS.c|.h` from github.com/jurplel/InstantSpaceSwitcher, MIT)
 - Swift mixed-language support via `Relux-Bridging-Header.h` and `SWIFT_OBJC_BRIDGING_HEADER` setting in project.yml
-- `iss_switch(ISSDirection)` posts synthetic dock-swipe CGEvents with high velocity to skip the macOS space-switch animation
-- Uses private CGS symbols (`CGSMainConnectionID`, `CGSGetActiveSpace`, `CGSCopyManagedDisplaySpaces`) via weak_import for bounds checking
+- `ReluxSwitchSpace(int delta)` requests the switch; the current implementation drives SkyLight's WMBridge sequence instead of synthetic dock-swipe events
+- Uses private SkyLight symbols (`CGSMainConnectionID`, `CGSCopyManagedDisplaySpaces`, `SLSBridgedShowSpacesOperation`/`HideSpaces`/`ManagedDisplaySetCurrentSpaceOperation`) resolved with `dlsym` for bounds checking
 - 4-finger horizontal swipes added to `GestureEngine` alongside existing 3-finger tracking, with separate state machines
 - Default bindings: 4-finger swipe left → `switchSpaceLeft`, right → `switchSpaceRight` (via `SystemAction` enum)
 
@@ -187,7 +190,9 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - Float division by zero returns `inf` which is caught by `.isFinite` guard
 - Also fixes the correctness bug where `800/500` evaluated to `1` instead of `1.6`
 
-## 2026-10-06: Volume HUD (planned)
+## 2026-10-06: Volume HUD
+
+> **Status 2026-10-30**: implemented — `Sources/Relux/VolumeHUD/` (`VolumeMonitor`, `VolumeHUDController`, `VolumeHUDView`), registered as `volumeHUD` in `ExtensionRegistry`.
 
 **Context**: macOS 26 moved the volume indicator to a small top-right popover. Hudlum/volumeHUD restore a large overlay; Relux should offer the same.
 
