@@ -70,27 +70,30 @@ final class ClipboardListModelTests: XCTestCase {
 
     // MARK: - Filtering
 
+    /// Search now goes through the FTS index, so it matches whole words and their prefixes across
+    /// the entire retained history instead of running the fuzzy matcher over the loaded page.
+    /// Source names are not in the index: `MATCH` covers `text_content` only.
     @MainActor
-    func testSearchMatchesBodyFirstLineAndSourceName() throws {
+    func testSearchMatchesWordsAnywhereInTheBody() throws {
         let (_, store) = try makeStore()
         let deploy = try insertText("deploy the build\nsecond line", into: store)
         try insertText("unrelated body", into: store)
-        let safari = try insertText("x", sourceName: "Safari", into: store)
+        try insertText("x", sourceName: "Safari", into: store)
 
         let model = ClipboardListModel(store: store)
         model.reload()
         XCTAssertEqual(model.entries.count, 3, "an empty query keeps every row")
 
-        model.searchText = "dpl"
-        XCTAssertEqual(model.filteredEntries.map(\.id), [deploy.id], "first line fuzzy match")
+        model.searchText = "depl"
+        XCTAssertEqual(model.filteredEntries.map(\.id), [deploy.id], "a word prefix matches")
 
         model.searchText = "second"
-        XCTAssertEqual(model.filteredEntries.map(\.id), [deploy.id], "whole body substring match")
+        XCTAssertEqual(model.filteredEntries.map(\.id), [deploy.id], "the whole body is searchable, not just line one")
 
-        model.searchText = "sfr"
-        XCTAssertEqual(model.filteredEntries.map(\.id), [safari.id], "source name fuzzy match")
+        model.searchText = "Saf"
+        XCTAssertTrue(model.filteredEntries.isEmpty, "source names are not part of the FTS index")
 
-        model.searchText = "  DPL  "
+        model.searchText = "  DEPL  "
         XCTAssertEqual(model.filteredEntries.map(\.id), [deploy.id], "the query is trimmed and folded")
 
         model.searchText = "zzz"
@@ -102,17 +105,17 @@ final class ClipboardListModelTests: XCTestCase {
     func testSearchResetsSelectionToTheTop() throws {
         let (_, store) = try makeStore()
         try insertText("alpha", into: store)
-        try insertText("beta", into: store)
+        try insertText("alpine", into: store)
 
         let model = ClipboardListModel(store: store)
         model.reload()
         model.select(row: 1)
-        XCTAssertEqual(model.selectedEntry?.textContent, "alpha", "newest row first, so row 1 is the older one")
+        XCTAssertEqual(model.selectedIndex, 1)
 
-        model.searchText = "a"
+        model.searchText = "al"
         XCTAssertEqual(model.filteredEntries.count, 2)
         XCTAssertEqual(model.selectedIndex, 0, "typing resets the selection, as the panel did before")
-        XCTAssertEqual(model.selectedEntry?.textContent, "beta")
+        XCTAssertNotNil(model.selectedEntry)
     }
 
     @MainActor
@@ -146,23 +149,24 @@ final class ClipboardListModelTests: XCTestCase {
     @MainActor
     func testUnfilteredListKeepsStoreOrder() throws {
         let (database, store) = try makeStore()
-        try insertText("newest", into: store)
-        try insertText("oldest", into: store)
-        try insertText("pinned", into: store)
+        try insertText("newest note", into: store)
+        try insertText("oldest note", into: store)
+        try insertText("pinned note", into: store)
         try database.execute("UPDATE clipboard_history SET updated_at = 5000 WHERE id = 1")
         try database.execute("UPDATE clipboard_history SET updated_at = 1000 WHERE id = 2")
         try database.execute("UPDATE clipboard_history SET updated_at = 100, pinned_at = 200 WHERE id = 3")
 
         let model = ClipboardListModel(store: store)
         model.reload()
-        XCTAssertEqual(model.filteredEntries.map(\.textContent), ["pinned", "newest", "oldest"])
+        XCTAssertEqual(model.filteredEntries.map(\.textContent), ["pinned note", "newest note", "oldest note"])
 
-        model.searchText = "e"
+        model.searchText = "note"
         XCTAssertEqual(
-            model.filteredEntries.map(\.textContent),
-            ["newest", "oldest", "pinned"],
-            "a query re-sorts by recency; pinned-first order is the store's and only survives unfiltered"
+            model.filteredEntries.first?.textContent,
+            "pinned note",
+            "a query keeps the pinned row first; the ordering is pinned, then relevance, then recency"
         )
+        XCTAssertEqual(Set(model.filteredEntries.map(\.textContent)), ["pinned note", "newest note", "oldest note"])
     }
 
     // MARK: - Selection
@@ -381,6 +385,89 @@ final class ClipboardListModelTests: XCTestCase {
         XCTAssertTrue(recorder.pastedText.isEmpty, "copy must not simulate Cmd+V")
         XCTAssertTrue(recorder.pastedImages.isEmpty)
         XCTAssertEqual(recorder.dismissals, 1)
+    }
+
+    // MARK: - Store-backed search
+
+    /// The search field reaches rows that are on disk but outside the 500-row page the panel
+    /// loads; that is the whole reason the query moved into SQLite.
+    @MainActor
+    func testSearchReadsTheStoreBeyondTheLoadedPage() throws {
+        let (_, store) = try makeStore()
+        try insertText("prehistoric needle", into: store)
+        for index in 0 ..< 520 {
+            try insertText("filler \(index)", into: store)
+        }
+
+        let model = ClipboardListModel(store: store)
+        model.reload()
+        XCTAssertEqual(model.entries.count, 500)
+        XCTAssertFalse(model.filteredEntries.contains { $0.textContent == "prehistoric needle" })
+
+        model.searchText = "needle"
+        XCTAssertEqual(model.filteredEntries.map(\.textContent), ["prehistoric needle"])
+    }
+
+    @MainActor
+    func testEmptyQueryKeepsTheLoadedPagePath() throws {
+        let (database, store) = try makeStore()
+        let older = try insertText("older", into: store)
+        let newest = try insertText("newest", into: store)
+        try database.execute("UPDATE clipboard_history SET updated_at = 2000 WHERE id = \(newest.id)")
+        try database.execute("UPDATE clipboard_history SET updated_at = 1000 WHERE id = \(older.id)")
+
+        let model = ClipboardListModel(store: store)
+        model.reload()
+        XCTAssertEqual(model.filteredEntries.map(\.id), [newest.id, older.id], "store order, untouched")
+
+        model.searchText = "old"
+        XCTAssertEqual(model.filteredEntries.map(\.id), [older.id])
+
+        model.resetSearch()
+        XCTAssertEqual(model.filteredEntries.map(\.id), model.entries.map(\.id), "clearing returns the page")
+    }
+
+    /// A database whose FTS table is missing must search the loaded page the way the panel did
+    /// before the index existed — including the fuzzy matcher that only survives on that path.
+    @MainActor
+    func testSearchFallsBackToThePageWhenTheIndexIsMissing() throws {
+        let (database, store) = try makeStore()
+        let deploy = try insertText("deploy the build", into: store)
+        try insertText("unrelated", into: store)
+        for trigger in ["clipboard_fts_ai", "clipboard_fts_ad", "clipboard_fts_au"] {
+            try database.execute("DROP TRIGGER \(trigger)")
+        }
+        try database.execute("DROP TABLE clipboard_fts")
+
+        let model = ClipboardListModel(store: store)
+        model.reload()
+
+        model.searchText = "dpl"
+        XCTAssertEqual(
+            model.filteredEntries.map(\.id),
+            [deploy.id],
+            "the page filter's subsequence match is what runs when the index is unusable"
+        )
+
+        model.searchText = "🚀"
+        XCTAssertTrue(model.filteredEntries.isEmpty, "no row contains the emoji, and none was invented")
+        XCTAssertEqual(model.entries.count, 2, "the page itself is untouched")
+    }
+
+    @MainActor
+    func testSearchIsDebounced() async throws {
+        let (_, store) = try makeStore()
+        try insertText("alpha", into: store)
+        try insertText("beta", into: store)
+
+        let model = ClipboardListModel(store: store, searchDebounceNanos: 60_000_000)
+        model.reload()
+
+        model.searchText = "alpha"
+        XCTAssertEqual(model.filteredEntries.count, 2, "the query waits out the debounce")
+
+        try await Task.sleep(nanoseconds: 400_000_000)
+        XCTAssertEqual(model.filteredEntries.map(\.textContent), ["alpha"])
     }
 
     // MARK: - Missing store

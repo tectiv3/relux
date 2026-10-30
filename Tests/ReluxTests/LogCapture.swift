@@ -22,10 +22,7 @@ struct LogCapture {
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while true {
-            let entries = (try? store.getEntries(at: position))?.compactMap { $0 as? OSLogEntryLog }
-            if let entries, entries.contains(where: {
-                $0.subsystem == subsystem && $0.category == category && $0.composedMessage.contains(text)
-            }) {
+            if countErrors(subsystem: subsystem, category: category, containing: text) > 0 {
                 return true
             }
             if Date() >= deadline {
@@ -33,5 +30,26 @@ struct LogCapture {
             }
             Thread.sleep(forTimeInterval: 0.05)
         }
+    }
+
+    /// Call after `waitForError`: the caller has already established that the entry is visible.
+    func messages(
+        subsystem: String = "com.relux.app",
+        category: String,
+        containing text: String
+    ) -> [String] {
+        let entries = (try? store.getEntries(at: position))?.compactMap { $0 as? OSLogEntryLog }
+        return entries?.filter { entry in
+            entry.subsystem == subsystem && entry.category == category
+                && entry.composedMessage.contains(text)
+        }.map(\.composedMessage) ?? []
+    }
+
+    func countErrors(
+        subsystem: String = "com.relux.app",
+        category: String,
+        containing text: String
+    ) -> Int {
+        messages(subsystem: subsystem, category: category, containing: text).count
     }
 }

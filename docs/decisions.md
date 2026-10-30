@@ -93,7 +93,8 @@ Only architectural/behavioral decisions with downstream implications. Not bug fi
 - `suppressNextCapture` flag prevents self-paste recording
 - Hotkey: Opt+Cmd+V (configurable via KeyboardShortcuts)
 - Disabled apps list stored in UserDefaults, defaults include Keychain Access and Passwords
-- Retention-based cleanup runs once on app launch (configurable: 1/3/6 months)
+- Retention-based cleanup runs once on app launch (configurable: 1/3/6 months); an entry expires when `MAX(COALESCE(created_at, 0), COALESCE(updated_at, 0))` is older than the cutoff, so a re-copied entry survives (its `updated_at` moves, its `created_at` does not), and pinned entries are never expired
+- Search runs in SQLite, not over the loaded page: `clipboard_fts` is an external-content FTS5 index over `clipboard_history.text_content` (schema version 2, kept in sync by the insert/delete/update triggers, `unicode61 remove_diacritics 2`). A non-empty query is quoted term-by-term and AND-joined (`ClipboardFTSQuery`), so no FTS operator is reachable from user input; only the last term matches by prefix, and input with no indexable token (emoji or punctuation only) falls back to the in-memory page filter, as does a database whose index is missing. `source_name` is not indexed, and an empty query still shows the 500-row page in its original order
 
 ## 2026-03-06: Remove MLX Dependencies
 

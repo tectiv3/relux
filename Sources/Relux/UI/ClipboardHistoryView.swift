@@ -23,7 +23,9 @@ private extension ClipboardTypeFilter {
 
 struct ClipboardHistoryView: View {
     @Environment(AppState.self) private var appState
-    @State private var model = ClipboardListModel()
+    @State private var model = ClipboardListModel(
+        searchDebounceNanos: ClipboardListModel.panelSearchDebounceNanos
+    )
     @State private var menu = ActionSelection()
     @FocusState private var isFilterFocused: Bool
 

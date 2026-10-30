@@ -60,7 +60,40 @@ final class ReluxSchemaTests: XCTestCase {
     func testMigrationRecordsVersion() throws {
         let database = try makeDatabase()
         XCTAssertEqual(try database.userVersion, ReluxSchema.version)
-        XCTAssertEqual(ReluxSchema.version, 1)
+        XCTAssertEqual(ReluxSchema.version, 2)
+    }
+
+    /// A database that already holds clipboard rows when migration 2 runs: the FTS table is
+    /// created empty and the triggers only see later writes, so the hit can only come from the
+    /// 'rebuild' step — this is the live-database case, reduced.
+    func testFTSMigrationIndexesRowsThatPredateIt() throws {
+        let database = try makeFreshShapedDatabase()
+        try database.execute("PRAGMA user_version = 1")
+        try database.execute("""
+            INSERT INTO clipboard_history (id, content_type, text_content, created_at, updated_at)
+            VALUES (1, 'text', 'quixotic sphinx of September', 1000, 1000)
+        """)
+        try database.execute("""
+            INSERT INTO clipboard_history (id, content_type, text_content, created_at, updated_at)
+            VALUES (2, 'image', NULL, 2000, 2000)
+        """)
+        XCTAssertFalse(
+            try masterRows(database).contains { $0.name == "clipboard_fts" },
+            "the table must not exist before the migration"
+        )
+
+        try ReluxSchema.migrate(database)
+
+        XCTAssertEqual(try database.userVersion, 2)
+        let match = try database.prepare("SELECT rowid FROM clipboard_fts WHERE clipboard_fts MATCH ?")
+        try match.bind(1, "\"sphinx\"*")
+        var ids: [Int64] = []
+        while try match.step() {
+            try ids.append(XCTUnwrap(match.columnInt64(0)))
+        }
+        XCTAssertEqual(ids, [1], "the pre-migration row must be searchable after the rebuild")
+        // Compares the inverted index against the content table; a missing token throws.
+        try database.execute("INSERT INTO clipboard_fts(clipboard_fts) VALUES('integrity-check')")
     }
 
     func testMigrationIsIdempotent() throws {
@@ -97,7 +130,7 @@ final class ReluxSchemaTests: XCTestCase {
         XCTAssertTrue(try statement.step())
         XCTAssertEqual(statement.columnDouble(1), 2000, "backfill must not touch an existing updated_at")
         XCTAssertEqual(statement.columnDouble(2), 3000)
-        XCTAssertEqual(try database.userVersion, 1)
+        XCTAssertEqual(try database.userVersion, 2)
     }
 
     func testOldSchemaGetsMissingColumnsAndBackfill() throws {
@@ -153,7 +186,7 @@ final class ReluxSchemaTests: XCTestCase {
         XCTAssertTrue(try statement.step())
         XCTAssertEqual(statement.columnText(0), "legacy")
         XCTAssertTrue(statement.isNull(1))
-        XCTAssertEqual(try database.userVersion, 1)
+        XCTAssertEqual(try database.userVersion, 2)
     }
 
     func testTranslationUpdatedAtIsNullable() throws {
@@ -304,22 +337,42 @@ final class ReluxSchemaTests: XCTestCase {
 
         try ReluxSchema.migrate(database)
 
-        XCTAssertEqual(ReluxSchema.version, 1)
+        XCTAssertEqual(ReluxSchema.version, 2)
         XCTAssertEqual(try database.userVersion, ReluxSchema.version)
 
         let after = try masterRows(database)
         // Lossless rebuild detection: a table's `rootpage` only changes when it is dropped and
         // recreated, so comparing the table rows whole (sql *and* rootpage) also catches a rebuild
         // that a `CREATE TABLE IF NOT EXISTS` would otherwise hide behind an identical schema text.
+        // The FTS shadow tables and the three sync triggers are what migration 2 adds, so they are
+        // excluded here and asserted separately below.
+        let historyTables: ([MasterRow]) -> [MasterRow] = { rows in
+            rows.filter { row in
+                row.type == "table"
+                    && (row.name.hasPrefix("clipboard_history") || row.name.hasPrefix("translation_history"))
+            }
+        }
         XCTAssertEqual(
-            after.filter { $0.type == "table" },
-            before.filter { $0.type == "table" },
+            historyTables(after),
+            historyTables(before),
             "migration must not rebuild or rewrite either table"
         )
+        let added = Set(after.map(\.name)).subtracting(before.map(\.name))
+        let ftsAdditions = added.filter { $0.hasPrefix("clipboard_fts") }
         XCTAssertEqual(
-            Set(after.map(\.name)).subtracting(before.map(\.name)),
+            ftsAdditions,
+            [
+                "clipboard_fts",
+                "clipboard_fts_ai", "clipboard_fts_ad", "clipboard_fts_au",
+                "clipboard_fts_config", "clipboard_fts_data",
+                "clipboard_fts_docsize", "clipboard_fts_idx",
+            ],
+            "migration adds the FTS table, its shadow tables and the three sync triggers"
+        )
+        XCTAssertEqual(
+            added.subtracting(ftsAdditions),
             ["idx_clipboard_history_order", "idx_translation_history_order"],
-            "migration must add exactly the two ordering indexes"
+            "migration adds nothing else"
         )
         XCTAssertEqual(
             try columnNames(of: "translation_history", database: database),

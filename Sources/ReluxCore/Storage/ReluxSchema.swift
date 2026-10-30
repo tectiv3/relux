@@ -8,15 +8,57 @@ import Foundation
 /// already carry some of the columns this migration introduces while still reporting
 /// version 0.
 public enum ReluxSchema {
-    public static let version = 1
+    public static let version = 2
 
     public static func migrate(_ database: SQLiteDatabase) throws {
         try database.migrate(to: version) { version, database in
             switch version {
             case 1: try applyInitial(database)
+            case 2: try applyClipboardFTS(database)
             default: throw StoreError.exec("no migration defined for schema version \(version)")
             }
         }
+    }
+
+    /// External-content FTS5 index over `clipboard_history.text_content`, so clipboard search
+    /// covers the whole retention window instead of the 500 rows the panel loads.
+    ///
+    /// `content=` keeps the text out of the index: the FTS table stores only the inverted index
+    /// and reads column values back from `clipboard_history`. SQLite does not maintain that for
+    /// external content, so all three triggers are required — and the delete/update cases must
+    /// replay the *old* row through the special `'delete'` command, otherwise rows that are gone
+    /// leave their tokens behind and search returns ids that no longer exist.
+    private static func applyClipboardFTS(_ database: SQLiteDatabase) throws {
+        try database.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts USING fts5(
+                text_content,
+                content='clipboard_history',
+                content_rowid='id',
+                tokenize='unicode61 remove_diacritics 2'
+            )
+        """)
+        try database.execute("""
+            CREATE TRIGGER IF NOT EXISTS clipboard_fts_ai AFTER INSERT ON clipboard_history BEGIN
+                INSERT INTO clipboard_fts(rowid, text_content) VALUES (new.id, new.text_content);
+            END
+        """)
+        try database.execute("""
+            CREATE TRIGGER IF NOT EXISTS clipboard_fts_ad AFTER DELETE ON clipboard_history BEGIN
+                INSERT INTO clipboard_fts(clipboard_fts, rowid, text_content)
+                VALUES ('delete', old.id, old.text_content);
+            END
+        """)
+        try database.execute("""
+            CREATE TRIGGER IF NOT EXISTS clipboard_fts_au AFTER UPDATE ON clipboard_history BEGIN
+                INSERT INTO clipboard_fts(clipboard_fts, rowid, text_content)
+                VALUES ('delete', old.id, old.text_content);
+                INSERT INTO clipboard_fts(rowid, text_content) VALUES (new.id, new.text_content);
+            END
+        """)
+        // A virtual table created on a database that already holds rows starts empty, and the
+        // triggers only see writes from here on: 'rebuild' indexes the existing 5k-odd rows.
+        // It is a full re-index, so running it twice is harmless.
+        try database.execute("INSERT INTO clipboard_fts(clipboard_fts) VALUES('rebuild')")
     }
 
     private static func applyInitial(_ database: SQLiteDatabase) throws {

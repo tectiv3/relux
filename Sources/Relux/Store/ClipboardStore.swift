@@ -137,6 +137,65 @@ final class ClipboardStore {
         return entries
     }
 
+    /// Rows matching an FTS5 query across the whole table, pinned first and then by relevance.
+    ///
+    /// `nil` means the FTS index could not answer: the query has nothing `unicode61` can index
+    /// (emoji or punctuation only), or the table is missing because a migration did not run. The
+    /// caller then filters the loaded page, which is what the panel did before the index existed,
+    /// rather than showing an empty list.
+    func search(matching query: String, type: ClipboardTypeFilter? = nil, limit: Int = 500) -> [ClipboardEntry]? {
+        guard let expression = ClipboardFTSQuery.matchExpression(for: query) else { return nil }
+
+        var sql = """
+        SELECT h.id, h.content_type, h.text_content, NULL, h.image_path, \
+        h.image_width, h.image_height, h.image_size, h.source_app, \
+        h.source_name, h.char_count, h.word_count, h.created_at, h.updated_at, h.pinned_at \
+        FROM clipboard_fts \
+        JOIN clipboard_history h ON h.id = clipboard_fts.rowid \
+        WHERE clipboard_fts MATCH ?
+        """
+        let contentTypes = type?.contentTypes ?? []
+        if !contentTypes.isEmpty {
+            let placeholders = Array(repeating: "?", count: contentTypes.count).joined(separator: ", ")
+            sql += " AND h.content_type IN (\(placeholders))"
+        }
+        // bm25 is best-first when ascending and is not defined for a row the FTS table matched
+        // outside the text column (it cannot happen here: text_content is the only column).
+        sql += """
+         ORDER BY CASE WHEN h.pinned_at IS NOT NULL THEN 0 ELSE 1 END, \
+        bm25(clipboard_fts), h.updated_at DESC \
+        LIMIT ?
+        """
+
+        let statement: Statement
+        do {
+            statement = try database.prepare(sql)
+        } catch {
+            logOnceSearchFailure(error)
+            return nil
+        }
+
+        var entries: [ClipboardEntry] = []
+        do {
+            try statement.bind(1, expression)
+            var index: Int32 = 2
+            for contentType in contentTypes {
+                try statement.bind(index, contentType)
+                index += 1
+            }
+            try statement.bind(index, limit)
+            while try statement.step() {
+                entries.append(readRow(statement))
+            }
+        } catch {
+            // A partial result is still better than the fallback here, but a failure that hides
+            // the index is worth one line in the log, not one per keystroke.
+            logOnceSearchFailure(error)
+            return entries.isEmpty ? nil : entries
+        }
+        return entries
+    }
+
     /// Check if the most recent entry or any pinned entry has the same text content (dedup)
     func isDuplicate(textContent: String) -> Bool {
         // Check pinned entries first — bump updated_at if matched
@@ -227,13 +286,17 @@ final class ClipboardStore {
         try database.execute("DELETE FROM clipboard_history WHERE pinned_at IS NULL")
     }
 
-    /// Delete entries older than the given date and their associated image files
+    /// Delete entries whose last activity — the insert or a later re-copy — is older than the
+    /// given date, and their associated image files.
+    ///
+    /// Expiry keys off both timestamps because the ordering does: re-copying an entry bumps
+    /// `updated_at` and leaves `created_at` at the first sighting, so expiring on `created_at`
+    /// alone deleted rows that had been used that day. Pinned rows are never expired.
     func deleteExpired(before date: Date) throws {
+        let stale = "MAX(COALESCE(created_at, 0), COALESCE(updated_at, 0)) < ? AND pinned_at IS NULL"
+
         // Collect image paths first
-        let sql = """
-        SELECT image_path FROM clipboard_history \
-        WHERE created_at < ? AND pinned_at IS NULL AND image_path IS NOT NULL
-        """
+        let sql = "SELECT image_path FROM clipboard_history WHERE \(stale) AND image_path IS NOT NULL"
         let statement = try database.prepare(sql)
         try statement.bind(1, date.timeIntervalSince1970)
 
@@ -249,13 +312,22 @@ final class ClipboardStore {
             try? FileManager.default.removeItem(at: fullPath)
         }
 
-        let deleteSql = "DELETE FROM clipboard_history WHERE created_at < ? AND pinned_at IS NULL"
+        let deleteSql = "DELETE FROM clipboard_history WHERE \(stale)"
         let deleteStatement = try database.prepare(deleteSql)
         try deleteStatement.bind(1, date.timeIntervalSince1970)
         try deleteStatement.stepToCompletion()
     }
 
     // MARK: - Private
+
+    /// Search failures repeat on every keystroke; the first one carries the diagnosis.
+    private var didLogSearchFailure = false
+
+    private func logOnceSearchFailure(_ error: Error) {
+        guard !didLogSearchFailure else { return }
+        didLogSearchFailure = true
+        log.error("search: FTS index unusable, filtering the loaded page instead: \(error)")
+    }
 
     private func fetchById(id: Int64) -> ClipboardEntry? {
         let sql = """

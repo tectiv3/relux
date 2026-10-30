@@ -10,13 +10,19 @@ enum ClipboardTypeFilter: String, CaseIterable {
     case richText
     case color
 
-    func matches(_ contentType: String) -> Bool {
+    /// The `content_type` values this filter accepts: one source of truth for the in-memory
+    /// predicate and the SQL the store runs.
+    var contentTypes: [String] {
         switch self {
-        case .text: contentType == ContentType.text
-        case .image: contentType == ContentType.image
-        case .richText: contentType == ContentType.rtf || contentType == ContentType.html
-        case .color: contentType == ContentType.color
+        case .text: [ContentType.text]
+        case .image: [ContentType.image]
+        case .richText: [ContentType.rtf, ContentType.html]
+        case .color: [ContentType.color]
         }
+    }
+
+    func matches(_ contentType: String) -> Bool {
+        contentTypes.contains(contentType)
     }
 }
 
@@ -98,6 +104,17 @@ final class ClipboardListModel {
     /// store instead of force-unwrapping it.
     @ObservationIgnored private var store: ClipboardStore?
     @ObservationIgnored private var board: ClipboardBoard
+    /// Pending debounced search, cancelled by the next keystroke or by an immediate recompute.
+    @ObservationIgnored private var searchTask: Task<Void, Never>?
+    /// Typing runs one FTS query per keystroke otherwise. The query is sub-millisecond on a
+    /// five-figure history, but it is a SQLite round trip on the main actor between the keystroke
+    /// and the redraw; 150 ms sits below the latency a user can feel and coalesces a typed word
+    /// into one search. Injected as nanoseconds so tests can run the search synchronously.
+    private let searchDebounceNanos: UInt64
+
+    /// The debounce the panel runs with; the initialiser defaults to none so tests and previews
+    /// see results without waiting.
+    static let panelSearchDebounceNanos: UInt64 = 150_000_000
 
     /// Rows in store order: pinned first by `pinned_at`, then `updated_at` descending.
     private(set) var entries: [ClipboardEntry] = []
@@ -109,14 +126,19 @@ final class ClipboardListModel {
     var searchText = "" {
         didSet {
             guard searchText != oldValue else { return }
-            recomputeFilteredEntries()
+            refreshFilteredEntries()
             selectedIndex = 0
         }
     }
 
-    init(store: ClipboardStore? = nil, board: ClipboardBoard = .inert) {
+    init(
+        store: ClipboardStore? = nil,
+        board: ClipboardBoard = .inert,
+        searchDebounceNanos: UInt64 = 0
+    ) {
         self.store = store
         self.board = board
+        self.searchDebounceNanos = searchDebounceNanos
     }
 
     var selectedEntry: ClipboardEntry? {
@@ -160,6 +182,7 @@ final class ClipboardListModel {
     func setTypeFilter(_ filter: ClipboardTypeFilter?) {
         guard typeFilter != filter else { return }
         typeFilter = filter
+        cancelPendingSearch()
         recomputeFilteredEntries()
         selectedIndex = 0
     }
@@ -247,10 +270,47 @@ final class ClipboardListModel {
 
     private func setEntries(_ newEntries: [ClipboardEntry]) {
         entries = newEntries
+        cancelPendingSearch()
         recomputeFilteredEntries()
     }
 
+    /// Cancels a pending debounced search and recomputes now, for mutations (type filter, pin,
+    /// delete) that must not wait out the debounce.
+    private func cancelPendingSearch() {
+        searchTask?.cancel()
+        searchTask = nil
+    }
+
+    private func refreshFilteredEntries() {
+        cancelPendingSearch()
+        // An empty query keeps the page path synchronous: there is nothing to wait for and the
+        // panel must show the loaded rows as soon as it opens.
+        guard searchDebounceNanos > 0, !ClipboardFilter.normalized(searchText).isEmpty else {
+            recomputeFilteredEntries()
+            return
+        }
+        let delay = searchDebounceNanos
+        searchTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled, let self else { return }
+            searchTask = nil
+            recomputeFilteredEntries()
+        }
+    }
+
     private func recomputeFilteredEntries() {
+        if let results = storeSearchResults() {
+            filteredEntries = results
+            return
+        }
+        // Fallback paths: an empty query, input the index cannot tokenize (emoji or punctuation
+        // only), or an unusable/missing FTS table. All three keep the pre-index behaviour of
+        // filtering the loaded page instead of showing nothing.
         filteredEntries = ClipboardFilter.apply(entries, query: searchText, type: typeFilter)
+    }
+
+    private func storeSearchResults() -> [ClipboardEntry]? {
+        guard let store, !ClipboardFilter.normalized(searchText).isEmpty else { return nil }
+        return store.search(matching: searchText, type: typeFilter)
     }
 }
