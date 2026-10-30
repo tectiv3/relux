@@ -42,14 +42,20 @@ final class AppState {
     }
 
     func setup() throws {
-        let clipStore = try ClipboardStore()
+        let fileManager = FileManager.default
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = appSupport.appendingPathComponent("Relux", isDirectory: true)
+        try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        let database = try SQLiteDatabase(path: dir.appendingPathComponent("relux.db").path)
+        try ReluxSchema.migrate(database)
+
+        let clipStore = try ClipboardStore(db: database)
         clipboardStore = clipStore
         let monitor = ClipboardMonitor(store: clipStore)
         clipboardMonitor = monitor
         monitor.start()
 
-        let transStore = try TranslateStore()
-        translateStore = transStore
+        translateStore = TranslateStore(db: database)
 
         // Clean up expired clipboard entries
         let retentionMonths = UserDefaults.standard.object(forKey: "clipboardRetentionMonths") as? Int ?? 3

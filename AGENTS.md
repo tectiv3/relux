@@ -36,10 +36,10 @@ Adding dependencies: update `project.yml` under `packages` and `targets`, then `
 Three targets, all generated from `project.yml`:
 
 - `Relux` — `type: application`, the app. Sources `Sources/Relux`; depends on the `KeyboardShortcuts` SPM package and on `ReluxCore`.
-- `ReluxCore` — `type: framework` (`com.relux.core`), sources `Sources/ReluxCore`. Pure, SwiftUI-free, SQLite-free code only: `Search/SearchItem.swift` (`SearchItem`/`SearchItemKind`), `Search/FuzzyMatch.swift`, `Search/ResultGrouping.swift`, `Util/Formatting.swift`, `JWT/JWTParser.swift`. No dependencies. Needs `DYLIB_INSTALL_NAME_BASE: @rpath` — XcodeGen does not emit Xcode's framework default, so the install name would become `/Library/Frameworks/...` and loading fails.
-- `ReluxTests` — `type: bundle.unit-test` (`com.relux.tests`), sources `Tests/ReluxTests`. No `TEST_HOST`: runs host-free against `ReluxCore` and never launches the app. 41 tests in 4 suites, wired into the shared `Relux` scheme under `test.targets`.
+- `ReluxCore` — `type: framework` (`com.relux.core`), sources `Sources/ReluxCore`. Pure, SwiftUI-free code only: `Search/SearchItem.swift` (`SearchItem`/`SearchItemKind`), `Search/FuzzyMatch.swift`, `Search/ResultGrouping.swift`, `Util/Formatting.swift`, `JWT/JWTParser.swift`, plus the SQLite layer (`Storage/SQLiteDatabase.swift`, `Storage/ReluxSchema.swift`, `Storage/StoreError.swift`) — the SQLite helper lives here rather than in the app so the SQL layer can be tested host-free, since `ReluxTests` has no `TEST_HOST`. No dependencies. Needs `DYLIB_INSTALL_NAME_BASE: @rpath` — XcodeGen does not emit Xcode's framework default, so the install name would become `/Library/Frameworks/...` and loading fails.
+- `ReluxTests` — `type: bundle.unit-test` (`com.relux.tests`), sources `Tests/ReluxTests` plus `Sources/Relux/Store` and `Sources/Relux/Translate/TranslateStore.swift` (the stores depend only on `ReluxCore` + Foundation, so compiling them into the bundle keeps their SQL covered without a host). No `TEST_HOST`: runs host-free against `ReluxCore` and never launches the app. 94 tests in 8 suites, wired into the shared `Relux` scheme under `test.targets`.
 
-Dependency direction: `Relux` → `ReluxCore`; `ReluxTests` → `ReluxCore`, no host. Pure logic belongs in `ReluxCore` and is covered by tests; anything touching AppKit/SwiftUI/SQLite stays in `Relux`.
+Dependency direction: `Relux` → `ReluxCore`; `ReluxTests` → `ReluxCore`, no host. Pure logic belongs in `ReluxCore` and is covered by tests; anything touching AppKit/SwiftUI stays in `Relux`.
 
 Inside `Relux` (SwiftUI + AppKit), sources rooted at `Sources/Relux/`:
 
@@ -47,7 +47,7 @@ Inside `Relux` (SwiftUI + AppKit), sources rooted at `Sources/Relux/`:
 - `HotkeyManager.swift`, `SelectionCapture.swift` — `KeyboardShortcuts` bindings; Accessibility (`AXUIElement`) capture of the selected text before the panel takes focus
 - `UI/` — overlay, floating panel, clipboard history, settings, translate views, toasts
 - `Search/` — `AppSearcher` (Spotlight `NSMetadataQuery`), `SystemSettingsSearcher`, `ScriptSearcher`, `ScriptRunner`, `FrecencyTracker`
-- `Store/` — `ClipboardStore` (SQLite), `StoreError`
+- `Store/` — `ClipboardStore` (SQL on the shared `SQLiteDatabase` from `ReluxCore`)
 - `Clipboard/` — `ClipboardMonitor` (pasteboard polling), `PasteService` (CGEvent Cmd+V)
 - `Translate/` — `AnthropicService` (streaming HTTPS), `TranslateStore` (SQLite)
 - `Calculator/` — `CalculatorService`, `ExchangeRateCache` (ECB daily XML), `NSExpression+Safe.m`

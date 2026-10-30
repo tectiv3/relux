@@ -1,6 +1,6 @@
 import Foundation
 import os
-import SQLite3
+import ReluxCore
 
 private let log = Logger(subsystem: "com.relux.app", category: "translatestore")
 
@@ -27,38 +27,10 @@ struct TranslationEntry: Identifiable {
 
 @MainActor
 final class TranslateStore {
-    // swiftlint:disable:next identifier_name
-    private nonisolated(unsafe) var db: OpaquePointer?
-    private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+    private let database: SQLiteDatabase
 
-    init() throws {
-        let fileManager = FileManager.default
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = appSupport.appendingPathComponent("Relux", isDirectory: true)
-        try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
-
-        let dbPath = dir.appendingPathComponent("relux.db").path
-        guard sqlite3_open(dbPath, &db) == SQLITE_OK else {
-            throw StoreError.cannotOpen
-        }
-
-        try execute("""
-            CREATE TABLE IF NOT EXISTS translation_history (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                source_text     TEXT NOT NULL,
-                translated_text TEXT NOT NULL,
-                source_lang     TEXT,
-                content_hash    TEXT,
-                target_lang     TEXT NOT NULL,
-                model           TEXT NOT NULL,
-                created_at      REAL NOT NULL,
-                updated_at      REAL NOT NULL
-            )
-        """)
-    }
-
-    deinit {
-        sqlite3_close(db)
+    init(db database: SQLiteDatabase) {
+        self.database = database
     }
 
     // MARK: - Insert
@@ -76,48 +48,32 @@ final class TranslateStore {
                 (source_text, translated_text, source_lang, target_lang, model, created_at, updated_at, content_hash)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw StoreError.query
-        }
-        defer { sqlite3_finalize(stmt) }
+        let statement = try database.prepare(sql)
 
-        sqlite3_bind_text(stmt, 1, sourceText, -1, Self.transient)
-        sqlite3_bind_text(stmt, 2, translatedText, -1, Self.transient)
-        if let sourceLang {
-            sqlite3_bind_text(stmt, 3, sourceLang, -1, Self.transient)
-        } else {
-            sqlite3_bind_null(stmt, 3)
-        }
-        sqlite3_bind_text(stmt, 4, targetLang, -1, Self.transient)
-        sqlite3_bind_text(stmt, 5, model, -1, Self.transient)
+        try statement.bind(1, sourceText)
+        try statement.bind(2, translatedText)
+        try statement.bind(3, sourceLang)
+        try statement.bind(4, targetLang)
+        try statement.bind(5, model)
         let now = Date().timeIntervalSince1970
-        sqlite3_bind_double(stmt, 6, now)
-        sqlite3_bind_double(stmt, 7, now)
-        sqlite3_bind_text(stmt, 8, hash, -1, Self.transient)
+        try statement.bind(6, now)
+        try statement.bind(7, now)
+        try statement.bind(8, hash)
 
-        guard sqlite3_step(stmt) == SQLITE_DONE else {
-            throw StoreError.query
-        }
-        return sqlite3_last_insert_rowid(db)
+        try statement.stepToCompletion()
+        return database.lastInsertRowID
     }
 
     // MARK: - Update
 
     func updateTranslation(id: Int64, translatedText: String) throws {
         let sql = "UPDATE translation_history SET translated_text = ? WHERE id = ?"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw StoreError.query
-        }
-        defer { sqlite3_finalize(stmt) }
+        let statement = try database.prepare(sql)
 
-        sqlite3_bind_text(stmt, 1, translatedText, -1, Self.transient)
-        sqlite3_bind_int64(stmt, 2, id)
+        try statement.bind(1, translatedText)
+        try statement.bind(2, id)
 
-        guard sqlite3_step(stmt) == SQLITE_DONE else {
-            throw StoreError.query
-        }
+        try statement.stepToCompletion()
     }
 
     // MARK: - Query
@@ -128,15 +84,12 @@ final class TranslateStore {
                 model, created_at, updated_at, content_hash
             FROM translation_history ORDER BY COALESCE(updated_at, created_at) DESC LIMIT ?
         """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_int(stmt, 1, Int32(limit))
+        guard let statement = try? database.prepare(sql) else { return [] }
+        try? statement.bind(1, limit)
 
         var entries: [TranslationEntry] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            entries.append(readRow(stmt))
+        while (try? statement.step()) == true {
+            entries.append(readRow(statement))
         }
         return entries
     }
@@ -147,64 +100,59 @@ final class TranslateStore {
                 model, created_at, updated_at, content_hash
             FROM translation_history WHERE content_hash = ? AND translated_text != '' LIMIT 1
         """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
-        defer { sqlite3_finalize(stmt) }
+        guard let statement = try? database.prepare(sql) else { return nil }
+        try? statement.bind(1, hash)
 
-        sqlite3_bind_text(stmt, 1, hash, -1, Self.transient)
-
-        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
-        return readRow(stmt)
+        guard (try? statement.step()) == true else { return nil }
+        return readRow(statement)
     }
 
+    /// Fire-and-forget: a failed bump only costs ordering in the history list.
     func bumpTimestamp(id: Int64) {
         let sql = "UPDATE translation_history SET updated_at = ? WHERE id = ?"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970)
-        sqlite3_bind_int64(stmt, 2, id)
-        sqlite3_step(stmt)
+        guard let statement = try? database.prepare(sql) else {
+            log.warning("bumpTimestamp: failed to prepare statement")
+            return
+        }
+        try? statement.bind(1, Date().timeIntervalSince1970)
+        try? statement.bind(2, id)
+        _ = try? statement.stepToCompletion()
     }
 
     // MARK: - Delete
 
     func delete(id: Int64) throws {
         let sql = "DELETE FROM translation_history WHERE id = ?"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw StoreError.query
-        }
-        defer { sqlite3_finalize(stmt) }
+        let statement = try database.prepare(sql)
 
-        sqlite3_bind_int64(stmt, 1, id)
-        guard sqlite3_step(stmt) == SQLITE_DONE else {
-            throw StoreError.query
-        }
+        try statement.bind(1, id)
+        try statement.stepToCompletion()
     }
 
     func clearAll() throws {
-        try execute("DELETE FROM translation_history")
+        try database.execute("DELETE FROM translation_history")
     }
 
     // MARK: - Private
 
-    private func readRow(_ stmt: OpaquePointer?) -> TranslationEntry {
-        let id = sqlite3_column_int64(stmt, 0)
-        let sourceText = String(cString: sqlite3_column_text(stmt, 1))
-        let translatedText = String(cString: sqlite3_column_text(stmt, 2))
-        let sourceLang: String? = sqlite3_column_type(stmt, 3) == SQLITE_NULL
-            ? nil : String(cString: sqlite3_column_text(stmt, 3))
-        let targetLang = String(cString: sqlite3_column_text(stmt, 4))
-        let model = String(cString: sqlite3_column_text(stmt, 5))
-        let createdAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 6))
-        let updatedAt: Date = sqlite3_column_type(stmt, 7) == SQLITE_NULL
-            ? createdAt
-            : Date(timeIntervalSince1970: sqlite3_column_double(stmt, 7))
-        let contentHash: String = sqlite3_column_type(stmt, 8) == SQLITE_NULL
-            ? TranslationEntry.hash(source: sourceText, target: targetLang)
-            : String(cString: sqlite3_column_text(stmt, 8))
+    private func readRow(_ statement: Statement) -> TranslationEntry {
+        let id = statement.columnInt64(0) ?? 0
+        // NOT NULL columns: a NULL here means the row is corrupt, which used to trap on
+        // `String(cString:)`; the forced unwrap keeps that behaviour instead of inventing "".
+        let sourceText = statement.columnText(1)!
+        let translatedText = statement.columnText(2)!
+        let sourceLang = statement.columnText(3)
+        let targetLang = statement.columnText(4)!
+        let model = statement.columnText(5)!
+
+        let createdAt = Date(timeIntervalSince1970: statement.columnDouble(6) ?? 0)
+        let updatedAt: Date = if let raw = statement.columnDouble(7) {
+            Date(timeIntervalSince1970: raw)
+        } else {
+            createdAt
+        }
+        let contentHash: String = statement.columnText(8)
+            ?? TranslationEntry.hash(source: sourceText, target: targetLang)
 
         return TranslationEntry(
             id: id,
@@ -217,14 +165,5 @@ final class TranslateStore {
             updatedAt: updatedAt,
             contentHash: contentHash
         )
-    }
-
-    private func execute(_ sql: String) throws {
-        var errMsg: UnsafeMutablePointer<CChar>?
-        guard sqlite3_exec(db, sql, nil, nil, &errMsg) == SQLITE_OK else {
-            let msg = errMsg.map { String(cString: $0) } ?? "unknown"
-            sqlite3_free(errMsg)
-            throw StoreError.exec(msg)
-        }
     }
 }

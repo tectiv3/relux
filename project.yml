@@ -42,6 +42,10 @@ targets:
     platform: macOS
     sources:
       - path: Tests/ReluxTests
+      # The two stores are app-target types, but they depend only on ReluxCore + Foundation,
+      # so compiling them into the test bundle keeps the SQL layer covered without a test host.
+      - path: Sources/Relux/Store
+      - path: Sources/Relux/Translate/TranslateStore.swift
     dependencies:
       - target: ReluxCore
     settings:
