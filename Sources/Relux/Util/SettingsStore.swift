@@ -13,6 +13,7 @@ final class SettingsStore {
         case hasCompletedSetup
         case clearQueryOnOpen
         case maxSearchResults
+        case appSearchPaths
         case appAppearance
         case forceInputSourceId
         case clipboardEnabled
@@ -38,6 +39,17 @@ final class SettingsStore {
     static let defaultDisabledClipboardApps = [
         "com.apple.keychainaccess",
         "com.apple.Passwords",
+    ]
+
+    /// Directories `AppSearcher` scans for app bundles. Computed once per process, as it always
+    /// was, because `NSHomeDirectory()` is part of the default and callers compare arrays.
+    static let defaultAppSearchPaths: [String] = [
+        "/Applications",
+        "/Applications/Utilities",
+        "/System/Applications",
+        "/System/Applications/Utilities",
+        "/System/Library/CoreServices/Applications",
+        NSHomeDirectory() + "/Applications",
     ]
 
     private let defaults: UserDefaults
@@ -80,6 +92,11 @@ final class SettingsStore {
     var maxSearchResults: Int {
         get { defaults.object(forKey: DefaultsKey.maxSearchResults.rawValue) as? Int ?? 10 }
         set { defaults.set(newValue, forKey: DefaultsKey.maxSearchResults.rawValue) }
+    }
+
+    var appSearchPaths: [String] {
+        get { defaults.stringArray(forKey: DefaultsKey.appSearchPaths.rawValue) ?? Self.defaultAppSearchPaths }
+        set { defaults.set(newValue, forKey: DefaultsKey.appSearchPaths.rawValue) }
     }
 
     var appAppearance: String {

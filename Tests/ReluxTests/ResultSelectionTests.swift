@@ -155,6 +155,38 @@ final class ResultSelectionTests: XCTestCase {
         XCTAssertEqual(ResultSelection.retreated(-1, count: 3), 0)
     }
 
+    // MARK: - isRow(_:in:)
+
+    /// The reported crash: ⌘K on the only recent row left the highlight at `min(0, 0 - 1) == -1`
+    /// over an empty array, and every guard was written `selectedIndex < results.count`, which
+    /// `-1 < 0` satisfies. This pins both halves of the fix — the clamp and the predicate.
+    func testPostRemovalIndexOnAnEmptyListIsRejectedByTheRowPredicate() {
+        let remaining: [SearchItem] = []
+        let selectedIndex = min(0, max(0, remaining.count - 1))
+        XCTAssertEqual(selectedIndex, 0, "the post-removal clamp has to land on row 0, not -1")
+        XCTAssertFalse(ResultSelection.isRow(selectedIndex, in: remaining.count))
+
+        // What the panel used to compute, and why the old guard let it through.
+        let oldIndex = min(0, remaining.count - 1)
+        XCTAssertEqual(oldIndex, -1)
+        XCTAssertTrue(oldIndex < remaining.count, "-1 < 0: the old bounds check accepted it")
+        XCTAssertFalse(ResultSelection.isRow(oldIndex, in: remaining.count))
+    }
+
+    func testRowPredicateAcceptsExactlyTheOccupiedRows() {
+        XCTAssertTrue(ResultSelection.isRow(0, in: 1))
+        XCTAssertTrue(ResultSelection.isRow(0, in: 3))
+        XCTAssertTrue(ResultSelection.isRow(2, in: 3))
+    }
+
+    func testRowPredicateRejectsNegativesAndTheEnd() {
+        XCTAssertFalse(ResultSelection.isRow(-1, in: 3))
+        XCTAssertFalse(ResultSelection.isRow(-7, in: 3))
+        XCTAssertFalse(ResultSelection.isRow(3, in: 3))
+        XCTAssertFalse(ResultSelection.isRow(0, in: 0), "an empty list has no row, not even row 0")
+        XCTAssertFalse(ResultSelection.isRow(-1, in: 0))
+    }
+
     // MARK: - rowIndex(forCommandKey:rowCount:)
 
     func testCommandKeyMapsOneBasedCapsToZeroBasedRows() {

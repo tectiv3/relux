@@ -1,5 +1,8 @@
 import Foundation
+import os
 import ReluxCore
+
+private let log = Logger(subsystem: "com.relux.app", category: "FrecencyTracker")
 
 /// Learns which apps the user opens and which app they pick for a given query.
 ///
@@ -10,6 +13,9 @@ import ReluxCore
 /// - `learned`: folded query -> identity of the last pick for that query.
 ///
 /// `recents.json` keeps the richer item snapshots shown for an empty query.
+///
+/// A file that exists but cannot be read or decoded is never rewritten: the tracker keeps running
+/// on empty state for the session instead of replacing bytes it failed to understand.
 ///
 /// Every date this type handles is injected: ranking reads a caller-supplied
 /// `now` so decay and the learned-pick TTL are exact rather than wall-clock
@@ -67,6 +73,11 @@ final class FrecencyTracker {
     private var items: [String: StoredItem] = [:]
     private let storePath: URL
     private let itemsPath: URL
+    /// Cleared when a store file exists but nobody could read it: absent files are fair game for
+    /// `save`, unreadable ones are not. Writing an in-memory fallback over bytes that may still be
+    /// recoverable would destroy the user's ranking history with no trace of the original.
+    private var canWriteUsage = true
+    private var canWriteRecents = true
 
     init(directory: URL? = nil, now: Date) {
         let dir: URL
@@ -222,7 +233,8 @@ final class FrecencyTracker {
     private func load(now: Date) {
         var needsRewrite = false
 
-        if let data = try? Data(contentsOf: storePath) {
+        let usageFile = existingBytes(at: storePath, label: Self.storeFileName)
+        if let data = usageFile.data {
             if let decoded = try? JSONDecoder().decode(PersistedUsage.self, from: data) {
                 usage = decoded.usage
                 learned = decoded.learned
@@ -232,7 +244,15 @@ final class FrecencyTracker {
             } else if let legacy = try? JSONDecoder().decode([String: LegacyEntry].self, from: data) {
                 migrate(legacy: legacy, now: now)
                 needsRewrite = true
+            } else {
+                // None of the three known shapes decoded it. Keep the session usable with an empty
+                // ranking and leave the file alone: the next save must not replace it with that
+                // emptiness.
+                canWriteUsage = false
+                log.error("frecency.json matched no known schema; preserving the file untouched")
             }
+        } else {
+            canWriteUsage = usageFile.writable
         }
 
         // Reads ignore an expired pick anyway; pruning here keeps the file bounded.
@@ -242,10 +262,16 @@ final class FrecencyTracker {
             needsRewrite = true
         }
 
-        if let data = try? Data(contentsOf: itemsPath),
-           let decoded = try? JSONDecoder().decode([String: StoredItem].self, from: data)
-        {
-            items = decoded
+        let recentsFile = existingBytes(at: itemsPath, label: "recents.json")
+        if let data = recentsFile.data {
+            if let decoded = try? JSONDecoder().decode([String: StoredItem].self, from: data) {
+                items = decoded
+            } else {
+                canWriteRecents = false
+                log.error("recents.json did not decode; preserving the file untouched")
+            }
+        } else {
+            canWriteRecents = recentsFile.writable
         }
 
         // Rewrite only after recents are loaded, otherwise a migration would
@@ -253,6 +279,21 @@ final class FrecencyTracker {
         if needsRewrite {
             save(now: now)
         }
+    }
+
+    /// Bytes of a store file, plus whether writing it is safe afterwards.
+    ///
+    /// A missing file yields no data and is writable; a file that exists but cannot be read yields
+    /// no data either, but is not writable — the distinction the old `try? Data(contentsOf:)` threw
+    /// away, which made an unreadable file indistinguishable from a first run.
+    private func existingBytes(at url: URL, label: String) -> (data: Data?, writable: Bool) {
+        guard FileManager.default.fileExists(atPath: url.path) else { return (nil, true) }
+        guard let data = try? Data(contentsOf: url) else {
+            let name = label
+            log.error("\(name) exists but could not be read; preserving it untouched")
+            return (nil, false)
+        }
+        return (data, true)
     }
 
     /// Previous-unit shape: `usage: [path: Int]`, `learned: [query: path]`.
@@ -282,12 +323,16 @@ final class FrecencyTracker {
 
     private func save(now: Date) {
         learned = learned.filter { UsageBoost.isLive(lastPickAt: $0.value.pickedAt, now: now) }
-        let persisted = PersistedUsage(usage: usage, learned: learned)
-        if let data = try? JSONEncoder().encode(persisted) {
-            try? data.write(to: storePath, options: .atomic)
+        if canWriteUsage {
+            let persisted = PersistedUsage(usage: usage, learned: learned)
+            if let data = try? JSONEncoder().encode(persisted) {
+                try? data.write(to: storePath, options: .atomic)
+            }
         }
-        if let data = try? JSONEncoder().encode(items) {
-            try? data.write(to: itemsPath, options: .atomic)
+        if canWriteRecents {
+            if let data = try? JSONEncoder().encode(items) {
+                try? data.write(to: itemsPath, options: .atomic)
+            }
         }
     }
 }

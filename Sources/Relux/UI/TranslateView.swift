@@ -26,7 +26,8 @@ struct TranslateView: View {
     }
 
     private var languages: [String] {
-        let stored = UserDefaults.standard.stringArray(forKey: "translateLanguages") ?? ["English"]
+        // An empty list is still possible from the stored value; the picker needs one language.
+        let stored = appState.settings.translateLanguages
         return stored.isEmpty ? ["English"] : stored
     }
 

@@ -75,7 +75,7 @@ struct OverlayView: View {
     }
 
     private var currentActions: [Action] {
-        guard selectedIndex < results.count else { return [] }
+        guard ResultSelection.isRow(selectedIndex, in: results.count) else { return [] }
         let item = results[selectedIndex]
         let hasCapturedOutput = !answer.isEmpty && item.meta["outputMode"] == "capture"
         return PanelActions.search(kind: item.kind, hasCapturedOutput: hasCapturedOutput).map { descriptor in
@@ -142,7 +142,7 @@ struct OverlayView: View {
             streamingTask?.cancel()
             rawAnswer = ""
             isGenerating = false
-            if UserDefaults.standard.bool(forKey: "clearQueryOnOpen") {
+            if appState.settings.clearQueryOnOpen {
                 query = ""
             }
             userMovedSelection = false
@@ -202,7 +202,7 @@ struct OverlayView: View {
             Group {
                 // Cmd+K to toggle actions menu
                 Button("") {
-                    menu.toggle(isAvailable: !results.isEmpty && selectedIndex < results.count)
+                    menu.toggle(isAvailable: ResultSelection.isRow(selectedIndex, in: results.count))
                 }
                 .keyboardShortcut("k", modifiers: .command)
 
@@ -448,7 +448,7 @@ struct OverlayView: View {
 
     @ViewBuilder
     private var actionMenuHeader: some View {
-        if selectedIndex < results.count {
+        if ResultSelection.isRow(selectedIndex, in: results.count) {
             let item = results[selectedIndex]
             HStack(spacing: 6) {
                 itemIcon(for: item)
@@ -504,13 +504,13 @@ struct OverlayView: View {
                 KeyboardHint(key: "\u{2191}\u{2193}", label: "Navigate")
                 KeyboardHint(key: "esc", label: "Back")
             } else {
-                if selectedIndex < results.count, results[selectedIndex].kind == .calculator {
+                if ResultSelection.isRow(selectedIndex, in: results.count), results[selectedIndex].kind == .calculator {
                     KeyboardHint(key: "\u{23CE}", label: "Copy Answer")
                 } else {
                     KeyboardHint(key: "\u{23CE}", label: "Open")
                 }
                 KeyboardHint(key: "\u{2318}K", label: "Actions")
-                if selectedIndex < results.count, results[selectedIndex].meta["path"] != nil {
+                if ResultSelection.isRow(selectedIndex, in: results.count), results[selectedIndex].meta["path"] != nil {
                     KeyboardHint(key: "\u{2318}\u{23CE}", label: "Reveal")
                 }
                 KeyboardHint(key: "\u{21E5}", label: "Next")
@@ -539,7 +539,8 @@ struct OverlayView: View {
     private func performSearch(_ text: String) {
         // Captured before the results array is replaced so the refresh can restore the highlight
         // by identity: every keystroke otherwise snapped the selection back to the first row.
-        let previousSelectionID = selectedIndex < results.count ? results[selectedIndex].id : nil
+        let previousSelectionID = ResultSelection.isRow(selectedIndex, in: results.count)
+            ? results[selectedIndex].id : nil
         runningAppPaths = Set(
             NSWorkspace.shared.runningApplications.compactMap { $0.bundleURL?.path }
         )
@@ -661,7 +662,7 @@ struct OverlayView: View {
     }
 
     private func openSelectedItem() {
-        guard selectedIndex < results.count else { return }
+        guard ResultSelection.isRow(selectedIndex, in: results.count) else { return }
         var item = results[selectedIndex]
         // Record for frecency (scripts deferred until stdin is computed)
         if item.kind != .webSearch, item.kind != .calculator, item.kind != .jwt, item.kind != .script {
@@ -802,7 +803,7 @@ struct OverlayView: View {
     /// Cmd+Return and the "Show in Finder" action. Only app results carry a file path; hints,
     /// web searches, scripts, calculator and settings rows have nothing to reveal, so they no-op.
     private func revealSelectedInFinder() {
-        guard selectedIndex < results.count,
+        guard ResultSelection.isRow(selectedIndex, in: results.count),
               let path = results[selectedIndex].meta["path"],
               FileManager.default.fileExists(atPath: path)
         else { return }
@@ -836,11 +837,12 @@ struct OverlayView: View {
     }
 
     private func removeFromHistory() {
-        guard selectedIndex < results.count else { return }
+        guard ResultSelection.isRow(selectedIndex, in: results.count) else { return }
         let item = results[selectedIndex]
         appState.frecency.removeItem(id: item.id)
         results.remove(at: selectedIndex)
-        selectedIndex = min(selectedIndex, results.count - 1)
+        // The list can end up empty, where `count - 1` is -1; the highlight has to stay on row 0.
+        selectedIndex = min(selectedIndex, max(0, results.count - 1))
         menu.close()
     }
 }

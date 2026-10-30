@@ -17,30 +17,28 @@ struct AppItem {
 
 @MainActor
 final class AppSearcher {
-    static let defaultSearchPaths: [String] = [
-        "/Applications",
-        "/Applications/Utilities",
-        "/System/Applications",
-        "/System/Applications/Utilities",
-        "/System/Library/CoreServices/Applications",
-        NSHomeDirectory() + "/Applications",
-    ]
+    /// Kept as the name the settings UI resets to; the array itself lives in `SettingsStore` so
+    /// there is one source of truth for the default search paths.
+    static var defaultSearchPaths: [String] {
+        SettingsStore.defaultAppSearchPaths
+    }
 
     private var apps: [AppItem] = []
     private var query: NSMetadataQuery?
     private var newlyDetected: Set<String> = []
     private var watchSources: [DispatchSourceFileSystemObject] = []
+    private let settings: SettingsStore
 
     var searchPaths: [String] {
         didSet {
-            UserDefaults.standard.set(searchPaths, forKey: "appSearchPaths")
+            settings.appSearchPaths = searchPaths
             restartSpotlightQuery()
         }
     }
 
-    init() {
-        searchPaths = UserDefaults.standard.stringArray(forKey: "appSearchPaths")
-            ?? Self.defaultSearchPaths
+    init(settings: SettingsStore = SettingsStore()) {
+        self.settings = settings
+        searchPaths = settings.appSearchPaths
         startSpotlightQuery()
         startDirectoryWatchers()
     }

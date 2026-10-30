@@ -33,6 +33,7 @@ final class SettingsStoreTests: XCTestCase {
             "hasCompletedSetup",
             "clearQueryOnOpen",
             "maxSearchResults",
+            "appSearchPaths",
             "appAppearance",
             "forceInputSourceId",
             "clipboardEnabled",
@@ -70,6 +71,9 @@ final class SettingsStoreTests: XCTestCase {
 
         settings.maxSearchResults = 17
         XCTAssertEqual(defaults.object(forKey: "maxSearchResults") as? Int, 17)
+
+        settings.appSearchPaths = ["/opt/apps"]
+        XCTAssertEqual(defaults.stringArray(forKey: "appSearchPaths"), ["/opt/apps"])
 
         settings.appAppearance = "dark"
         XCTAssertEqual(defaults.string(forKey: "appAppearance"), "dark")
@@ -167,6 +171,18 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(settings.isFirstRun, true)
         XCTAssertEqual(settings.clearQueryOnOpen, false)
         XCTAssertEqual(settings.maxSearchResults, 10)
+        XCTAssertEqual(
+            settings.appSearchPaths,
+            [
+                "/Applications",
+                "/Applications/Utilities",
+                "/System/Applications",
+                "/System/Applications/Utilities",
+                "/System/Library/CoreServices/Applications",
+                NSHomeDirectory() + "/Applications",
+            ],
+            "the default scan list is the one AppSearcher always used"
+        )
         XCTAssertEqual(settings.appAppearance, "system")
         XCTAssertEqual(settings.forceInputSourceID, "")
         XCTAssertEqual(settings.clipboardEnabled, true)
@@ -287,6 +303,16 @@ final class SettingsStoreTests: XCTestCase {
     func testArrayAndSetRoundTrips() {
         settings.translateLanguages = ["German", "English"]
         XCTAssertEqual(settings.translateLanguages, ["German", "English"])
+
+        // An empty stored list stays empty: only the caller decides what an empty list renders as.
+        settings.translateLanguages = []
+        XCTAssertEqual(settings.translateLanguages, [])
+        settings.translateLanguages = ["German", "English"]
+
+        settings.appSearchPaths = []
+        XCTAssertEqual(settings.appSearchPaths, [], "a deliberately emptied scan list must not fall back")
+        settings.appSearchPaths = ["/Applications", "/opt/apps"]
+        XCTAssertEqual(settings.appSearchPaths, ["/Applications", "/opt/apps"])
 
         settings.clipboardDisabledApps = ["com.example.a", "com.example.b"]
         XCTAssertEqual(settings.clipboardDisabledApps, ["com.example.a", "com.example.b"])

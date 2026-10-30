@@ -437,6 +437,96 @@ final class FrecencyTrackerTests: XCTestCase {
         XCTAssertEqual(tracker.usageBoost(query: "other", itemId: script.id, now: Self.now), 20)
     }
 
+    // MARK: - Unreadable stores
+
+    /// The reported data-loss path: an undecodable `frecency.json` decoded to nothing, so `usage`
+    /// and `learned` stayed empty, and the next `recordSelection` rewrote the file with that empty
+    /// state. The old bytes are the only copy of the user's ranking history.
+    func testUndecodableFrecencyFileIsNotOverwritten() throws {
+        let dir = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("frecency.json")
+
+        // Valid JSON, no known shape: `opens` is a string and `lastUsed` is missing, so neither the
+        // current schema nor either migration shape decodes it.
+        let corrupt = Data(
+            #"{"usage":{"\/Applications\/X.app":{"opens":"many"}},"learned":{}}"#.utf8
+        )
+        try corrupt.write(to: path)
+
+        let tracker = FrecencyTracker(directory: dir, now: Self.now)
+        // The session stays usable: it ranks from empty state rather than refusing to run.
+        XCTAssertEqual(tracker.appUsage(query: "rem", path: Self.remoteDesktopPath, now: Self.now).opens, 0)
+
+        tracker.recordSelection(
+            query: "rem",
+            item: appItem(path: Self.remoteDesktopPath, title: "Microsoft Remote Desktop"),
+            now: Self.now
+        )
+
+        // Recording still works in memory for this session...
+        XCTAssertEqual(tracker.appUsage(query: "rem", path: Self.remoteDesktopPath, now: Self.now).opens, 1)
+        XCTAssertEqual(tracker.recentItems().map(\.id), ["app:\(Self.remoteDesktopPath)"])
+        // ...but the bytes nobody could read are left exactly as they were.
+        XCTAssertEqual(try Data(contentsOf: path), corrupt)
+    }
+
+    /// Same class of bug for recents: the guard was “a read was attempted”, not “a read
+    /// succeeded”, so an undecodable `recents.json` was replaced with `{}` on the next save.
+    func testUndecodableRecentsFileIsNotOverwritten() throws {
+        let dir = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("recents.json")
+
+        // A snapshot missing every persisted field except `id`.
+        let corrupt = Data(#"{"app:\/Applications\/X.app":{"id":"app:\/Applications\/X.app"}}"#.utf8)
+        try corrupt.write(to: path)
+
+        let tracker = FrecencyTracker(directory: dir, now: Self.now)
+        XCTAssertTrue(tracker.recentItems().isEmpty)
+
+        tracker.recordSelection(
+            query: "gho",
+            item: appItem(path: "/Applications/Ghostty.app", title: "Ghostty"),
+            now: Self.now
+        )
+
+        XCTAssertEqual(try Data(contentsOf: path), corrupt, "the undecodable recents file must keep its bytes")
+        // The session still shows what it recorded, so recents are not blind for the whole run.
+        XCTAssertEqual(tracker.recentItems().map(\.id), ["app:/Applications/Ghostty.app"])
+        // `frecency.json` was absent, so it is still maintained as usual.
+        XCTAssertEqual(try storedState(in: dir).usage["/Applications/Ghostty.app"]?.opens, 1)
+    }
+
+    /// The partially valid case: one bad entry fails the whole-file decode. Salvaging the readable
+    /// entries and writing them back would silently drop the rest, so the file is preserved.
+    func testPartiallyValidFrecencyFileIsPreserved() throws {
+        let dir = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("frecency.json")
+        // Two entries of the current schema, one of which has a non-numeric `opens`.
+        let payload: [String: Any] = [
+            "usage": [
+                "/Applications/Good.app": ["opens": 4, "lastUsed": Self.now.timeIntervalSinceReferenceDate],
+                "/Applications/Bad.app": ["opens": "many", "lastUsed": Self.now.timeIntervalSinceReferenceDate],
+            ],
+            "learned": [String: String](),
+        ]
+        let corrupt = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        try corrupt.write(to: path)
+
+        let tracker = FrecencyTracker(directory: dir, now: Self.now)
+        XCTAssertEqual(tracker.appUsage(query: "rem", path: "/Applications/Good.app", now: Self.now).opens, 0)
+
+        tracker.recordSelection(
+            query: "gho",
+            item: appItem(path: "/Applications/Ghostty.app", title: "Ghostty"),
+            now: Self.now
+        )
+
+        XCTAssertEqual(try Data(contentsOf: path), corrupt, "no partial salvage is written back")
+    }
+
     // MARK: - Recents display name
 
     func testStoredAppRecentsAreShownWithoutTheBundleExtension() throws {
