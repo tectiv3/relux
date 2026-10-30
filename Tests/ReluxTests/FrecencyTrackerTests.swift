@@ -81,6 +81,37 @@ final class FrecencyTrackerTests: XCTestCase {
             .write(to: dir.appendingPathComponent("recents.json"), options: .atomic)
     }
 
+    /// One hand-written `recents.json` snapshot, including the fields the app-kind
+    /// title normalisation has to respect.
+    private struct RecentSeed {
+        var id: String
+        var title: String
+        var kind: String
+        var age: TimeInterval = 0
+    }
+
+    @discardableResult
+    private func writeRecents(_ dir: URL, seeds: [RecentSeed]) throws -> Data {
+        let entries: [String: [String: Any]] = seeds.reduce(into: [:]) { result, seed in
+            result[seed.id] = [
+                "id": seed.id,
+                "title": seed.title,
+                "subtitle": "",
+                "icon": "app.dashed",
+                "kind": seed.kind,
+                "meta": [String: String](),
+                "lastUsed": Self.now.addingTimeInterval(-seed.age).timeIntervalSinceReferenceDate,
+            ]
+        }
+        let data = try JSONSerialization.data(withJSONObject: entries, options: [.sortedKeys])
+        try data.write(to: dir.appendingPathComponent("recents.json"), options: .atomic)
+        return data
+    }
+
+    private func recentTitles(in dir: URL, limit: Int) -> [String] {
+        FrecencyTracker(directory: dir, now: Self.now).recentItems(limit: limit).map(\.title)
+    }
+
     // MARK: - Migration
 
     func testLegacyMigrationSumsCountsPerIdentityAndPreservesLatestTimestamp() throws {
@@ -404,5 +435,79 @@ final class FrecencyTrackerTests: XCTestCase {
 
         XCTAssertEqual(tracker.usageBoost(query: "deploy", itemId: script.id, now: Self.now), 20 + 300)
         XCTAssertEqual(tracker.usageBoost(query: "other", itemId: script.id, now: Self.now), 20)
+    }
+
+    // MARK: - Recents display name
+
+    func testStoredAppRecentsAreShownWithoutTheBundleExtension() throws {
+        let dir = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // Shape of the live pre-normalisation file: Spotlight's display name.
+        try writeRecents(dir, seeds: [
+            .init(id: "app:\(Self.remoteDesktopPath)", title: "Microsoft Remote Desktop.app", kind: "app"),
+            .init(id: "app:/Applications/Ghostty.app", title: "Ghostty.APP", kind: "app", age: 60),
+            .init(id: "app:\(Self.remindersPath)", title: "Reminders", kind: "app", age: 120),
+        ])
+
+        // Case-insensitive suffix, and an already-stripped title passes through.
+        XCTAssertEqual(
+            recentTitles(in: dir, limit: 8),
+            ["Microsoft Remote Desktop", "Ghostty", "Reminders"]
+        )
+    }
+
+    func testStoredNonAppRecentsKeepATitleThatEndsInBundleExtension() throws {
+        let dir = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try writeRecents(dir, seeds: [
+            // A script legitimately named `deploy.app` must not be renamed.
+            .init(id: Self.scriptID, title: "deploy.app", kind: "script"),
+            .init(id: Self.settingsID, title: "Wi-Fi.app", kind: "systemSettings", age: 60),
+            // Defensive: a snapshot whose kind says app but whose id is not
+            // app-shaped has no path to corroborate it, so it is left alone.
+            .init(id: "legacy-unscoped", title: "Odd.app", kind: "app", age: 120),
+        ])
+
+        XCTAssertEqual(recentTitles(in: dir, limit: 8), ["deploy.app", "Wi-Fi.app", "Odd.app"])
+    }
+
+    func testReadingRecentsDoesNotRewriteTheStoredFile() throws {
+        let dir = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let original = try writeRecents(dir, seeds: [
+            .init(id: "app:\(Self.remoteDesktopPath)", title: "Microsoft Remote Desktop.app", kind: "app"),
+        ])
+        let path = dir.appendingPathComponent("recents.json")
+        let mtimeBefore = try FileManager.default.attributesOfItem(atPath: path.path)[.modificationDate] as? Date
+        XCTAssertNotNil(mtimeBefore)
+
+        XCTAssertEqual(recentTitles(in: dir, limit: 8), ["Microsoft Remote Desktop"])
+
+        // Read-time normalisation, not a migration: the file is left byte-identical.
+        XCTAssertEqual(try Data(contentsOf: path), original)
+        let mtimeAfter = try FileManager.default.attributesOfItem(atPath: path.path)[.modificationDate] as? Date
+        XCTAssertEqual(mtimeAfter, mtimeBefore)
+    }
+
+    func testRecordingAnAppSelectionStoresTheStrippedTitle() throws {
+        let dir = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let tracker = FrecencyTracker(directory: dir, now: Self.now)
+
+        // The scan path now strips the extension, but the tracker must not depend
+        // on its caller for the snapshot it persists.
+        tracker.recordSelection(
+            query: "gho",
+            item: appItem(path: "/Applications/Ghostty.app", title: "Ghostty.app"),
+            now: Self.now
+        )
+
+        let stored = try XCTUnwrap(
+            try JSONSerialization.jsonObject(
+                with: Data(contentsOf: dir.appendingPathComponent("recents.json"))
+            ) as? [String: [String: Any]]
+        )
+        XCTAssertEqual(stored["app:/Applications/Ghostty.app"]?["title"] as? String, "Ghostty")
+        XCTAssertEqual(recentTitles(in: dir, limit: 8), ["Ghostty"])
     }
 }

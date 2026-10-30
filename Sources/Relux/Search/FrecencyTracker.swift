@@ -58,6 +58,8 @@ final class FrecencyTracker {
 
     private static let appIdPrefix = "app:"
     private static let storeFileName = "frecency.json"
+    /// `StoredItem.kind` value for app snapshots; the recents discriminator.
+    private static let appKind = "app"
 
     private var usage: [String: UsageEntry] = [:]
     private var learned: [String: LearnedPick] = [:]
@@ -121,21 +123,20 @@ final class FrecencyTracker {
             learned[foldedQuery] = LearnedPick(path: identity, pickedAt: now)
         }
 
+        let storedKind: String = switch item.kind {
+        case .app: Self.appKind
+        case .script: "script"
+        case .translate: "translate"
+        case .jwt: "jwt"
+        case .systemSettings: "systemSettings"
+        default: Self.appKind
+        }
         items[item.id] = StoredItem(
             id: item.id,
-            title: item.title,
+            title: Self.displayTitle(kind: storedKind, id: item.id, title: item.title),
             subtitle: item.subtitle,
             icon: item.icon,
-            kind: {
-                switch item.kind {
-                case .app: "app"
-                case .script: "script"
-                case .translate: "translate"
-                case .jwt: "jwt"
-                case .systemSettings: "systemSettings"
-                default: "app"
-                }
-            }(),
+            kind: storedKind,
             meta: item.meta,
             lastUsed: now
         )
@@ -169,13 +170,29 @@ final class FrecencyTracker {
         return pick.path == identity && UsageBoost.isLive(lastPickAt: pick.pickedAt, now: now)
     }
 
+    /// The title a stored snapshot is shown under.
+    ///
+    /// Snapshots written before `AppDisplayName` existed keep Spotlight's
+    /// `kMDItemDisplayName`, extension included, so recents rendered
+    /// `"Microsoft Remote Desktop.app"` while a fresh scan rendered the stripped
+    /// name. Normalising at the two boundaries where a title enters or leaves the
+    /// store — instead of rewriting `recents.json` — fixes that without touching
+    /// the user's file, and keeps one implementation. Both halves of the test are
+    /// required: a non-app snapshot legitimately titled `"deploy.app"` must keep
+    /// its name, so `kind` alone is not enough, and the `app:` id prefix is the
+    /// discriminator every written entry carries.
+    private static func displayTitle(kind: String, id: String, title: String) -> String {
+        guard kind == appKind, id.hasPrefix(appIdPrefix) else { return title }
+        return AppDisplayName.from(bundleName: title)
+    }
+
     /// Returns recently used items, sorted by most recent first
     func recentItems(limit: Int = 8) -> [SearchItem] {
         let sorted = items.values.sorted { $0.lastUsed > $1.lastUsed }
         return sorted.prefix(limit).map { stored in
             SearchItem(
                 id: stored.id,
-                title: stored.title,
+                title: Self.displayTitle(kind: stored.kind, id: stored.id, title: stored.title),
                 subtitle: stored.subtitle,
                 icon: stored.icon,
                 kind: {

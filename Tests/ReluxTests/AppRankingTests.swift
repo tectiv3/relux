@@ -153,4 +153,47 @@ final class AppRankingTests: XCTestCase {
         // tie between an app row and a non-app row is decided by source order, not
         // by kind. The ranker deliberately has no kind input; nothing to assert here.
     }
+
+    // MARK: - App display name
+
+    func testAppDisplayNameStripsOnlyTheBundleExtension() {
+        XCTAssertEqual(
+            AppDisplayName.from(bundleName: "Microsoft Remote Desktop.app"),
+            "Microsoft Remote Desktop"
+        )
+        XCTAssertEqual(AppDisplayName.from(bundleName: "Reminders.app"), "Reminders")
+        XCTAssertEqual(AppDisplayName.from(bundleName: "Reminders"), "Reminders")
+        XCTAssertEqual(AppDisplayName.from(bundleName: "com.apple.Safari.app"), "com.apple.Safari")
+        // A bundle literally named `.app` keeps its name; there is nothing to strip.
+        XCTAssertEqual(AppDisplayName.from(bundleName: ".app"), ".app")
+    }
+
+    /// The name the ranker sees is the name the row shows: `rem` against Remote Desktop is a
+    /// word-prefix hit scored against 24 characters, not 28.
+    func testScoredNameIsTheStrippedDisplayName() throws {
+        let displayed = AppDisplayName.from(bundleName: "Microsoft Remote Desktop.app")
+        let stripped = try XCTUnwrap(AppRanking.score(query: "rem", name: displayed, now: Self.now))
+        XCTAssertEqual(stripped, 700 - 24)
+
+        // Scoring the bundle name instead charges every app for 4 invisible characters.
+        let withExtension = try XCTUnwrap(
+            AppRanking.score(query: "rem", name: "Microsoft Remote Desktop.app", now: Self.now)
+        )
+        XCTAssertEqual(withExtension, 700 - 28)
+    }
+
+    /// With the extension attached no app could ever reach the exact-name tier, and any query
+    /// matching `app` inside `.app` (substring tier) would surface apps whose name lacks it.
+    func testExtensionHidTheExactTierAndPollutedMatches() throws {
+        let exact = try XCTUnwrap(AppRanking.score(query: "Reminders", name: "Reminders", now: Self.now))
+        XCTAssertEqual(exact, 1000 - 9)
+
+        let polluted = try XCTUnwrap(
+            AppRanking.score(query: "Reminders", name: "Reminders.app", now: Self.now)
+        )
+        XCTAssertEqual(polluted, 900 - 13)
+
+        XCTAssertNil(FuzzyMatch.score(query: "app", name: "Reminders"))
+        XCTAssertNotNil(FuzzyMatch.score(query: "app", name: "Reminders.app"))
+    }
 }
