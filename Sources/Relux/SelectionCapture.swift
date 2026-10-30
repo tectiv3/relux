@@ -18,29 +18,90 @@ private let clipboardOnlyBundleIDs: Set<String> = [
     "ru.keepcoder.Telegram",
 ]
 
+/// Stateless accessibility primitives. The capture flow itself — and every piece of mutable
+/// state it needs — lives in `SelectionCaptureService`.
 enum SelectionCapture {
-    /// Apps that don't expose selection via AX. The caller must use `captureViaClipboard()`
-    /// synchronously while they're still the key app — the synthesized ⌘C goes to whichever
-    /// window is key, so it has to happen before Relux's panel takes focus.
+    /// Apps that don't expose selection via AX. The caller must use
+    /// `SelectionCaptureService.captureViaClipboard()` synchronously while they're still the key
+    /// app — the synthesized ⌘C goes to whichever window is key, so it has to happen before
+    /// Relux's panel takes focus.
     static func isClipboardOnly(_ bundleID: String?) -> Bool {
         guard let bundleID else { return false }
         return clipboardOnlyBundleIDs.contains(bundleID)
     }
 
-    /// AX-only selection read for a specific app. Injects no events and is thread-safe, so it
-    /// can run on a background queue *after* Relux's panel is already key — capture never blocks
-    /// panel presentation or keyboard input.
-    static func captureViaAX(pid: pid_t) -> String? {
-        let appElement = AXUIElementCreateApplication(pid)
-        if let text = selectedText(in: appElement) { return text }
+    static func replaceSelectedText(with replacement: String, in app: NSRunningApplication) -> Bool {
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
 
-        // Stubborn apps (Firefox, some Electron) only expose selection once enhanced AX is on.
-        // Setting it rebuilds the app's AX tree, so do it once per app and retry — never on
-        // every activation, which was the prior latency hit.
-        if enableEnhancedAccessibilityIfNeeded(pid: pid, appElement: appElement) {
-            return selectedText(in: appElement)
+        var focusedElement: AnyObject?
+        let result = AXUIElementCopyAttributeValue(
+            appElement,
+            kAXFocusedUIElementAttribute as CFString,
+            &focusedElement
+        )
+        guard result == .success else { return false }
+
+        // swiftlint:disable:next force_cast
+        let element = focusedElement as! AXUIElement
+
+        return AXUIElementSetAttributeValue(
+            element,
+            kAXSelectedTextAttribute as CFString,
+            replacement as CFString
+        ) == .success
+    }
+
+    static func ensureAccessibilityPermission() {
+        let prompt = "AXTrustedCheckOptionPrompt" as CFString
+        let options = [prompt: true] as CFDictionary
+        AXIsProcessTrustedWithOptions(options)
+    }
+}
+
+// MARK: - Accessibility bridge
+
+/// The AX primitives the capture flow needs, injected so the retry policy and attribute-read
+/// order can be tested without a live accessibility connection.
+struct SelectionAXBridge: Sendable {
+    /// Reads the focused element's selection: standard attribute first, text markers second.
+    var selectedText: @Sendable (pid_t) async -> String?
+    /// Switches the app into enhanced AX. Rebuilds the app's AX tree, so callers do it once.
+    var enableEnhancedAX: @Sendable (pid_t) async -> Void
+}
+
+extension SelectionAXBridge {
+    static let live = SelectionAXBridge(
+        selectedText: { pid in
+            await AXSelectionReader.selectedText(pid: pid)
+        },
+        enableEnhancedAX: { pid in
+            await AXSelectionReader.enableEnhancedAccessibility(pid: pid)
         }
-        return nil
+    )
+}
+
+/// AX calls block on IPC into the target app, and enabling enhanced AX rebuilds its tree — neither
+/// belongs on the main actor while the panel is taking keystrokes. They are serialised here
+/// because they touch another process's accessibility state, not because of local mutation.
+@globalActor
+private actor AXCaptureExecutor {
+    static let shared = AXCaptureExecutor()
+}
+
+/// AX-only reads for a specific app. Isolated to `AXCaptureExecutor`; holds no local state.
+@AXCaptureExecutor
+private enum AXSelectionReader {
+    static func selectedText(pid: pid_t) -> String? {
+        let appElement = AXUIElementCreateApplication(pid)
+        return selectedText(in: appElement)
+    }
+
+    /// Enables enhanced AX via the app-level element, which is the same proxy
+    /// `AXUIElementCreateApplication` hands out for the capture read.
+    static func enableEnhancedAccessibility(pid: pid_t) {
+        let appElement = AXUIElementCreateApplication(pid)
+        AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
     }
 
     private static func selectedText(in appElement: AXUIElement) -> String? {
@@ -72,23 +133,6 @@ enum SelectionCapture {
         return nil
     }
 
-    // PIDs already switched into enhanced AX. captureViaAX runs off the main thread, so guard the set.
-    private nonisolated(unsafe) static var enhancedPIDs: Set<pid_t> = []
-    private static let enhancedLock = NSLock()
-
-    /// Enables enhanced AX once per app. Returns true if it was just enabled (caller should retry).
-    private static func enableEnhancedAccessibilityIfNeeded(pid: pid_t, appElement: AXUIElement) -> Bool {
-        enhancedLock.lock()
-        let alreadyEnabled = enhancedPIDs.contains(pid)
-        if !alreadyEnabled { enhancedPIDs.insert(pid) }
-        enhancedLock.unlock()
-        guard !alreadyEnabled else { return false }
-
-        AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
-        AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-        return true
-    }
-
     private static func selectedTextViaMarkers(from element: AXUIElement) -> String? {
         var markerRange: AnyObject?
         let mrResult = AXUIElementCopyAttributeValue(
@@ -112,31 +156,46 @@ enum SelectionCapture {
         }
         return text as? String
     }
+}
 
-    static func replaceSelectedText(with replacement: String, in app: NSRunningApplication) -> Bool {
-        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+// MARK: - Capture flow
 
-        var focusedElement: AnyObject?
-        let result = AXUIElementCopyAttributeValue(
-            appElement,
-            kAXFocusedUIElementAttribute as CFString,
-            &focusedElement
-        )
-        guard result == .success else { return false }
+/// The selection capture flow. Its only mutable state — the apps already switched into enhanced
+/// AX — is main-actor isolated by construction, so there is no unsynchronised global; the blocking
+/// AX work hops to `AXCaptureExecutor` inside `SelectionAXBridge`.
+@MainActor
+final class SelectionCaptureService {
+    private let bridge: SelectionAXBridge
+    private var enhancedAXPIDs: Set<pid_t> = []
 
-        // swiftlint:disable:next force_cast
-        let element = focusedElement as! AXUIElement
+    init(bridge: SelectionAXBridge = .live) {
+        self.bridge = bridge
+    }
 
-        return AXUIElementSetAttributeValue(
-            element,
-            kAXSelectedTextAttribute as CFString,
-            replacement as CFString
-        ) == .success
+    /// AX-only selection read for a specific app. Injects no events, so it can run *after* Relux's
+    /// panel is already key — capture never blocks panel presentation or keyboard input.
+    func capture(from pid: pid_t) async -> String? {
+        if let text = await bridge.selectedText(pid) {
+            return text
+        }
+
+        // Stubborn apps (Firefox, some Electron) only expose selection once enhanced AX is on.
+        // Setting it rebuilds the app's AX tree, so do it once per app and retry — never on
+        // every activation, which was the prior latency hit.
+        guard firstEnhancedAXRequest(for: pid) else { return nil }
+        await bridge.enableEnhancedAX(pid)
+        return await bridge.selectedText(pid)
+    }
+
+    /// True the first time an app is asked to switch enhanced AX on, so the retry runs at most
+    /// once per app for this process's lifetime.
+    private func firstEnhancedAXRequest(for pid: pid_t) -> Bool {
+        enhancedAXPIDs.insert(pid).inserted
     }
 
     // MARK: - Chromium clipboard fallback
 
-    static func captureViaClipboard() -> String? {
+    func captureViaClipboard() -> String? {
         let pasteboard = NSPasteboard.general
         let oldChangeCount = pasteboard.changeCount
 
@@ -188,11 +247,5 @@ enum SelectionCapture {
 
         log.debug("Clipboard fallback: no text captured")
         return nil
-    }
-
-    static func ensureAccessibilityPermission() {
-        let prompt = "AXTrustedCheckOptionPrompt" as CFString
-        let options = [prompt: true] as CFDictionary
-        AXIsProcessTrustedWithOptions(options)
     }
 }

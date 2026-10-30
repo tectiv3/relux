@@ -10,6 +10,8 @@ private let log = Logger(subsystem: "com.relux.app", category: "appdelegate")
 class AppDelegate: NSObject, NSApplicationDelegate {
     let appState = AppState()
     var panel: FloatingPanel?
+    /// Owns the per-app accessibility state of selection capture; lives as long as the app.
+    let selectionCaptureService = SelectionCaptureService()
 
     func applicationDidFinishLaunching(_: Notification) {
         appState.settings.registerDefaults()
@@ -126,19 +128,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             if SelectionCapture.isClipboardOnly(previousApp?.bundleIdentifier) {
                 // ⌘C must be synthesized while the source app is still key — before the panel.
-                appState.currentSelection = SelectionCapture.captureViaClipboard()
+                appState.currentSelection = selectionCaptureService.captureViaClipboard()
                 showPanel()
             } else {
                 // Panel first so keystrokes are never dropped; read the selection via AX
                 // off the main thread and fill it in when ready.
                 showPanel()
                 if let pid = previousApp?.processIdentifier {
-                    Task.detached(priority: .userInitiated) { [appState] in
-                        guard let text = SelectionCapture.captureViaAX(pid: pid) else { return }
-                        await MainActor.run {
-                            appState.currentSelection = text
-                            appState.selectionCaptureID = UUID()
-                        }
+                    Task(priority: .userInitiated) {
+                        guard let text = await selectionCaptureService.capture(from: pid) else { return }
+                        appState.currentSelection = text
+                        appState.selectionCaptureID = UUID()
                     }
                 }
             }
