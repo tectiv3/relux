@@ -14,6 +14,7 @@ final class AppRankingTests: XCTestCase {
         explicitOpens: Int,
         ambientOpens: Int = 0,
         ageDays: Double,
+        ambientAgeDays: Double? = nil,
         lastPick: Bool = false
     ) -> Double {
         UsageBoost.value(
@@ -21,9 +22,111 @@ final class AppRankingTests: XCTestCase {
                 explicitOpens: explicitOpens,
                 ambientOpens: ambientOpens,
                 lastUsed: Self.now.addingTimeInterval(-Self.days(ageDays)),
+                ambientLastUsed: ambientOpens > 0
+                    ? Self.now.addingTimeInterval(-Self.days(ambientAgeDays ?? ageDays))
+                    : nil,
                 lastPick: lastPick
             ),
             now: Self.now
+        )
+    }
+
+    /// Both counters are bounded, and each bounds only its own term.
+    func testAmbientCannotSatiateTheOpenCapOnItsOwn() {
+        XCTAssertEqual(boost(explicitOpens: 9, ageDays: 0), 180, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 10, ageDays: 0), 200, accuracy: 1e-9)
+        // Ambient saturates at one explicit pick, not at the 200-point cap.
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 1, ageDays: 0), 4, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 5, ageDays: 0), 20, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 50, ageDays: 0), 20, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 500, ageDays: 0), 20, accuracy: 1e-9)
+        // Ambient is added after the explicit cap, so mixed usage tops out at 200 + 20.
+        XCTAssertEqual(boost(explicitOpens: 5, ambientOpens: 25, ageDays: 0), 100 + 20, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 10, ambientOpens: 500, ageDays: 0), 200 + 20, accuracy: 1e-9)
+    }
+
+    func testAmbientBonusDecaysByTheSameCurve() {
+        // 10 ambient events already reach the ambient ceiling of 20.
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 50, ageDays: 30), 10, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 10, ageDays: 30), 10, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 10, ageDays: 90), 2.5, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 50, ageDays: 0), 20, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 50, ageDays: 60), 5, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 1, ageDays: 30), 2, accuracy: 1e-9)
+    }
+
+    // MARK: - Ambient and explicit weight interaction
+
+    /// The review's failure case, one level up from the write site: a large stale explicit
+    /// history is worth 3.1, and its ambient event today may add 4 — never the 200 the shared
+    /// anchor used to mint — so an app picked last week still wins.
+    func testFreshAmbientAnchorDoesNotRestoreStaleExplicitWeight() throws {
+        let abandoned = AppUsage(
+            explicitOpens: 139,
+            ambientOpens: 1,
+            lastUsed: Self.now.addingTimeInterval(-Self.days(180)),
+            ambientLastUsed: Self.now
+        )
+        let pickedLastWeek = AppUsage(
+            explicitOpens: 3,
+            lastUsed: Self.now.addingTimeInterval(-Self.days(7))
+        )
+        XCTAssertEqual(UsageBoost.value(for: abandoned, now: Self.now), 200 * 0.015625 + 4, accuracy: 1e-9)
+        XCTAssertLessThan(
+            UsageBoost.value(for: abandoned, now: Self.now),
+            UsageBoost.value(for: pickedLastWeek, now: Self.now)
+        )
+
+        // Same name and query, so the fuzzy term cancels and the order is the usage order.
+        let stale = try XCTUnwrap(AppRanking.score(query: "rem", name: "Reminders", usage: abandoned, now: Self.now))
+        let recent = try XCTUnwrap(
+            AppRanking.score(query: "rem", name: "Reminders", usage: pickedLastWeek, now: Self.now)
+        )
+        XCTAssertLessThan(stale, recent)
+    }
+
+    /// No amount of background activity may out-earn two deliberate picks: ambient alone
+    /// saturates at the weight of a single explicit open, at any count.
+    func testAmbientOnlyAccumulationNeverOutEarnsARecentExplicitPick() throws {
+        let picked = AppUsage(explicitOpens: 2, lastUsed: Self.now)
+        for ambient in [1, 5, 10, 49, 50, 51, 200, 500, 5000] {
+            let ambientOnly = AppUsage(ambientOpens: ambient, ambientLastUsed: Self.now)
+            let value = UsageBoost.value(for: ambientOnly, now: Self.now)
+            XCTAssertLessThan(value, UsageBoost.value(for: picked, now: Self.now), "\(ambient) ambient events")
+            XCTAssertLessThanOrEqual(value, Double(UsageBoost.perExplicitOpen), "\(ambient) ambient events")
+
+            // Through the ranker too: the ambient-only app must not reach the explicit one.
+            let ambientRow = try XCTUnwrap(
+                AppRanking.score(query: "rem", name: "Reminders", usage: ambientOnly, now: Self.now)
+            )
+            let pickedRow = try XCTUnwrap(
+                AppRanking.score(query: "rem", name: "Reminders", usage: picked, now: Self.now)
+            )
+            XCTAssertLessThan(ambientRow, pickedRow, "\(ambient) ambient events")
+        }
+    }
+
+    /// The fix must not zero ambient learning: it still contributes, monotonically, while it
+    /// has not saturated, and it still decays on its own anchor.
+    func testAmbientContributionRemainsPositiveAndMonotonic() {
+        let none = boost(explicitOpens: 0, ageDays: 0)
+        let one = boost(explicitOpens: 0, ambientOpens: 1, ageDays: 0)
+        let four = boost(explicitOpens: 0, ambientOpens: 4, ageDays: 0)
+        let pastCeiling = boost(explicitOpens: 0, ambientOpens: 500, ageDays: 0)
+
+        XCTAssertEqual(none, 0, accuracy: 1e-9)
+        XCTAssertGreaterThan(one, none)
+        XCTAssertGreaterThan(four, one)
+        XCTAssertGreaterThan(pastCeiling, 0)
+        XCTAssertEqual(pastCeiling, 20, accuracy: 1e-9)
+
+        // Ambient recency still matters: the same count a half-life ago is worth half.
+        XCTAssertLessThan(boost(explicitOpens: 0, ambientOpens: 4, ageDays: 30), four)
+        // Ambient recency is independent of the explicit anchor on the same entry.
+        XCTAssertEqual(
+            boost(explicitOpens: 10, ambientOpens: 4, ageDays: 90, ambientAgeDays: 0),
+            200 * 0.125 + 16,
+            accuracy: 1e-9
         )
     }
 
@@ -59,38 +162,30 @@ final class AppRankingTests: XCTestCase {
         XCTAssertEqual(boost(explicitOpens: 1, ageDays: 60), 5, accuracy: 1e-9)
     }
 
-    /// An ambient observation is worth a fifth of an explicit pick, and the two
-    /// counters are weighted before the cap, not after it.
+    /// Per event an ambient observation is worth a fifth of an explicit pick, and the two
+    /// terms are capped separately, so neither drowns the other.
     func testAmbientUsageIsWeightedOneFifthOfAnExplicitPick() {
         XCTAssertEqual(UsageBoost.value(for: AppUsage(ambientOpens: 1, lastUsed: Self.now), now: Self.now), 4)
         XCTAssertEqual(UsageBoost.value(for: AppUsage(ambientOpens: 5, lastUsed: Self.now), now: Self.now), 20)
         XCTAssertEqual(UsageBoost.value(for: AppUsage(explicitOpens: 1, lastUsed: Self.now), now: Self.now), 20)
         XCTAssertEqual(
             UsageBoost.value(
-                for: AppUsage(explicitOpens: 2, ambientOpens: 5, lastUsed: Self.now),
+                for: AppUsage(explicitOpens: 2, ambientOpens: 5, lastUsed: Self.now, ambientLastUsed: Self.now),
                 now: Self.now
             ),
             40 + 20
         )
     }
 
-    func testBothCountersSaturateTheSameCap() {
+    /// The old `testBothCountersSaturateTheSameCap` pinned the defect: 50 ambient events scored
+    /// the same 200 as 10 explicit picks, so ambient could satiate the cap alone.
+    /// Both counters still reach their own ceiling.
+    func testBothCountersReachTheCapOnTheirOwn() {
         XCTAssertEqual(boost(explicitOpens: 9, ageDays: 0), 180, accuracy: 1e-9)
         XCTAssertEqual(boost(explicitOpens: 10, ageDays: 0), 200, accuracy: 1e-9)
-        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 49, ageDays: 0), 196, accuracy: 1e-9)
-        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 50, ageDays: 0), 200, accuracy: 1e-9)
-        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 500, ageDays: 0), 200, accuracy: 1e-9)
-        // 5 * 20 + 25 * 4 = 200 exactly: mixed usage reaches the cap without one
-        // counter drowning the other.
-        XCTAssertEqual(boost(explicitOpens: 5, ambientOpens: 25, ageDays: 0), 200, accuracy: 1e-9)
-    }
-
-    func testAmbientBonusDecaysByTheSameCurve() {
-        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 50, ageDays: 30), 100, accuracy: 1e-9)
-        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 10, ageDays: 30), 20, accuracy: 1e-9)
-        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 10, ageDays: 90), 5, accuracy: 1e-9)
-        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 50, ageDays: 0), 200, accuracy: 1e-9)
-        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 50, ageDays: 60), 50, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 5, ageDays: 0), 20, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 50, ageDays: 0), 20, accuracy: 1e-9)
+        XCTAssertEqual(boost(explicitOpens: 0, ambientOpens: 500, ageDays: 0), 20, accuracy: 1e-9)
     }
 
     func testLearnedPickDoesNotDecay() {

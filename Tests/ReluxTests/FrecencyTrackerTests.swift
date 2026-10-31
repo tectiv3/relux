@@ -20,6 +20,7 @@ final class FrecencyTrackerTests: XCTestCase {
         var explicitOpens: Int
         var ambientOpens: Int
         var lastUsed: Date
+        var ambientLastUsed: Date?
     }
 
     private struct StoredPick: Decodable {
@@ -640,6 +641,37 @@ final class FrecencyTrackerTests: XCTestCase {
         )
     }
 
+    /// A file written by the one-anchor code has ambient counts but no ambient anchor. Its
+    /// `lastUsed` is the best timestamp such a file contains, so the ambient term decays on it.
+    func testOneAnchorEntryAnchorsAmbientOnLastUsed() throws {
+        let dir = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let lastUsed = Self.now.addingTimeInterval(-Self.days(30))
+        let payload: [String: Any] = [
+            "usage": [
+                Self.remoteDesktopPath: [
+                    "explicitOpens": 2,
+                    "ambientOpens": 3,
+                    "lastUsed": lastUsed.timeIntervalSinceReferenceDate,
+                ],
+            ],
+            "learned": [String: String](),
+        ]
+        try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+            .write(to: dir.appendingPathComponent("frecency.json"))
+
+        let tracker = FrecencyTracker(directory: dir, now: Self.now)
+        let state = tracker.appUsage(query: "", path: Self.remoteDesktopPath, now: Self.now)
+        XCTAssertEqual(state.explicitOpens, 2)
+        XCTAssertEqual(state.ambientOpens, 3)
+        // 40 explicit + 12 ambient, both halved once by the 30-day-old anchor.
+        XCTAssertEqual(
+            tracker.usageBoost(query: "", itemId: "app:\(Self.remoteDesktopPath)", now: Self.now),
+            52 * 0.5,
+            accuracy: 1e-9
+        )
+    }
+
     /// Ambient events carry no query, so they must never set or move a learned pick —
     /// otherwise a background launch would outvote the panel choice for that query.
     func testAmbientRecordNeverTouchesLearned() throws {
@@ -667,6 +699,63 @@ final class FrecencyTrackerTests: XCTestCase {
         XCTAssertEqual(reminders.ambientOpens, 1)
     }
 
+    /// The review's concrete failure: 139 explicit picks 180 days ago are worth 3.1, and one
+    /// ambient launch today used to re-anchor the whole bonus at `now` and mint 204, outranking
+    /// an app the user picked last week. The ambient write must not move the explicit anchor.
+    func testAmbientEventDoesNotRestoreStaleExplicitWeight() {
+        let dir = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let tracker = FrecencyTracker(directory: dir, now: Self.now)
+        let remote = appItem(path: Self.remoteDesktopPath, title: "Microsoft Remote Desktop")
+        let reminders = appItem(path: Self.remindersPath, title: "Reminders")
+        let longAgo = Self.now.addingTimeInterval(-Self.days(180))
+        let lastWeek = Self.now.addingTimeInterval(-Self.days(7))
+
+        // No query, so no learned pick inflates either score: this is the opens bonus alone.
+        for _ in 0 ..< 139 {
+            tracker.recordSelection(query: "", item: remote, now: longAgo)
+        }
+        for _ in 0 ..< 3 {
+            tracker.recordSelection(query: "", item: reminders, now: lastWeek)
+        }
+
+        let remoteID = "app:\(Self.remoteDesktopPath)"
+        let remindersID = "app:\(Self.remindersPath)"
+        let beforeAmbient = tracker.usageBoost(query: "", itemId: remoteID, now: Self.now)
+        tracker.recordAmbient(path: Self.remoteDesktopPath, now: Self.now)
+        let afterAmbient = tracker.usageBoost(query: "", itemId: remoteID, now: Self.now)
+        let recentPick = tracker.usageBoost(query: "", itemId: remindersID, now: Self.now)
+
+        // 200 capped, six half-lives old; one ambient observation adds its own 4 points.
+        XCTAssertEqual(beforeAmbient, 200 * 0.015625, accuracy: 1e-9)
+        XCTAssertEqual(afterAmbient - beforeAmbient, Double(UsageBoost.perAmbientOpen), accuracy: 1e-9)
+        XCTAssertEqual(recentPick, 60 * pow(0.5, 7.0 / 30.0), accuracy: 1e-9)
+        XCTAssertLessThan(afterAmbient, recentPick)
+    }
+
+    /// Ambient alone, read back through the tracker: no count may out-earn two deliberate picks.
+    func testAmbientOnlyHistoryNeverOutEarnsARecentExplicitPick() {
+        let dir = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let tracker = FrecencyTracker(directory: dir, now: Self.now)
+        let picked = appItem(path: Self.remindersPath, title: "Reminders")
+
+        for index in 0 ..< 500 {
+            tracker.recordAmbient(
+                path: Self.remoteDesktopPath,
+                now: Self.now.addingTimeInterval(-Double(500 - index))
+            )
+        }
+        tracker.recordSelection(query: "", item: picked, now: Self.now)
+        tracker.recordSelection(query: "", item: picked, now: Self.now)
+
+        let ambientOnly = tracker.usageBoost(query: "", itemId: "app:\(Self.remoteDesktopPath)", now: Self.now)
+        let recentPick = tracker.usageBoost(query: "", itemId: "app:\(Self.remindersPath)", now: Self.now)
+        XCTAssertGreaterThan(ambientOnly, 0)
+        XCTAssertLessThan(ambientOnly, recentPick)
+        XCTAssertLessThanOrEqual(ambientOnly, Double(UsageBoost.ambientCap))
+    }
+
     /// `frecency.json` is not rewritten per activation: at most one write per
     /// `ambientSaveInterval`, and `flush` is what gets the rest onto disk.
     func testAmbientWritesAreDebouncedAndFlushed() throws {
@@ -679,6 +768,10 @@ final class FrecencyTrackerTests: XCTestCase {
         XCTAssertEqual(try storedState(in: dir).usage[Self.remindersPath]?.ambientOpens, 1)
         XCTAssertEqual(
             try XCTUnwrap(try storedState(in: dir).usage[Self.remindersPath]?.lastUsed),
+            Self.now
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(try storedState(in: dir).usage[Self.remindersPath]?.ambientLastUsed),
             Self.now
         )
         // Ambient observations do not create recents snapshots.
@@ -699,7 +792,9 @@ final class FrecencyTrackerTests: XCTestCase {
 
         tracker.flush(now: later)
         XCTAssertEqual(try storedState(in: dir).usage[Self.remindersPath]?.ambientOpens, 2)
-        XCTAssertEqual(try storedState(in: dir).usage[Self.remindersPath]?.lastUsed, later)
+        // Ambient moves only its own anchor: the explicit anchor is still the first observation.
+        XCTAssertEqual(try storedState(in: dir).usage[Self.remindersPath]?.lastUsed, Self.now)
+        XCTAssertEqual(try storedState(in: dir).usage[Self.remindersPath]?.ambientLastUsed, later)
         // A full interval after the last write, the next observation writes immediately.
         let muchLater = later.addingTimeInterval(FrecencyTracker.ambientSaveInterval + 1)
         tracker.recordAmbient(path: Self.remindersPath, now: muchLater)
@@ -725,7 +820,7 @@ final class FrecencyTrackerTests: XCTestCase {
 
         let stored = try storedState(in: dir)
         XCTAssertEqual(stored.usage[Self.remindersPath]?.ambientOpens, 2)
-        XCTAssertEqual(stored.usage[Self.remindersPath]?.lastUsed, held)
+        XCTAssertEqual(stored.usage[Self.remindersPath]?.ambientLastUsed, held)
         XCTAssertEqual(stored.usage["/Applications/Ghostty.app"]?.explicitOpens, 1)
     }
 

@@ -10,14 +10,15 @@ private enum UsageEntryKey: String, CodingKey {
     case explicitOpens
     case ambientOpens
     case lastUsed
+    case ambientLastUsed
     case opens
 }
 
 /// Learns which apps the user opens and which app they pick for a given query.
 ///
 /// Two stores, both persisted atomically to `frecency.json`:
-/// - `usage`: explicit panel picks plus ambient launches/activations, and the last-use
-///   timestamp, keyed by stable identity — the bundle path for apps (not the
+/// - `usage`: explicit panel picks plus ambient launches/activations, each with its own
+///   last-use timestamp, keyed by stable identity — the bundle path for apps (not the
 ///   `app:`-prefixed `SearchItem.id`), the item id for everything else;
 /// - `learned`: folded query -> identity of the last pick for that query. Written only
 ///   from `recordSelection`; ambient observations never touch it.
@@ -38,17 +39,20 @@ final class FrecencyTracker {
     }
 
     /// One identity's usage record. The two counters stay separate because they
-    /// are weighted differently (see `UsageBoost.perExplicitOpen`); `lastUsed` is
-    /// the undecayed recency anchor for the whole bonus.
+    /// are weighted differently (see `UsageBoost.perExplicitOpen`), and so do
+    /// their recency anchors: `lastUsed` moves only on a panel pick,
+    /// `ambientLastUsed` only on an observed launch/activation.
     private struct UsageEntry: Codable {
         var explicitOpens: Int
         var ambientOpens: Int
         var lastUsed: Date
+        var ambientLastUsed: Date?
 
-        init(explicitOpens: Int, ambientOpens: Int, lastUsed: Date) {
+        init(explicitOpens: Int, ambientOpens: Int, lastUsed: Date, ambientLastUsed: Date?) {
             self.explicitOpens = explicitOpens
             self.ambientOpens = ambientOpens
             self.lastUsed = lastUsed
+            self.ambientLastUsed = ambientLastUsed
         }
 
         /// Ambient observations did not exist when `{ opens, lastUsed }` was written,
@@ -64,6 +68,11 @@ final class FrecencyTracker {
                 explicitOpens = try container.decode(Int.self, forKey: .opens)
                 ambientOpens = 0
             }
+            // Until the anchors were split, ambient activity folded its timestamp into
+            // `lastUsed`, so that is the best available ambient anchor for an entry that
+            // carried ambient counts. The pre-ambient shape has none.
+            ambientLastUsed = try container.decodeIfPresent(Date.self, forKey: .ambientLastUsed)
+                ?? (ambientOpens > 0 ? lastUsed : nil)
         }
 
         func encode(to encoder: Encoder) throws {
@@ -71,6 +80,7 @@ final class FrecencyTracker {
             try container.encode(explicitOpens, forKey: .explicitOpens)
             try container.encode(ambientOpens, forKey: .ambientOpens)
             try container.encode(lastUsed, forKey: .lastUsed)
+            try container.encodeIfPresent(ambientLastUsed, forKey: .ambientLastUsed)
         }
     }
 
@@ -182,7 +192,8 @@ final class FrecencyTracker {
         usage[identity] = UsageEntry(
             explicitOpens: (existing?.explicitOpens ?? 0) + 1,
             ambientOpens: existing?.ambientOpens ?? 0,
-            lastUsed: now
+            lastUsed: now,
+            ambientLastUsed: existing?.ambientLastUsed
         )
         if !foldedQuery.isEmpty {
             learned[foldedQuery] = LearnedPick(path: identity, pickedAt: now)
@@ -218,13 +229,16 @@ final class FrecencyTracker {
     ///
     /// Ambient events must never teach a query preference: they carry no query, and
     /// inferring one from "the app named `rem` was opened" would let a background
-    /// launch outvote a real pick. Only `explicitOpens` and `lastUsed` move here.
+    /// launch outvote a real pick. Neither may they move `lastUsed`: refreshing the
+    /// explicit anchor here would mint the app's whole open bonus on evidence the
+    /// user never gave, so ambient only advances `ambientLastUsed`.
     func recordAmbient(path: String, now: Date) {
         let existing = usage[path]
         usage[path] = UsageEntry(
             explicitOpens: existing?.explicitOpens ?? 0,
             ambientOpens: (existing?.ambientOpens ?? 0) + 1,
-            lastUsed: now
+            lastUsed: existing?.lastUsed ?? now,
+            ambientLastUsed: now
         )
 
         // The debounce is driven by the injected clock so the write rate is a pure
@@ -254,6 +268,7 @@ final class FrecencyTracker {
             explicitOpens: entry?.explicitOpens ?? 0,
             ambientOpens: entry?.ambientOpens ?? 0,
             lastUsed: entry?.lastUsed,
+            ambientLastUsed: entry?.ambientLastUsed,
             lastPick: isLastPick(query: query, identity: identity, now: now)
         )
     }
@@ -383,7 +398,7 @@ final class FrecencyTracker {
     /// The timestamps were never stored, so "now" is the only defensible value.
     private func migrate(previous: PreviousUsage, now: Date) {
         usage = previous.usage.mapValues {
-            UsageEntry(explicitOpens: $0, ambientOpens: 0, lastUsed: now)
+            UsageEntry(explicitOpens: $0, ambientOpens: 0, lastUsed: now, ambientLastUsed: nil)
         }
         learned = previous.learned.mapValues { LearnedPick(path: $0, pickedAt: now) }
     }
@@ -399,7 +414,8 @@ final class FrecencyTracker {
             usage[identity] = UsageEntry(
                 explicitOpens: (existing?.explicitOpens ?? 0) + entry.count,
                 ambientOpens: existing?.ambientOpens ?? 0,
-                lastUsed: max(existing?.lastUsed ?? entry.lastUsed, entry.lastUsed)
+                lastUsed: max(existing?.lastUsed ?? entry.lastUsed, entry.lastUsed),
+                ambientLastUsed: existing?.ambientLastUsed
             )
         }
         // `learned` stays empty: a 4-character query prefix is not a full folded
