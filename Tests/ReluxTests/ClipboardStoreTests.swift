@@ -511,19 +511,17 @@ final class ClipboardStoreTests: XCTestCase {
         XCTAssertEqual(results?.isEmpty, true)
     }
 
-    /// Ordering on the FTS path: pinned first, then relevance, then recency. The three matching
-    /// rows have equal-length text, so bm25 scores them identically and recency decides.
+    /// Ordering on the FTS path is the same as the unfiltered page: pinned first, then most
+    /// recently used. `MATCH` only filters — a row that matches the term more often is not moved
+    /// ahead of a newer one, because the panel groups by date and a relevance order would split
+    /// one day across several headings.
     @MainActor
     func testSearchOrdersPinnedFirstThenByRecency() throws {
         let (database, store) = try makeStore()
         try insertText("alpha aaa", into: store)
         try insertText("alpha bbb", into: store)
-        try insertText("alpha ccc", into: store)
-        // bm25 needs documents that do *not* contain the term; when a term is in more than half
-        // the table its inverse document frequency flips sign.
-        for index in 0 ..< 10 {
-            try insertText("filler \(index)", into: store)
-        }
+        // Three more occurrences of the term: a relevance order would rank this row first.
+        try insertText("alpha alpha alpha alpha", into: store)
         try database.execute("UPDATE clipboard_history SET updated_at = 3000 WHERE id = 1")
         try database.execute("UPDATE clipboard_history SET updated_at = 2000 WHERE id = 2")
         try database.execute("UPDATE clipboard_history SET updated_at = 1000 WHERE id = 3")
@@ -531,11 +529,25 @@ final class ClipboardStoreTests: XCTestCase {
         XCTAssertEqual(
             searchIDs("alpha", in: store),
             [1, 2, 3],
-            "equal relevance falls back to the most recently used row"
+            "recency decides; the row with the most occurrences of the term does not jump the queue"
         )
 
         store.pin(id: 3)
-        XCTAssertEqual(searchIDs("alpha", in: store), [3, 1, 2], "a pinned row leads regardless of relevance")
+        XCTAssertEqual(searchIDs("alpha", in: store), [3, 1, 2], "a pinned row leads regardless of recency")
+    }
+
+    /// Equal timestamps must still produce one order on every run: `id DESC` breaks the tie, so the
+    /// list cannot reorder itself between two queries.
+    @MainActor
+    func testSearchBreaksEqualTimestampsByIDDescending() throws {
+        let (database, store) = try makeStore()
+        try insertText("tie one", into: store)
+        try insertText("tie two", into: store)
+        try insertText("tie three", into: store)
+        try database.execute("UPDATE clipboard_history SET updated_at = 1000")
+
+        XCTAssertEqual(searchIDs("tie", in: store), [3, 2, 1])
+        XCTAssertEqual(searchIDs("tie", in: store), searchIDs("tie", in: store))
     }
 
     @MainActor

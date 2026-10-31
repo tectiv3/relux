@@ -189,62 +189,12 @@ struct ClipboardHistoryView: View {
 
     // MARK: - List Panel
 
-    private var groupedEntries: [(label: String, items: [(index: Int, entry: ClipboardEntry)])] {
-        let items = model.filteredEntries
-        let calendar = Calendar.current
-        let isFiltering = model.isFiltering
-
-        var groups: [(label: String, items: [(index: Int, entry: ClipboardEntry)])] = []
-        var currentLabel = ""
-        var currentItems: [(index: Int, entry: ClipboardEntry)] = []
-
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateStyle = .medium
-        dateFormatter.timeStyle = .none
-
-        if !isFiltering {
-            let pinnedItems = items.enumerated()
-                .filter(\.element.isPinned)
-                .map { (index: $0.offset, entry: $0.element) }
-            if !pinnedItems.isEmpty {
-                groups.append(("Pinned", pinnedItems))
-            }
-        }
-
-        for (index, entry) in items.enumerated() {
-            if !isFiltering, entry.isPinned {
-                continue
-            }
-
-            let label: String = if calendar.isDateInToday(entry.updatedAt) {
-                "Today"
-            } else if calendar.isDateInYesterday(entry.updatedAt) {
-                "Yesterday"
-            } else {
-                dateFormatter.string(from: entry.updatedAt)
-            }
-
-            if label != currentLabel {
-                if !currentItems.isEmpty {
-                    groups.append((currentLabel, currentItems))
-                }
-                currentLabel = label
-                currentItems = []
-            }
-            currentItems.append((index, entry))
-        }
-        if !currentItems.isEmpty {
-            groups.append((currentLabel, currentItems))
-        }
-        return groups
-    }
-
     private var listPanel: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
                     Spacer().frame(height: 4)
-                    ForEach(Array(groupedEntries.enumerated()), id: \.element.label) { _, section in
+                    ForEach(model.sections) { section in
                         Text(section.label)
                             .font(.system(size: 11, weight: .medium))
                             .foregroundColor(.secondary)
@@ -253,27 +203,31 @@ struct ClipboardHistoryView: View {
                             .padding(.top, 8)
                             .padding(.bottom, 2)
 
-                        ForEach(section.items, id: \.entry.id) { index, entry in
-                            entryRow(entry: entry, isSelected: index == model.selectedIndex)
-                                .id(entry.id)
+                        ForEach(section.rows) { row in
+                            entryRow(entry: row.entry, isSelected: row.index == model.selectedIndex)
+                                .id(row.entry.id)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
-                                    model.select(row: index)
+                                    model.select(row: row.index)
                                 }
                                 .onTapGesture(count: 2) {
-                                    model.select(row: index)
-                                    model.paste(entry)
+                                    model.select(row: row.index)
+                                    model.paste(row.entry)
                                 }
                         }
                     }
                 }
             }
-            .onChange(of: model.selectedIndex) { _, newIndex in
-                let items = model.filteredEntries
-                if newIndex >= 0, newIndex < items.count {
-                    withAnimation {
-                        proxy.scrollTo(items[newIndex].id, anchor: .center)
+            // Keyed on the entry, not the index: a new result set can select row 0 again, and an
+            // arrow key can move the selection without the list otherwise knowing to follow it.
+            .onChange(of: model.selectedEntry?.id) { _, newID in
+                guard let newID else { return }
+                if model.selectionOrigin == .navigation {
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        proxy.scrollTo(newID, anchor: .center)
                     }
+                } else {
+                    proxy.scrollTo(newID, anchor: .center)
                 }
             }
         }

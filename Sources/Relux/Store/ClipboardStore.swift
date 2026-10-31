@@ -137,7 +137,13 @@ final class ClipboardStore {
         return entries
     }
 
-    /// Rows matching an FTS5 query across the whole table, pinned first and then by relevance.
+    /// Rows matching an FTS5 query across the whole table, pinned first and then chronologically.
+    ///
+    /// `MATCH` filters here, it does not rank. The panel shows a copy history under a date
+    /// heading, so a relevance order interleaves the dates and the same day appears in several
+    /// non-adjacent runs; the list then renders one heading per run with a colliding id and
+    /// SwiftUI draws it wrong (blank bands, stale fills). Relevance over a substring match of the
+    /// user's own clipboard also has little signal: every hit is a literal substring.
     ///
     /// The index is trigram-tokenized (schema 3), so a query matches any substring of three or
     /// more characters in `text_content` or `source_name` — mid-word, sub-word CJK and source app
@@ -165,11 +171,11 @@ final class ClipboardStore {
             let placeholders = Array(repeating: "?", count: contentTypes.count).joined(separator: ", ")
             sql += " AND h.content_type IN (\(placeholders))"
         }
-        // bm25 is best-first when ascending. It scores the matched columns together, so a source
-        // name hit counts like a body hit; recency breaks an equal-score tie.
+        // Chronological, matching the unfiltered page (`fetchAll`): pinned first, then most
+        // recently used. `id DESC` breaks equal timestamps so the order is deterministic.
         sql += """
          ORDER BY CASE WHEN h.pinned_at IS NOT NULL THEN 0 ELSE 1 END, \
-        bm25(clipboard_fts), h.updated_at DESC \
+        h.updated_at DESC, h.id DESC \
         LIMIT ?
         """
 

@@ -1,3 +1,4 @@
+import Foundation
 import ReluxCore
 import XCTest
 
@@ -192,6 +193,86 @@ final class ClipboardListModelTests: XCTestCase {
         XCTAssertNotNil(model.selectedEntry)
     }
 
+    /// The selection is an index, so the row it names has to come from the result set the panel is
+    /// showing now. A query that changes the first row must move the selection with it.
+    @MainActor
+    func testQueryChangeSelectsTheFirstRowOfTheNewResultSet() throws {
+        let (database, store) = try makeStore()
+        let alphaOlder = try insertText("alpha older", into: store)
+        let beta = try insertText("beta row", into: store)
+        let alphaNewer = try insertText("alpha newer", into: store)
+        try database.execute("UPDATE clipboard_history SET updated_at = 3000 WHERE id = \(alphaNewer.id)")
+        try database.execute("UPDATE clipboard_history SET updated_at = 2000 WHERE id = \(beta.id)")
+        try database.execute("UPDATE clipboard_history SET updated_at = 1000 WHERE id = \(alphaOlder.id)")
+
+        let model = ClipboardListModel(store: store)
+        model.reload()
+        XCTAssertEqual(model.filteredEntries.map(\.id), [alphaNewer.id, beta.id, alphaOlder.id])
+        model.select(row: 1)
+        XCTAssertEqual(model.selectedEntry?.id, beta.id)
+
+        model.searchText = "alpha"
+
+        XCTAssertEqual(model.selectedIndex, 0)
+        XCTAssertEqual(model.filteredEntries.map(\.id), [alphaNewer.id, alphaOlder.id], "chronological, one date order")
+        XCTAssertEqual(
+            model.selectedEntry?.id,
+            model.filteredEntries.first?.id,
+            "the selection names a row of the new result set, not an index carried over"
+        )
+        XCTAssertEqual(model.selectedEntry?.id, alphaNewer.id)
+    }
+
+    /// A new copy lands at the top while the panel is open. The selection follows its entry, and
+    /// the index it ends up on is always inside the list — the model never indexes a shorter one.
+    @MainActor
+    func testANewTopEntryKeepsTheSelectionOnTheSameRow() throws {
+        let (database, store) = try makeStore()
+        let first = try insertText("first", into: store)
+        let second = try insertText("second", into: store)
+        let third = try insertText("third", into: store)
+        try database.execute("UPDATE clipboard_history SET updated_at = 3000 WHERE id = \(first.id)")
+        try database.execute("UPDATE clipboard_history SET updated_at = 2000 WHERE id = \(second.id)")
+        try database.execute("UPDATE clipboard_history SET updated_at = 1000 WHERE id = \(third.id)")
+
+        let model = ClipboardListModel(store: store)
+        model.reload()
+        model.select(row: 2)
+        XCTAssertEqual(model.selectedEntry?.id, third.id)
+
+        try insertText("newest", into: store)
+        model.refreshEntries()
+
+        XCTAssertEqual(model.filteredEntries.count, 4)
+        XCTAssertEqual(model.selectedIndex, 3, "one row was inserted above it")
+        XCTAssertEqual(model.selectedEntry?.id, third.id, "the selection follows the entry, not its index")
+    }
+
+    /// The list can also shrink underneath the selection; the index must be clamped, not carried.
+    @MainActor
+    func testARefreshThatLosesTheSelectedRowKeepsTheIndexInRange() throws {
+        let (database, store) = try makeStore()
+        let first = try insertText("first", into: store)
+        let second = try insertText("second", into: store)
+        let third = try insertText("third", into: store)
+        try database.execute("UPDATE clipboard_history SET updated_at = 3000 WHERE id = \(first.id)")
+        try database.execute("UPDATE clipboard_history SET updated_at = 2000 WHERE id = \(second.id)")
+        try database.execute("UPDATE clipboard_history SET updated_at = 1000 WHERE id = \(third.id)")
+
+        let model = ClipboardListModel(store: store)
+        model.reload()
+        model.select(row: 2)
+        XCTAssertEqual(model.selectedEntry?.id, third.id)
+
+        try store.delete(id: third.id)
+        model.refreshEntries()
+
+        XCTAssertEqual(model.filteredEntries.count, 2)
+        XCTAssertEqual(model.selectedIndex, 1)
+        XCTAssertTrue(model.selectedIndex < model.filteredEntries.count)
+        XCTAssertEqual(model.selectedEntry?.id, second.id, "the selection lands on a row that exists")
+    }
+
     @MainActor
     func testTypeFilterSelectsOnlyMatchingContentTypes() throws {
         let (_, store) = try makeStore()
@@ -238,9 +319,104 @@ final class ClipboardListModelTests: XCTestCase {
         XCTAssertEqual(
             model.filteredEntries.first?.textContent,
             "pinned note",
-            "a query keeps the pinned row first; the ordering is pinned, then relevance, then recency"
+            "a query keeps the pinned row first; the ordering is pinned, then recency — `MATCH` only filters"
         )
         XCTAssertEqual(Set(model.filteredEntries.map(\.textContent)), ["pinned note", "newest note", "oldest note"])
+    }
+
+    // MARK: - Sections
+
+    private func day(_ year: Int, _ month: Int, _ day: Int, hour: Int = 9) -> Date {
+        Calendar.current.date(from: DateComponents(year: year, month: month, day: day, hour: hour)) ?? .distantPast
+    }
+
+    private func entry(id: Int64, at date: Date, pinnedAt: Date? = nil) -> ClipboardEntry {
+        ClipboardEntry(
+            id: id,
+            contentType: ContentType.text,
+            textContent: "row \(id)",
+            rawData: nil,
+            imagePath: nil,
+            imageWidth: nil,
+            imageHeight: nil,
+            imageSize: nil,
+            sourceApp: nil,
+            sourceName: nil,
+            charCount: nil,
+            wordCount: nil,
+            createdAt: date,
+            updatedAt: date,
+            pinnedAt: pinnedAt
+        )
+    }
+
+    /// What `bm25` used to hand the list: one calendar day split over several non-adjacent runs,
+    /// because relevance interleaved the dates. Grouping must still produce one heading per day,
+    /// newest first, with every section id distinct — a duplicate id is what corrupted the list.
+    func testInterleavedDatesStillYieldUniqueChronologicalSections() {
+        let may = day(2026, 5, 19)
+        let june = day(2026, 6, 12)
+        let september = day(2026, 9, 4)
+        let entries = [
+            entry(id: 1, at: september),
+            entry(id: 2, at: may),
+            entry(id: 3, at: june),
+            entry(id: 4, at: september),
+            entry(id: 5, at: may),
+            entry(id: 6, at: june),
+        ]
+
+        let sections = ClipboardListModel.sections(for: entries, isFiltering: true)
+
+        XCTAssertEqual(sections.count, 3, "one heading per day, not one per run of rows")
+        XCTAssertEqual(Set(sections.map(\.id)).count, sections.count, "section ids must be unique")
+
+        let days = sections.compactMap { section -> Date? in
+            if case let .day(day) = section.id {
+                return day
+            }
+            return nil
+        }
+        XCTAssertEqual(
+            days,
+            [september, june, may].map { Calendar.current.startOfDay(for: $0) },
+            "headings run newest to oldest, not in the order the rows arrived"
+        )
+        XCTAssertTrue(
+            zip(days, days.dropFirst()).allSatisfy { $0 > $1 },
+            "strictly descending days: an equal pair would repeat a heading"
+        )
+        XCTAssertEqual(sections.flatMap(\.rows).count, entries.count, "grouping loses no rows")
+        XCTAssertEqual(Set(sections.flatMap(\.rows).map(\.entry.id)), Set(entries.map(\.id)), "same rows, regrouped")
+        XCTAssertEqual(
+            sections.first { $0.id == .day(Calendar.current.startOfDay(for: september)) }?.rows.map(\.entry.id),
+            [1, 4],
+            "rows inside a day keep their incoming order"
+        )
+    }
+
+    /// Pinned rows get their own heading only while the list is unfiltered, and that heading never
+    /// collides with a day heading.
+    func testPinnedRowsFormADistinctSectionOnlyWhileUnfiltered() {
+        let older = day(2026, 5, 19)
+        let newer = day(2026, 9, 4)
+        let entries = [
+            entry(id: 1, at: older, pinnedAt: newer),
+            entry(id: 2, at: newer),
+            entry(id: 3, at: older),
+        ]
+
+        let unfiltered = ClipboardListModel.sections(for: entries, isFiltering: false)
+        XCTAssertEqual(
+            unfiltered.map(\.id),
+            [.pinned, .day(Calendar.current.startOfDay(for: newer)), .day(Calendar.current.startOfDay(for: older))]
+        )
+        XCTAssertEqual(Set(unfiltered.map(\.id)).count, unfiltered.count)
+
+        let filtered = ClipboardListModel.sections(for: entries, isFiltering: true)
+        XCTAssertEqual(filtered.count, 2, "a query keeps pinned rows under their own date")
+        XCTAssertEqual(Set(filtered.map(\.id)).count, filtered.count)
+        XCTAssertEqual(filtered.flatMap(\.rows).count, 3)
     }
 
     // MARK: - Selection
