@@ -21,8 +21,41 @@ enum ClipboardTypeFilter: String, CaseIterable {
         }
     }
 
+    /// Plural label the panel shows for the filter; the empty-state copy uses the same words so
+    /// the two never disagree about what is being filtered.
+    var label: String {
+        switch self {
+        case .text: "Text"
+        case .image: "Images"
+        case .richText: "Rich Text"
+        case .color: "Colors"
+        }
+    }
+
     func matches(_ contentType: String) -> Bool {
         contentTypes.contains(contentType)
+    }
+}
+
+/// What the list area shows when it has no rows to show. Derived here rather than in the view so
+/// the difference between "the history is empty", "the filter has nothing" and "the query did not
+/// match" is a value a test can assert on without a SwiftUI host.
+enum ClipboardEmptyState: Equatable {
+    case noHistory
+    case noRowsForFilter(ClipboardTypeFilter)
+    case noMatches(ClipboardTypeFilter?)
+
+    var message: String {
+        switch self {
+        case .noHistory:
+            "No clipboard history"
+        case let .noRowsForFilter(type):
+            "No \(type.label.lowercased()) in history"
+        case let .noMatches(type):
+            // Images are stored without text, so the index can never match them: naming the
+            // reason beats implying the history holds no images.
+            type == .image ? "Images have no text to search" : "No matches"
+        }
     }
 }
 
@@ -149,6 +182,16 @@ final class ClipboardListModel {
     /// The list groups by date only while it is unfiltered, so the view needs this too.
     var isFiltering: Bool {
         typeFilter != nil || !ClipboardFilter.normalized(searchText).isEmpty
+    }
+
+    /// The message the list area shows instead of rows, or `nil` when it has rows to show.
+    var emptyState: ClipboardEmptyState? {
+        guard filteredEntries.isEmpty else { return nil }
+        guard !entries.isEmpty else { return .noHistory }
+        if let typeFilter, ClipboardFilter.normalized(searchText).isEmpty {
+            return .noRowsForFilter(typeFilter)
+        }
+        return .noMatches(typeFilter)
     }
 
     /// Replaces the store/board references. The panel only reaches `AppState` from

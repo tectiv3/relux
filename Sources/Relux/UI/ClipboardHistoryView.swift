@@ -2,15 +2,6 @@ import ReluxCore
 import SwiftUI
 
 private extension ClipboardTypeFilter {
-    var label: String {
-        switch self {
-        case .text: "Text"
-        case .image: "Images"
-        case .richText: "Rich Text"
-        case .color: "Colors"
-        }
-    }
-
     var icon: String {
         switch self {
         case .text: "doc.plaintext"
@@ -100,15 +91,8 @@ struct ClipboardHistoryView: View {
                 .padding(.top, 6)
             }
 
-            if model.filteredEntries.isEmpty {
-                let message = if model.entries.isEmpty {
-                    "No clipboard history"
-                } else if let typeFilter = model.typeFilter {
-                    "No \(typeFilter.label.lowercased()) in history"
-                } else {
-                    "No matches"
-                }
-                Text(message)
+            if let emptyState = model.emptyState {
+                Text(emptyState.message)
                     .font(.system(size: 13))
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

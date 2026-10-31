@@ -60,22 +60,26 @@ final class ReluxSchemaTests: XCTestCase {
     func testMigrationRecordsVersion() throws {
         let database = try makeDatabase()
         XCTAssertEqual(try database.userVersion, ReluxSchema.version)
-        XCTAssertEqual(ReluxSchema.version, 2)
+        XCTAssertEqual(ReluxSchema.version, 3)
     }
 
-    /// A database that already holds clipboard rows when migration 2 runs: the FTS table is
-    /// created empty and the triggers only see later writes, so the hit can only come from the
-    /// 'rebuild' step — this is the live-database case, reduced.
+    /// A database that already holds clipboard rows when the clipboard migrations run: the FTS
+    /// table is created empty and the triggers only see later writes, so a hit can only come from
+    /// the 'rebuild' step — this is the live-database case, reduced.
     func testFTSMigrationIndexesRowsThatPredateIt() throws {
         let database = try makeFreshShapedDatabase()
         try database.execute("PRAGMA user_version = 1")
         try database.execute("""
-            INSERT INTO clipboard_history (id, content_type, text_content, created_at, updated_at)
-            VALUES (1, 'text', 'quixotic sphinx of September', 1000, 1000)
+            INSERT INTO clipboard_history (id, content_type, text_content, source_name, created_at, updated_at)
+            VALUES (1, 'text', 'quixotic sphinx of September', 'Notes', 1000, 1000)
         """)
         try database.execute("""
             INSERT INTO clipboard_history (id, content_type, text_content, created_at, updated_at)
             VALUES (2, 'image', NULL, 2000, 2000)
+        """)
+        try database.execute("""
+            INSERT INTO clipboard_history (id, content_type, text_content, created_at, updated_at)
+            VALUES (3, 'text', '日本語のテキストをコピーしました', 3000, 3000)
         """)
         XCTAssertFalse(
             try masterRows(database).contains { $0.name == "clipboard_fts" },
@@ -84,15 +88,91 @@ final class ReluxSchemaTests: XCTestCase {
 
         try ReluxSchema.migrate(database)
 
-        XCTAssertEqual(try database.userVersion, 2)
+        XCTAssertEqual(try database.userVersion, 3)
         let match = try database.prepare("SELECT rowid FROM clipboard_fts WHERE clipboard_fts MATCH ?")
-        try match.bind(1, "\"sphinx\"*")
+        try match.bind(1, "\"sphinx\"")
         var ids: [Int64] = []
         while try match.step() {
             try ids.append(XCTUnwrap(match.columnInt64(0)))
         }
         XCTAssertEqual(ids, [1], "the pre-migration row must be searchable after the rebuild")
+        // The version 1 rows have to come out of the trigram index too, not just be present.
+        XCTAssertEqual(
+            try matchIDs("\"uixot\"", database: database), [1],
+            "a mid-word substring of a pre-migration row"
+        )
+        XCTAssertEqual(try matchIDs("\"otes\"", database: database), [1], "a source name from before the migration")
+        XCTAssertEqual(
+            try matchIDs("\"語のテ\"", database: database), [3],
+            "a CJK substring from before the migration"
+        )
+        XCTAssertEqual(try rowCount(of: "clipboard_history", database: database), 3, "no row may be lost")
         // Compares the inverted index against the content table; a missing token throws.
+        try database.execute("INSERT INTO clipboard_fts(clipboard_fts) VALUES('integrity-check')")
+    }
+
+    /// A version 2 database — the `unicode61` index over `text_content` only — upgrades in place:
+    /// the version 3 rebuild indexes every existing row, no row is lost, and text that only a
+    /// substring or source-name query can find is searchable afterwards.
+    func testV2DatabaseUpgradesToTheTrigramIndexWithoutLosingRows() throws {
+        let database = try makeV2Database()
+        try database.execute("""
+            INSERT INTO clipboard_history (id, content_type, text_content, source_name, created_at, updated_at)
+            VALUES (1, 'text', 'remote desktop connection notes', 'Safari', 1000, 1000)
+        """)
+        try database.execute("""
+            INSERT INTO clipboard_history (id, content_type, text_content, source_name, created_at, updated_at)
+            VALUES (2, 'image', NULL, NULL, 2000, 2000)
+        """)
+        try database.execute("""
+            INSERT INTO clipboard_history (id, content_type, text_content, source_name, created_at, updated_at)
+            VALUES (3, 'text', '日本語のテキストをコピーしました', NULL, 3000, 3000)
+        """)
+        XCTAssertEqual(try database.userVersion, 2)
+        // What the version 2 index could not answer. Asserting it first shows the test observes the
+        // upgrade rather than only the happy path.
+        XCTAssertEqual(try matchIDs("\"esktop\"", database: database), [], "mid-word matched nothing before")
+        XCTAssertEqual(try matchIDs("\"Saf\"", database: database), [], "source_name was not indexed before")
+        XCTAssertEqual(try matchIDs("\"語のテ\"", database: database), [], "sub-word CJK matched nothing before")
+
+        try ReluxSchema.migrate(database)
+
+        XCTAssertEqual(try database.userVersion, 3)
+        XCTAssertEqual(try rowCount(of: "clipboard_history", database: database), 3, "no row may be lost")
+        XCTAssertEqual(try matchIDs("\"esktop\"", database: database), [1])
+        XCTAssertEqual(try matchIDs("\"Saf\"", database: database), [1])
+        XCTAssertEqual(try matchIDs("\"語のテ\"", database: database), [3])
+        XCTAssertEqual(try matchIDs("\"desktop\"", database: database), [1], "the word still matches")
+        try database.execute("INSERT INTO clipboard_fts(clipboard_fts) VALUES('integrity-check')")
+    }
+
+    /// The trigram tokenizer needs SQLite 3.34. A build without it has to fail the migration
+    /// loudly and roll the whole version 3 step back — the version 2 index stays usable instead of
+    /// being replaced by a half-built one.
+    func testUpgradeFailsLoudlyWhenTheIndexCannotBeBuilt() throws {
+        let database = try makeV2Database()
+        try database.execute("""
+            INSERT INTO clipboard_history (id, content_type, text_content, source_name, created_at, updated_at)
+            VALUES (1, 'text', 'alpha notes', 'Safari', 1000, 1000)
+        """)
+
+        XCTAssertThrowsError(try ReluxSchema.migrate(database, ftsTokenizer: "definitely-not-a-tokenizer")) { error in
+            guard case let StoreError.exec(message) = error else {
+                return XCTFail("expected StoreError.exec, got \(error)")
+            }
+            XCTAssertTrue(message.contains("definitely-not-a-tokenizer"), message)
+            XCTAssertTrue(message.contains("3.34"), "the message has to name the requirement: \(message)")
+        }
+
+        XCTAssertEqual(try database.userVersion, 2, "a failed version must not be recorded")
+        XCTAssertEqual(try matchIDs("\"notes\"", database: database), [1], "the version 2 index still answers")
+        XCTAssertEqual(try rowCount(of: "clipboard_history", database: database), 1)
+        let triggers = try masterRows(database).filter { $0.type == "trigger" }.map(\.name).sorted()
+        XCTAssertEqual(
+            triggers,
+            ["clipboard_fts_ad", "clipboard_fts_ai", "clipboard_fts_au"],
+            "the version 2 triggers have to come back with the table"
+        )
         try database.execute("INSERT INTO clipboard_fts(clipboard_fts) VALUES('integrity-check')")
     }
 
@@ -130,7 +210,7 @@ final class ReluxSchemaTests: XCTestCase {
         XCTAssertTrue(try statement.step())
         XCTAssertEqual(statement.columnDouble(1), 2000, "backfill must not touch an existing updated_at")
         XCTAssertEqual(statement.columnDouble(2), 3000)
-        XCTAssertEqual(try database.userVersion, 2)
+        XCTAssertEqual(try database.userVersion, 3)
     }
 
     func testOldSchemaGetsMissingColumnsAndBackfill() throws {
@@ -186,7 +266,7 @@ final class ReluxSchemaTests: XCTestCase {
         XCTAssertTrue(try statement.step())
         XCTAssertEqual(statement.columnText(0), "legacy")
         XCTAssertTrue(statement.isNull(1))
-        XCTAssertEqual(try database.userVersion, 2)
+        XCTAssertEqual(try database.userVersion, 3)
     }
 
     func testTranslationUpdatedAtIsNullable() throws {
@@ -289,6 +369,66 @@ final class ReluxSchemaTests: XCTestCase {
         return rows
     }
 
+    /// Row ids the FTS index matches for an expression, sorted. Deliberately column-filter free so
+    /// the same helper works against the version 2 index (one column) and the version 3 one (two).
+    private func matchIDs(_ expression: String, database: SQLiteDatabase) throws -> [Int64] {
+        let statement = try database.prepare("SELECT rowid FROM clipboard_fts WHERE clipboard_fts MATCH ?")
+        try statement.bind(1, expression)
+        var ids: [Int64] = []
+        while try statement.step() {
+            ids.append(statement.columnInt64(0) ?? -1)
+        }
+        return ids.sorted()
+    }
+
+    private func rowCount(of table: String, database: SQLiteDatabase) throws -> Int {
+        let statement = try database.prepare("SELECT count(*) FROM \(table)")
+        guard try statement.step() else { return -1 }
+        return statement.columnInt64(0).map(Int.init) ?? -1
+    }
+
+    /// The version 2 FTS schema, verbatim: a `unicode61` index over `text_content` only with an
+    /// unnarrowed `AFTER UPDATE` trigger. This is the shape a shipped version 2 database has, and
+    /// it is the migration *input* — never derived from the current schema code.
+    private static let v2FTSStatements = [
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts USING fts5(
+            text_content,
+            content='clipboard_history',
+            content_rowid='id',
+            tokenize='unicode61 remove_diacritics 2'
+        )
+        """,
+        """
+        CREATE TRIGGER IF NOT EXISTS clipboard_fts_ai AFTER INSERT ON clipboard_history BEGIN
+            INSERT INTO clipboard_fts(rowid, text_content) VALUES (new.id, new.text_content);
+        END
+        """,
+        """
+        CREATE TRIGGER IF NOT EXISTS clipboard_fts_ad AFTER DELETE ON clipboard_history BEGIN
+            INSERT INTO clipboard_fts(clipboard_fts, rowid, text_content)
+            VALUES ('delete', old.id, old.text_content);
+        END
+        """,
+        """
+        CREATE TRIGGER IF NOT EXISTS clipboard_fts_au AFTER UPDATE ON clipboard_history BEGIN
+            INSERT INTO clipboard_fts(clipboard_fts, rowid, text_content)
+            VALUES ('delete', old.id, old.text_content);
+            INSERT INTO clipboard_fts(rowid, text_content) VALUES (new.id, new.text_content);
+        END
+        """,
+        "INSERT INTO clipboard_fts(clipboard_fts) VALUES('rebuild')",
+    ]
+
+    private func makeV2Database() throws -> SQLiteDatabase {
+        let database = try makeFreshShapedDatabase()
+        for statement in Self.v2FTSStatements {
+            try database.execute(statement)
+        }
+        try database.execute("PRAGMA user_version = 2")
+        return database
+    }
+
     private func translationOrder(of database: SQLiteDatabase, rows: [TranslationRow]) throws -> [Int] {
         let insert = try database.prepare("""
         INSERT INTO translation_history
@@ -337,7 +477,7 @@ final class ReluxSchemaTests: XCTestCase {
 
         try ReluxSchema.migrate(database)
 
-        XCTAssertEqual(ReluxSchema.version, 2)
+        XCTAssertEqual(ReluxSchema.version, 3)
         XCTAssertEqual(try database.userVersion, ReluxSchema.version)
 
         let after = try masterRows(database)

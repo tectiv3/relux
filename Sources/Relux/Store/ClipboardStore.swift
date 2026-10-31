@@ -139,10 +139,16 @@ final class ClipboardStore {
 
     /// Rows matching an FTS5 query across the whole table, pinned first and then by relevance.
     ///
-    /// `nil` means the FTS index could not answer: the query has nothing `unicode61` can index
-    /// (emoji or punctuation only), or the table is missing because a migration did not run. The
-    /// caller then filters the loaded page, which is what the panel did before the index existed,
-    /// rather than showing an empty list.
+    /// The index is trigram-tokenized (schema 3), so a query matches any substring of three or
+    /// more characters in `text_content` or `source_name` — mid-word, sub-word CJK and source app
+    /// names included.
+    ///
+    /// `nil` means the FTS index could not answer at all: the query has a term shorter than three
+    /// characters (which no trigram index can match, see `ClipboardFTSQuery`), or the table is
+    /// missing or unusable. The caller then filters the loaded page, which is what the panel did
+    /// before the index existed. An empty array is the honest answer "no row matches" and must
+    /// not be treated as a fallback trigger: with substring matching, an empty result means the
+    /// text is not in the history.
     func search(matching query: String, type: ClipboardTypeFilter? = nil, limit: Int = 500) -> [ClipboardEntry]? {
         guard let expression = ClipboardFTSQuery.matchExpression(for: query) else { return nil }
 
@@ -159,8 +165,8 @@ final class ClipboardStore {
             let placeholders = Array(repeating: "?", count: contentTypes.count).joined(separator: ", ")
             sql += " AND h.content_type IN (\(placeholders))"
         }
-        // bm25 is best-first when ascending and is not defined for a row the FTS table matched
-        // outside the text column (it cannot happen here: text_content is the only column).
+        // bm25 is best-first when ascending. It scores the matched columns together, so a source
+        // name hit counts like a body hit; recency breaks an equal-score tie.
         sql += """
          ORDER BY CASE WHEN h.pinned_at IS NOT NULL THEN 0 ELSE 1 END, \
         bm25(clipboard_fts), h.updated_at DESC \

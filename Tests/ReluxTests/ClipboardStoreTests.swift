@@ -415,18 +415,112 @@ final class ClipboardStoreTests: XCTestCase {
         XCTAssertFalse(page.contains { $0.textContent == "prehistoric needle" }, "the target must be off the page")
 
         XCTAssertEqual(store.search(matching: "needle")?.map(\.textContent), ["prehistoric needle"])
-        XCTAssertEqual(store.search(matching: "prehi")?.count, 1, "the last term matches by prefix")
+        XCTAssertEqual(
+            store.search(matching: "prehi")?.count, 1,
+            "any three-character window matches, not only a prefix"
+        )
         XCTAssertEqual(store.search(matching: "zzz")?.count, 0, "no match is an empty result, not the fallback")
     }
 
+    /// Mid-word substrings are what the old `unicode61` index could not match: it tokenized
+    /// `desktop` whole, so only a token prefix matched. The row is off the loaded page as well, so
+    /// this is the search the panel is supposed to have.
     @MainActor
-    func testSearchOrdersPinnedFirstThenByRelevance() throws {
+    func testMidWordSubstringFindsARowOutsideTheLoadedPage() throws {
+        let (_, store) = try makeStore()
+        try insertText("remote desktop connection notes", into: store)
+        for index in 0 ..< 520 {
+            try insertText("filler \(index)", into: store)
+        }
+        XCTAssertFalse(
+            entries(in: store).contains { $0.textContent == "remote desktop connection notes" },
+            "the target must be off the page"
+        )
+
+        XCTAssertEqual(
+            store.search(matching: "esktop")?.map(\.textContent),
+            ["remote desktop connection notes"],
+            "a substring inside a word matches"
+        )
+        XCTAssertEqual(store.search(matching: "nnectio")?.count, 1, "a window in the middle of a long word")
+        XCTAssertEqual(store.search(matching: "DESKTOP")?.count, 1, "trigram folds case")
+        XCTAssertEqual(store.search(matching: "ktop conn")?.count, 1)
+    }
+
+    /// A contiguous CJK run is a single `unicode61` token, so only a prefix of the whole run could
+    /// match. Trigram matches any window inside it.
+    @MainActor
+    func testCJKSubstringMatchesInsideARun() throws {
+        let (_, store) = try makeStore()
+        try insertText("日本語のテキストをコピーしました", into: store)
+        try insertText("unrelated latin row", into: store)
+
+        XCTAssertEqual(store.search(matching: "語のテ")?.count, 1, "a query drawn from the middle of the run")
+        XCTAssertEqual(store.search(matching: "ストをコ")?.count, 1)
+        XCTAssertEqual(store.search(matching: "しました")?.count, 1, "the tail of the run")
+        XCTAssertEqual(store.search(matching: "本語のテキスト")?.count, 1)
+        XCTAssertEqual(store.search(matching: "存在しない")?.count, 0, "a term the run does not contain")
+        XCTAssertNil(store.search(matching: "本語"), "a two-character query is below the trigram width")
+    }
+
+    /// `source_name` is indexed since schema 3: images carry no text at all, so the app a clip came
+    /// from is often the only thing there is to search.
+    @MainActor
+    func testSourceNameIsSearchable() throws {
+        let (_, store) = try makeStore()
+        try store.insert(
+            contentType: ContentType.text, textContent: "unremarkable body", rawData: nil, imagePath: nil,
+            imageWidth: nil, imageHeight: nil, imageSize: nil,
+            sourceApp: "com.apple.Safari", sourceName: "Safari"
+        )
+        try store.insert(
+            contentType: ContentType.image, textContent: nil, rawData: nil, imagePath: "shot.png",
+            imageWidth: 10, imageHeight: 10, imageSize: 10,
+            sourceApp: "com.apple.Preview", sourceName: "Preview"
+        )
+        try insertText("unrelated filler", into: store)
+
+        XCTAssertEqual(store.search(matching: "Saf")?.map(\.sourceName), ["Safari"])
+        XCTAssertEqual(store.search(matching: "afar")?.count, 1, "a window inside the source name matches")
+        XCTAssertEqual(store.search(matching: "Previe")?.count, 1, "a text-less image row is reachable this way")
+    }
+
+    /// A term below the trigram width cannot be matched by the index at all, and dropping it would
+    /// silently search for something other than what was typed: the whole query is unanswerable
+    /// and the caller filters the loaded page instead.
+    @MainActor
+    func testAQueryWithATermShorterThanThreeCharactersIsUnanswerable() throws {
+        let (_, store) = try makeStore()
+        try insertText("grab the cab", into: store)
+
+        XCTAssertNil(store.search(matching: "ab"), "two characters cannot be indexed by trigram")
+        XCTAssertNil(store.search(matching: "grab a"), "a short term next to a long one still makes it unanswerable")
+        XCTAssertEqual(store.search(matching: "cab")?.count, 1, "the same text is found at three characters")
+        XCTAssertEqual(store.search(matching: " grab ")?.count, 1, "surrounding whitespace is not a term")
+    }
+
+    /// An empty result from the index is an answer, not a failure: the text is not in the history,
+    /// so the caller must not fall back and search the page for it.
+    @MainActor
+    func testAnAbsentTermReturnsAnEmptyResultInsteadOfTheFallback() throws {
+        let (_, store) = try makeStore()
+        try insertText("alpha", into: store)
+
+        let results = store.search(matching: "zzzz")
+        XCTAssertNotNil(results, "the index answered")
+        XCTAssertEqual(results?.isEmpty, true)
+    }
+
+    /// Ordering on the FTS path: pinned first, then relevance, then recency. The three matching
+    /// rows have equal-length text, so bm25 scores them identically and recency decides.
+    @MainActor
+    func testSearchOrdersPinnedFirstThenByRecency() throws {
         let (database, store) = try makeStore()
-        try insertText("alpha", into: store)
-        try insertText("alpha alpha alpha alpha", into: store)
-        try insertText("alpha", into: store)
+        try insertText("alpha aaa", into: store)
+        try insertText("alpha bbb", into: store)
+        try insertText("alpha ccc", into: store)
         // bm25 needs documents that do *not* contain the term; when a term is in more than half
-        // the table its inverse document frequency flips sign and relevance ordering inverts.
+        // the table its inverse document frequency flips sign.
         for index in 0 ..< 10 {
             try insertText("filler \(index)", into: store)
         }
@@ -436,12 +530,12 @@ final class ClipboardStoreTests: XCTestCase {
 
         XCTAssertEqual(
             searchIDs("alpha", in: store),
-            [2, 1, 3],
-            "the row with the highest term frequency leads; recency breaks an equal-bm25 tie"
+            [1, 2, 3],
+            "equal relevance falls back to the most recently used row"
         )
 
         store.pin(id: 3)
-        XCTAssertEqual(searchIDs("alpha", in: store), [3, 2, 1], "a pinned row leads regardless of relevance")
+        XCTAssertEqual(searchIDs("alpha", in: store), [3, 1, 2], "a pinned row leads regardless of relevance")
     }
 
     @MainActor
@@ -468,25 +562,30 @@ final class ClipboardStoreTests: XCTestCase {
     @MainActor
     func testSearchEscapesHostileInput() throws {
         let (_, store) = try makeStore()
-        try insertText("a - b * c (d) OR NEAR \"quoted\"", into: store)
+        try insertText("alpha --beta gamma (delta) OR NEAR \"quoted\"", into: store)
         try insertText("plain row", into: store)
 
         for input in ["-", "*", "\"", "(", ")", ":", "^", "**", "🚀"] {
             XCTAssertNil(
                 store.search(matching: input),
-                "\(input) has no token for unicode61, so the caller filters the page instead"
+                "\(input) is below the trigram width, so the caller filters the page instead"
             )
         }
-        for input in ["OR", "NEAR"] {
-            XCTAssertEqual(store.search(matching: input)?.count, 1, "\(input) is a literal term inside a phrase")
-        }
+        XCTAssertEqual(store.search(matching: "NEAR")?.count, 1, "NEAR is a literal word inside a phrase")
         XCTAssertEqual(store.search(matching: "NOT")?.isEmpty, true, "an operator word no row contains matches nothing")
-        XCTAssertEqual(store.search(matching: "a - b")?.count, 1, "the dash separates terms, it is not negation")
-        XCTAssertEqual(store.search(matching: "(d)")?.count, 1, "parentheses are separators inside a phrase")
-        XCTAssertEqual(store.search(matching: "plain)")?.count, 1, "an unbalanced bracket is literal")
-        XCTAssertEqual(store.search(matching: "\"quoted\"")?.count, 1, "an embedded quote is doubled, not opened")
+        XCTAssertEqual(store.search(matching: "zzzz")?.count, 0)
+        XCTAssertEqual(
+            store.search(matching: "(delta)")?.count, 1,
+            "parentheses are literal characters inside a phrase"
+        )
         XCTAssertEqual(store.search(matching: "quoted")?.count, 1)
-        XCTAssertEqual(store.search(matching: "zzz")?.count, 0)
+        XCTAssertEqual(store.search(matching: "\"quoted\"")?.count, 1, "an embedded quote is doubled, not opened")
+        XCTAssertNil(store.search(matching: "alpha --"), "a two-character term is unanswerable even next to a long one")
+        XCTAssertEqual(
+            store.search(matching: "plain)")?.isEmpty,
+            true,
+            "trigram matches literally, punctuation included; the word tokenizer would have dropped the bracket"
+        )
     }
 
     @MainActor
@@ -496,11 +595,16 @@ final class ClipboardStoreTests: XCTestCase {
         try insertText("café latte", into: store)
         try insertText("ship it 🚀 today", into: store)
 
-        XCTAssertEqual(store.search(matching: "中文")?.map(\.textContent), ["中文测试内容"])
-        XCTAssertEqual(store.search(matching: "中文测")?.count, 1, "a CJK run is one token, matched by prefix")
-        XCTAssertEqual(store.search(matching: "cafe")?.count, 1, "remove_diacritics 2 folds café")
+        XCTAssertEqual(store.search(matching: "中文测试内容")?.count, 1)
+        XCTAssertEqual(store.search(matching: "中文测")?.count, 1, "a window inside the run")
+        XCTAssertEqual(store.search(matching: "文测试内")?.count, 1, "a window from the middle of the run")
+        XCTAssertEqual(store.search(matching: "cafe")?.count, 1, "remove_diacritics 1 folds café")
         XCTAssertEqual(store.search(matching: "café")?.count, 1)
-        XCTAssertEqual(store.search(matching: "ship 🚀")?.count, 1, "the emoji is dropped, the word is not")
+        XCTAssertEqual(store.search(matching: "ship")?.count, 1)
+        XCTAssertNil(
+            store.search(matching: "ship 🚀"),
+            "the emoji term is below the trigram width, so the query falls back"
+        )
         XCTAssertNil(store.search(matching: "🚀"), "an emoji-only query falls back to the page filter")
     }
 
@@ -519,9 +623,73 @@ final class ClipboardStoreTests: XCTestCase {
         store.pin(id: id)
         XCTAssertEqual(searchIDs("replacement", in: store), [id], "updates that leave the text alone keep it indexed")
 
+        try database.execute("UPDATE clipboard_history SET source_name = 'Firefox' WHERE id = \(id)")
+        XCTAssertEqual(searchIDs("Firefox", in: store), [id], "a changed source name is indexed")
+        try database.execute("UPDATE clipboard_history SET source_name = 'Chromium' WHERE id = \(id)")
+        XCTAssertEqual(searchIDs("Firefox", in: store), [], "the old source name leaves the index")
+        XCTAssertEqual(searchIDs("Chromium", in: store), [id])
+
         try store.delete(id: id)
         XCTAssertEqual(searchIDs("replacement", in: store), [], "a deleted row leaves no tokens behind")
+        XCTAssertEqual(searchIDs("Chromium", in: store), [])
         try database.execute("INSERT INTO clipboard_fts(clipboard_fts) VALUES('integrity-check')")
+    }
+
+    /// R1: `bumpTimestamp` (every paste and every re-copy) and `pin`/`unpin` only touch
+    /// `updated_at`/`pinned_at`, so they must not rewrite the inverted index — with an unnarrowed
+    /// `AFTER UPDATE` trigger each of them deleted and re-inserted the whole document.
+    ///
+    /// Observable without reading FTS internals: the row below reaches the table with its insert
+    /// trigger missing, so the index does not contain it. Letting an unindexed row be re-indexed is
+    /// exactly what an unnarrowed update trigger does, and FTS5 rejects the 'delete' half of that
+    /// replay for a document it never had, which aborts the whole `UPDATE`. So an unnarrowed
+    /// trigger makes `bumpTimestamp` and `pin` silently stop working (the store logs and returns),
+    /// while a narrowed one leaves them alone.
+    @MainActor
+    func testTimestampAndPinUpdatesDoNotRewriteTheIndex() throws {
+        let (database, store) = try makeStore()
+        try database.execute("DROP TRIGGER clipboard_fts_ai")
+        try insertText("hidden needle", into: store)
+        try insertText("second row", into: store)
+        let hidden = try XCTUnwrap(entries(in: store).first { $0.textContent == "hidden needle" }?.id)
+        let other = try XCTUnwrap(entries(in: store).first { $0.textContent == "second row" }?.id)
+        try database.execute("UPDATE clipboard_history SET updated_at = 1000 WHERE id = \(hidden)")
+        try database.execute("UPDATE clipboard_history SET updated_at = 2000 WHERE id = \(other)")
+        XCTAssertEqual(entries(in: store).map(\.id), [other, hidden], "recency order before the updates")
+
+        store.bumpTimestamp(id: hidden)
+        XCTAssertEqual(
+            entries(in: store).first?.id,
+            hidden,
+            "bumpTimestamp applied: the row moved to the top instead of failing on an index write"
+        )
+
+        store.pin(id: hidden)
+        XCTAssertEqual(entries(in: store).first?.isPinned, true, "pin applied")
+        store.unpin(id: hidden)
+        XCTAssertEqual(entries(in: store).first?.isPinned, false, "unpin applied")
+        XCTAssertEqual(entries(in: store).map(\.id), [hidden, other])
+    }
+
+    /// A database whose index is missing — dropped, or never built because the SQLite the app
+    /// links is older than 3.34 — must read as "the index could not answer", not as "no matches".
+    /// The caller then filters the loaded page, which still holds the row.
+    @MainActor
+    func testSearchWithoutTheIndexReturnsNilSoTheCallerCanFallBack() throws {
+        let (database, store) = try makeStore()
+        try insertText("remote desktop connection notes", into: store)
+        for trigger in ["clipboard_fts_ai", "clipboard_fts_ad", "clipboard_fts_au"] {
+            try database.execute("DROP TRIGGER \(trigger)")
+        }
+        try database.execute("DROP TABLE clipboard_fts")
+
+        XCTAssertNil(store.search(matching: "esktop"), "a missing index must not read as 'no matches'")
+        XCTAssertNil(store.search(matching: "desktop"))
+        XCTAssertEqual(
+            entries(in: store).map(\.textContent),
+            ["remote desktop connection notes"],
+            "the row is still on the page for the fallback to find"
+        )
     }
 
     @MainActor
@@ -547,34 +715,5 @@ final class ClipboardStoreTests: XCTestCase {
         // A NULL text_content row is the case the FTS 'delete' command has to tolerate: if the
         // trigger left anything behind, this check reports the index as malformed.
         try database.execute("INSERT INTO clipboard_fts(clipboard_fts) VALUES('integrity-check')")
-    }
-
-    @MainActor
-    func testSearchWithoutTheIndexReturnsNilSoTheCallerCanFallBack() throws {
-        let (database, store) = try makeStore()
-        try insertText("alpha", into: store)
-        for trigger in ["clipboard_fts_ai", "clipboard_fts_ad", "clipboard_fts_au"] {
-            try database.execute("DROP TRIGGER \(trigger)")
-        }
-        try database.execute("DROP TABLE clipboard_fts")
-
-        let log = try LogCapture()
-        XCTAssertNil(store.search(matching: "alpha"), "a missing index must not read as 'no matches'")
-        XCTAssertTrue(
-            log.waitForError(category: "clipboardstore", containing: "FTS index unusable"),
-            "the fallback has to leave a trace"
-        )
-        Thread.sleep(forTimeInterval: 0.2)
-        let afterFirstSearch = log.countErrors(category: "clipboardstore", containing: "FTS index unusable")
-        XCTAssertGreaterThan(afterFirstSearch, 0)
-
-        XCTAssertNil(store.search(matching: "alpha"))
-        Thread.sleep(forTimeInterval: 0.2)
-        let messages = log.messages(category: "clipboardstore", containing: "FTS index unusable")
-        XCTAssertEqual(
-            messages.count,
-            afterFirstSearch,
-            "the failure is logged once, not once per keystroke; got \(messages)"
-        )
     }
 }

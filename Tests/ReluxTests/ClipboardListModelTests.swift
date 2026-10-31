@@ -70,35 +70,109 @@ final class ClipboardListModelTests: XCTestCase {
 
     // MARK: - Filtering
 
-    /// Search now goes through the FTS index, so it matches whole words and their prefixes across
-    /// the entire retained history instead of running the fuzzy matcher over the loaded page.
-    /// Source names are not in the index: `MATCH` covers `text_content` only.
+    /// Search goes through the trigram FTS index, so any substring of three characters or more
+    /// matches across the entire retained history, in the body or in the source app name.
     @MainActor
-    func testSearchMatchesWordsAnywhereInTheBody() throws {
+    func testSearchMatchesSubstringsAnywhereInTheRow() throws {
         let (_, store) = try makeStore()
         let deploy = try insertText("deploy the build\nsecond line", into: store)
         try insertText("unrelated body", into: store)
-        try insertText("x", sourceName: "Safari", into: store)
+        let safari = try insertText("x", sourceName: "Safari", into: store)
 
         let model = ClipboardListModel(store: store)
         model.reload()
         XCTAssertEqual(model.entries.count, 3, "an empty query keeps every row")
 
         model.searchText = "depl"
-        XCTAssertEqual(model.filteredEntries.map(\.id), [deploy.id], "a word prefix matches")
+        XCTAssertEqual(model.filteredEntries.map(\.id), [deploy.id], "a leading substring matches")
+
+        model.searchText = "eplo"
+        XCTAssertEqual(model.filteredEntries.map(\.id), [deploy.id], "a substring from inside a word matches")
 
         model.searchText = "second"
         XCTAssertEqual(model.filteredEntries.map(\.id), [deploy.id], "the whole body is searchable, not just line one")
 
         model.searchText = "Saf"
-        XCTAssertTrue(model.filteredEntries.isEmpty, "source names are not part of the FTS index")
+        XCTAssertEqual(model.filteredEntries.map(\.id), [safari.id], "the source app name is indexed too")
 
         model.searchText = "  DEPL  "
         XCTAssertEqual(model.filteredEntries.map(\.id), [deploy.id], "the query is trimmed and folded")
 
-        model.searchText = "zzz"
+        model.searchText = "zzzz"
         XCTAssertTrue(model.filteredEntries.isEmpty)
         XCTAssertNil(model.selectedEntry)
+    }
+
+    /// A query the trigram index cannot answer — any term below three characters — falls back to
+    /// the in-memory page filter, which is the only path that matches a shorter substring.
+    @MainActor
+    func testShortQueryFallsBackToThePageFilter() throws {
+        let (_, store) = try makeStore()
+        let row = try insertText("grab the cab", into: store)
+        try insertText("unrelated text", into: store)
+
+        XCTAssertNil(store.search(matching: "ab"), "the store cannot answer a two-character query")
+
+        let model = ClipboardListModel(store: store)
+        model.reload()
+        model.searchText = "ab"
+        XCTAssertEqual(model.filteredEntries.map(\.id), [row.id], "the page filter still finds the row")
+    }
+
+    /// Images are stored without text, so `type: .image` plus a query legitimately matches nothing.
+    /// The copy has to say that instead of implying the history holds no images.
+    @MainActor
+    func testImageFilterWithAQueryExplainsThatImagesHaveNoText() throws {
+        let (_, store) = try makeStore()
+        let image = try insertImage(path: "a.png", into: store)
+        try insertText("some text", into: store)
+
+        let model = ClipboardListModel(store: store)
+        model.reload()
+        model.setTypeFilter(.image)
+        XCTAssertEqual(model.filteredEntries.map(\.id), [image.id], "the filter alone shows the image")
+
+        model.searchText = "photo"
+        XCTAssertTrue(model.filteredEntries.isEmpty, "nothing in an image can be matched by a text query")
+        XCTAssertEqual(model.entries.count, 2, "the history is not empty")
+        XCTAssertEqual(model.emptyState, ClipboardEmptyState.noMatches(.image))
+        XCTAssertEqual(model.emptyState?.message, "Images have no text to search")
+        XCTAssertNotEqual(model.emptyState?.message, "No images in history")
+    }
+
+    /// The filter on its own, with no query, still means "no images in history".
+    @MainActor
+    func testFilterWithNoRowsKeepsTheFilterCopy() throws {
+        let (_, store) = try makeStore()
+        try insertText("only text", into: store)
+
+        let model = ClipboardListModel(store: store)
+        model.reload()
+        model.setTypeFilter(.image)
+        XCTAssertEqual(model.emptyState, ClipboardEmptyState.noRowsForFilter(.image))
+        XCTAssertEqual(model.emptyState?.message, "No images in history")
+    }
+
+    @MainActor
+    func testAbsentWordReadsAsNoMatches() throws {
+        let (_, store) = try makeStore()
+        try insertText("alpha", into: store)
+
+        let model = ClipboardListModel(store: store)
+        model.reload()
+        model.searchText = "zzzz"
+        XCTAssertTrue(model.filteredEntries.isEmpty)
+        XCTAssertEqual(model.emptyState, ClipboardEmptyState.noMatches(nil))
+        XCTAssertEqual(model.emptyState?.message, "No matches")
+    }
+
+    @MainActor
+    func testAnEmptyHistorySaysSo() throws {
+        let (_, store) = try makeStore()
+        let model = ClipboardListModel(store: store)
+        model.reload()
+        XCTAssertEqual(model.emptyState, ClipboardEmptyState.noHistory)
+        XCTAssertEqual(model.emptyState?.message, "No clipboard history")
     }
 
     @MainActor
@@ -433,6 +507,7 @@ final class ClipboardListModelTests: XCTestCase {
     func testSearchFallsBackToThePageWhenTheIndexIsMissing() throws {
         let (database, store) = try makeStore()
         let deploy = try insertText("deploy the build", into: store)
+        let desktop = try insertText("remote desktop connection notes", into: store)
         try insertText("unrelated", into: store)
         for trigger in ["clipboard_fts_ai", "clipboard_fts_ad", "clipboard_fts_au"] {
             try database.execute("DROP TRIGGER \(trigger)")
@@ -449,9 +524,16 @@ final class ClipboardListModelTests: XCTestCase {
             "the page filter's subsequence match is what runs when the index is unusable"
         )
 
+        model.searchText = "esktop"
+        XCTAssertEqual(
+            model.filteredEntries.map(\.id),
+            [desktop.id],
+            "the fallback still matches a mid-word substring, as it did before the index existed"
+        )
+
         model.searchText = "🚀"
         XCTAssertTrue(model.filteredEntries.isEmpty, "no row contains the emoji, and none was invented")
-        XCTAssertEqual(model.entries.count, 2, "the page itself is untouched")
+        XCTAssertEqual(model.entries.count, 3, "the page itself is untouched")
     }
 
     @MainActor

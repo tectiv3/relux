@@ -8,20 +8,108 @@ import Foundation
 /// already carry some of the columns this migration introduces while still reporting
 /// version 0.
 public enum ReluxSchema {
-    public static let version = 2
+    public static let version = 3
+
+    /// Tokenizer of the clipboard index since schema version 3.
+    ///
+    /// `trigram` indexes every three-character window, so a quoted phrase matches any substring:
+    /// mid-word (`esktop` in "remote desktop") and sub-word CJK queries match, which `unicode61`
+    /// could not do (it only matches whole tokens and token prefixes). `remove_diacritics 1`
+    /// keeps the diacritic-insensitive search the word tokenizer had (`cafe` finds `café`).
+    /// The trigram tokenizer needs SQLite 3.34 or newer.
+    static let ftsTokenizer = "trigram remove_diacritics 1"
 
     public static func migrate(_ database: SQLiteDatabase) throws {
+        try migrate(database, ftsTokenizer: ftsTokenizer)
+    }
+
+    /// `ftsTokenizer` is injectable so the upgrade-failure path — a SQLite without the trigram
+    /// tokenizer — can be exercised with a tokenizer name no build of SQLite has. Production
+    /// callers use `migrate(_:)`.
+    public static func migrate(_ database: SQLiteDatabase, ftsTokenizer: String) throws {
         try database.migrate(to: version) { version, database in
             switch version {
             case 1: try applyInitial(database)
             case 2: try applyClipboardFTS(database)
+            case 3: try applyTrigramFTS(database, tokenizer: ftsTokenizer)
             default: throw StoreError.exec("no migration defined for schema version \(version)")
             }
         }
     }
 
-    /// External-content FTS5 index over `clipboard_history.text_content`, so clipboard search
-    /// covers the whole retention window instead of the 500 rows the panel loads.
+    /// Rebuilds the clipboard index as a trigram index over the text *and* the source app name.
+    ///
+    /// The version 2 index cannot be altered in place — FTS5 fixes its columns and tokenizer at
+    /// creation — so the table and the three sync triggers are replaced. Both indexed columns are
+    /// external content: SQLite does not maintain them for `content=`, so every trigger has to
+    /// replay the *old* row through the special `'delete'` command, otherwise removed text leaves
+    /// its trigrams behind and search returns ids that no longer exist.
+    ///
+    /// The update trigger is narrowed to the indexed columns: `bumpTimestamp` (every paste and
+    /// every re-copy) and `pin`/`unpin` only touch `updated_at`/`pinned_at`, and an unnarrowed
+    /// `AFTER UPDATE` deleted and re-inserted the whole inverted-index document for a 200 KB entry
+    /// on each of them.
+    ///
+    /// This runs inside the migration's transaction, so a SQLite that cannot create the table —
+    /// no trigram tokenizer, i.e. older than 3.34 — throws out of `migrate` and leaves the version
+    /// 2 index (or, for a fresh database, no index and `user_version` 2) rather than a half-built
+    /// one.
+    private static func applyTrigramFTS(_ database: SQLiteDatabase, tokenizer: String) throws {
+        // Triggers first: an index that is gone but still has triggers on the content table would
+        // make the next insert fail.
+        try database.execute("DROP TRIGGER IF EXISTS clipboard_fts_ai")
+        try database.execute("DROP TRIGGER IF EXISTS clipboard_fts_ad")
+        try database.execute("DROP TRIGGER IF EXISTS clipboard_fts_au")
+        try database.execute("DROP TABLE IF EXISTS clipboard_fts")
+
+        let createTable = """
+        CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts USING fts5(
+            text_content,
+            source_name,
+            content='clipboard_history',
+            content_rowid='id',
+            tokenize='\(tokenizer)'
+        )
+        """
+        do {
+            try database.execute(createTable)
+        } catch let StoreError.exec(message) {
+            throw StoreError.exec(
+                "cannot build the clipboard search index with tokenize='\(tokenizer)' " +
+                    "(the trigram tokenizer needs SQLite 3.34 or newer): \(message)"
+            )
+        } catch {
+            throw error
+        }
+
+        try database.execute("""
+            CREATE TRIGGER IF NOT EXISTS clipboard_fts_ai AFTER INSERT ON clipboard_history BEGIN
+                INSERT INTO clipboard_fts(rowid, text_content, source_name)
+                VALUES (new.id, new.text_content, new.source_name);
+            END
+        """)
+        try database.execute("""
+            CREATE TRIGGER IF NOT EXISTS clipboard_fts_ad AFTER DELETE ON clipboard_history BEGIN
+                INSERT INTO clipboard_fts(clipboard_fts, rowid, text_content, source_name)
+                VALUES ('delete', old.id, old.text_content, old.source_name);
+            END
+        """)
+        try database.execute("""
+            CREATE TRIGGER IF NOT EXISTS clipboard_fts_au AFTER UPDATE OF text_content, source_name
+            ON clipboard_history BEGIN
+                INSERT INTO clipboard_fts(clipboard_fts, rowid, text_content, source_name)
+                VALUES ('delete', old.id, old.text_content, old.source_name);
+                INSERT INTO clipboard_fts(rowid, text_content, source_name)
+                VALUES (new.id, new.text_content, new.source_name);
+            END
+        """)
+        // The triggers only see writes from here on; 'rebuild' indexes the rows that were already
+        // in the table. It is a full re-index, so running it twice is harmless.
+        try database.execute("INSERT INTO clipboard_fts(clipboard_fts) VALUES('rebuild')")
+    }
+
+    /// Version 2 of the index: a `unicode61` index over `text_content` only, superseded by
+    /// `applyTrigramFTS`. Kept verbatim as the historical step a version 2 database was built by.
     ///
     /// `content=` keeps the text out of the index: the FTS table stores only the inverted index
     /// and reads column values back from `clipboard_history`. SQLite does not maintain that for
