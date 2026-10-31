@@ -18,11 +18,14 @@ final class AppState {
     let appSearcher = AppSearcher()
     let scriptSearcher = ScriptSearcher()
     let frecency = FrecencyTracker(now: Date())
+    /// Teaches `frecency` from launches/activations the panel never saw; created in `setup()`.
+    private(set) var activityObserver: AppActivityObserver?
     let extensionRegistry = ExtensionRegistry()
     private let calculatorService = CalculatorService()
     let systemSettingsSearcher = SystemSettingsSearcher()
 
-    let gestureBindingManager = GestureBindingManager()
+    let settings: SettingsStore
+    let gestureBindingManager: GestureBindingManager
 
     var volumeHUDController: VolumeHUDController?
 
@@ -39,8 +42,14 @@ final class AppState {
     var currentSelection: String?
     /// Bumped when async selection capture completes, so views can refresh derived results.
     var selectionCaptureID = UUID()
+    init() {
+        let store = SettingsStore()
+        settings = store
+        gestureBindingManager = GestureBindingManager(settings: store)
+    }
+
     var needsFirstRun: Bool {
-        !UserDefaults.standard.bool(forKey: "hasCompletedSetup")
+        settings.isFirstRun
     }
 
     func setup() throws {
@@ -53,7 +62,7 @@ final class AppState {
 
         let clipStore = try ClipboardStore(db: database)
         clipboardStore = clipStore
-        let monitor = ClipboardMonitor(store: clipStore)
+        let monitor = ClipboardMonitor(store: clipStore, settings: settings)
         clipboardMonitor = monitor
         monitor.start()
 
@@ -70,12 +79,16 @@ final class AppState {
         )
 
         // Clean up expired clipboard entries
-        let retentionMonths = UserDefaults.standard.object(forKey: "clipboardRetentionMonths") as? Int ?? 3
+        let retentionMonths = settings.clipboardRetentionMonths
         if let cutoffDate = Calendar.current.date(byAdding: .month, value: -retentionMonths, to: Date()) {
             try? clipStore.deleteExpired(before: cutoffDate)
         }
 
         calculatorService.warmUp()
+
+        let observer = AppActivityObserver(tracker: frecency)
+        observer.start()
+        activityObserver = observer
 
         extensionRegistry.register(
             id: "translate", name: "Translate", icon: "character.book.closed",
@@ -111,11 +124,11 @@ final class AppState {
     }
 
     func markSetupComplete() {
-        UserDefaults.standard.set(true, forKey: "hasCompletedSetup")
+        settings.hasCompletedSetup = true
     }
 
     var maxSearchResults: Int {
-        UserDefaults.standard.object(forKey: "maxSearchResults") as? Int ?? 10
+        settings.maxSearchResults
     }
 
     func performSearch(query: String, stdinValue: String? = nil) -> [SearchItem] {
@@ -243,6 +256,18 @@ final class AppState {
 
     func recordSelection(query: String, item: SearchItem) {
         frecency.recordSelection(query: query, item: item, now: Date())
+        // Opening an app from the panel is also a launch + activation the observer will
+        // see; it already counted, so the ambient event must not add a second one.
+        if item.kind == .app, let path = item.meta["path"] {
+            activityObserver?.suppress(path: path)
+        }
+    }
+
+    /// Persist debounced ambient usage and stop observing. Called on terminate.
+    func shutdown() {
+        activityObserver?.stop()
+        activityObserver = nil
+        frecency.flush(now: Date())
     }
 
     func recentItems() -> [SearchItem] {

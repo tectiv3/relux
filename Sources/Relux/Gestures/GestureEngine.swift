@@ -44,33 +44,45 @@ final class GestureEngine {
     private var fourFingerTrackedIDs: Set<Int32> = []
     private var consecutiveFourFingerFrames = 0
 
-    /// Tunable via UserDefaults (gesture.stableFrames, gesture.swipeThreshold, gesture.edgeMargin,
-    /// gesture.keystrokeWindowMs, gesture.touchQualityMin, gesture.fingerSpreadMin, gesture.aspectRatioMax).
+    /// Tunables come from `SettingsStore` (gesture.stableFrames, gesture.swipeThreshold,
+    /// gesture.edgeMargin, gesture.keystrokeWindowMs, gesture.touchQualityMin,
+    /// gesture.fingerSpreadMin, gesture.aspectRatioMax).
     /// Cached to avoid hitting UserDefaults on every touch frame; refreshed via NSUserDefaultsDidChange.
-    private(set) var requiredStableFrames: Int = 2
-    private(set) var swipeThreshold: Float = 0.15
-    private(set) var edgeMargin: Float = 0.05
-    private(set) var keystrokeWindow: TimeInterval = 0.180
-    private(set) var touchQualityMin: Float = 0.125
-    private(set) var fingerSpreadMin: Float = 0.15
-    private(set) var aspectRatioMax: Float = 2.5
+    private(set) var requiredStableFrames: Int
+    private(set) var swipeThreshold: Float
+    private(set) var edgeMargin: Float
+    private(set) var keystrokeWindow: TimeInterval
+    private(set) var touchQualityMin: Float
+    private(set) var fingerSpreadMin: Float
+    private(set) var aspectRatioMax: Float
 
     private var defaultsObserver: NSObjectProtocol?
+    private let settings: SettingsStore
+
+    init(settings: SettingsStore) {
+        self.settings = settings
+        requiredStableFrames = settings.gestureStableFrames
+        swipeThreshold = settings.gestureSwipeThreshold
+        edgeMargin = settings.gestureEdgeMargin
+        keystrokeWindow = TimeInterval(settings.gestureKeystrokeWindowMs) / 1000.0
+        touchQualityMin = settings.gestureTouchQualityMin
+        fingerSpreadMin = settings.gestureFingerSpreadMin
+        aspectRatioMax = settings.gestureAspectRatioMax
+    }
 
     private var lastKeystrokeAt: Date = .distantPast
     private var keystrokeMonitor: Any?
 
     private func reloadTunables() {
-        let defaults = UserDefaults.standard
-        requiredStableFrames = max(1, defaults.object(forKey: "gesture.stableFrames") as? Int ?? 2)
-        swipeThreshold = defaults.object(forKey: "gesture.swipeThreshold") as? Float ?? 0.15
-        edgeMargin = defaults.object(forKey: "gesture.edgeMargin") as? Float ?? 0.05
-        keystrokeWindow = TimeInterval(max(0, defaults.object(forKey: "gesture.keystrokeWindowMs") as? Int ?? 180)) / 1000.0
-        touchQualityMin = defaults.object(forKey: "gesture.touchQualityMin") as? Float ?? 0.125
-        fingerSpreadMin = defaults.object(forKey: "gesture.fingerSpreadMin") as? Float ?? 0.15
-        aspectRatioMax = defaults.object(forKey: "gesture.aspectRatioMax") as? Float ?? 2.5
+        requiredStableFrames = settings.gestureStableFrames
+        swipeThreshold = settings.gestureSwipeThreshold
+        edgeMargin = settings.gestureEdgeMargin
+        keystrokeWindow = TimeInterval(settings.gestureKeystrokeWindowMs) / 1000.0
+        touchQualityMin = settings.gestureTouchQualityMin
+        fingerSpreadMin = settings.gestureFingerSpreadMin
+        aspectRatioMax = settings.gestureAspectRatioMax
 
-        let clickEnabled = defaults.object(forKey: "gesture.threeFingerClickEnabled") as? Bool ?? true
+        let clickEnabled = settings.gestureThreeFingerClickEnabled
         tapState.withLock { $0.clickEnabled = clickEnabled }
     }
 

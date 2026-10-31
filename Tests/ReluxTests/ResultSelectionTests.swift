@@ -31,40 +31,92 @@ final class ResultSelectionTests: XCTestCase {
         XCTAssertEqual(ResultSelection.index(of: "dup", in: items), 0)
     }
 
-    // MARK: - restoredIndex(of:in:)
+    // MARK: - indexAfterRefresh(of:userMoved:in:previousQuery:newQuery:)
 
-    func testRestoredIndexPrefersSurvivingSelection() {
+    /// The reported defect, exactly: `rem` ranked Remote Desktop first and Reminders second,
+    /// the highlight sat on Reminders from an earlier query, and nothing had been pressed since.
+    func testUntouchedHighlightFollowsTheNewRanking() {
+        let reminders = "app:/System/Applications/Reminders.app"
+        let ranked = [
+            item("app:/Applications/Microsoft Remote Desktop.app"),
+            item(reminders),
+        ]
+        // The stale selection really is row 1 of the new ranking, so identity-restore would keep it.
+        XCTAssertEqual(ResultSelection.index(of: reminders, in: ranked), 1)
+        XCTAssertEqual(
+            ResultSelection.indexAfterRefresh(
+                of: reminders, userMoved: false, in: ranked,
+                previousQuery: "rem", newQuery: "rem"
+            ),
+            0
+        )
+    }
+
+    func testMovedHighlightIsRestoredByIdentity() {
         let items = [item("new-top"), item("kept"), item("other")]
-        XCTAssertEqual(ResultSelection.restoredIndex(of: "kept", in: items), 1)
+        XCTAssertEqual(
+            ResultSelection.indexAfterRefresh(
+                of: "kept", userMoved: true, in: items,
+                previousQuery: "rem", newQuery: "rem"
+            ),
+            1
+        )
     }
 
-    func testRestoredIndexFallsBackToZeroWhenSelectionDisappears() {
-        XCTAssertEqual(ResultSelection.restoredIndex(of: "gone", in: [item("a1")]), 0)
-    }
-
-    func testRestoredIndexFallsBackToZeroForNilAndEmpty() {
-        XCTAssertEqual(ResultSelection.restoredIndex(of: nil, in: [item("a1"), item("a2")]), 0)
-        XCTAssertEqual(ResultSelection.restoredIndex(of: "a1", in: []), 0)
-    }
-
-    func testRestoredIndexSurvivesRegroupingOfRealGroupingOutput() {
-        // Display order is the grouped order, so restore must run against that same array.
+    func testRestoreRunsAgainstTheGroupedArray() {
+        // Display order is the grouped order, so the index must be resolved there, not upstream.
         let ungrouped = [item("s1", .script), item("a1", .app), item("w1", .webSearch), item("s2", .script)]
         let grouped = ResultGrouping.groupByKind(ungrouped)
         XCTAssertEqual(grouped.map(\.id), ["s1", "s2", "a1", "w1"])
-        XCTAssertEqual(ResultSelection.restoredIndex(of: "a1", in: grouped), 2)
+        XCTAssertEqual(
+            ResultSelection.indexAfterRefresh(
+                of: "a1", userMoved: true, in: grouped,
+                previousQuery: "rem", newQuery: "rem"
+            ),
+            2
+        )
 
         // The same ids in the ungrouped order would give a different index; the grouped array wins.
-        XCTAssertEqual(ResultSelection.restoredIndex(of: "a1", in: ungrouped), 1)
+        XCTAssertEqual(ResultSelection.index(of: "a1", in: ungrouped), 1)
     }
 
-    func testRestoredIndexAfterSelectionRowDropsOut() {
-        let before = [item("a1"), item("a2"), item("a3")]
-        let selected = ResultSelection.restoredIndex(of: "a3", in: before)
-        XCTAssertEqual(selected, 2)
+    func testMovedHighlightFallsBackToTopWhenItsRowDisappears() {
+        let items = [item("a1"), item("a2")]
+        XCTAssertEqual(
+            ResultSelection.indexAfterRefresh(
+                of: "gone", userMoved: true, in: items,
+                previousQuery: "rem", newQuery: "rem"
+            ),
+            0
+        )
+    }
 
-        let after = [item("a1"), item("a2")]
-        XCTAssertEqual(ResultSelection.restoredIndex(of: before[selected].id, in: after), 0)
+    func testQueryChangeResetsToTopEvenAfterMoving() {
+        let items = [item("a1"), item("a2"), item("a3")]
+        XCTAssertEqual(
+            ResultSelection.indexAfterRefresh(
+                of: "a3", userMoved: true, in: items,
+                previousQuery: "rem", newQuery: "remo"
+            ),
+            0
+        )
+    }
+
+    func testEmptyResultsSelectTopRegardlessOfMovement() {
+        XCTAssertEqual(
+            ResultSelection.indexAfterRefresh(
+                of: "a1", userMoved: true, in: [],
+                previousQuery: "rem", newQuery: "rem"
+            ),
+            0
+        )
+        XCTAssertEqual(
+            ResultSelection.indexAfterRefresh(
+                of: nil, userMoved: true, in: [item("a1")],
+                previousQuery: "rem", newQuery: "rem"
+            ),
+            0
+        )
     }
 
     // MARK: - advanced(_:count:)
@@ -83,6 +135,56 @@ final class ResultSelectionTests: XCTestCase {
         XCTAssertEqual(ResultSelection.advanced(0, count: 0), 0)
         XCTAssertEqual(ResultSelection.advanced(7, count: 3), 0)
         XCTAssertEqual(ResultSelection.advanced(-1, count: 3), 0)
+    }
+
+    // MARK: - retreated(_:count:)
+
+    func testRetreatedMovesBackward() {
+        XCTAssertEqual(ResultSelection.retreated(2, count: 3), 1)
+        XCTAssertEqual(ResultSelection.retreated(1, count: 3), 0)
+    }
+
+    func testRetreatedWrapsPastTheStart() {
+        XCTAssertEqual(ResultSelection.retreated(0, count: 3), 2)
+        XCTAssertEqual(ResultSelection.retreated(0, count: 1), 0)
+    }
+
+    func testRetreatedHandlesEmptyAndOutOfRange() {
+        XCTAssertEqual(ResultSelection.retreated(0, count: 0), 0)
+        XCTAssertEqual(ResultSelection.retreated(7, count: 3), 0)
+        XCTAssertEqual(ResultSelection.retreated(-1, count: 3), 0)
+    }
+
+    // MARK: - isRow(_:in:)
+
+    /// The reported crash: ⌘K on the only recent row left the highlight at `min(0, 0 - 1) == -1`
+    /// over an empty array, and every guard was written `selectedIndex < results.count`, which
+    /// `-1 < 0` satisfies. This pins both halves of the fix — the clamp and the predicate.
+    func testPostRemovalIndexOnAnEmptyListIsRejectedByTheRowPredicate() {
+        let remaining: [SearchItem] = []
+        let selectedIndex = min(0, max(0, remaining.count - 1))
+        XCTAssertEqual(selectedIndex, 0, "the post-removal clamp has to land on row 0, not -1")
+        XCTAssertFalse(ResultSelection.isRow(selectedIndex, in: remaining.count))
+
+        // What the panel used to compute, and why the old guard let it through.
+        let oldIndex = min(0, remaining.count - 1)
+        XCTAssertEqual(oldIndex, -1)
+        XCTAssertTrue(oldIndex < remaining.count, "-1 < 0: the old bounds check accepted it")
+        XCTAssertFalse(ResultSelection.isRow(oldIndex, in: remaining.count))
+    }
+
+    func testRowPredicateAcceptsExactlyTheOccupiedRows() {
+        XCTAssertTrue(ResultSelection.isRow(0, in: 1))
+        XCTAssertTrue(ResultSelection.isRow(0, in: 3))
+        XCTAssertTrue(ResultSelection.isRow(2, in: 3))
+    }
+
+    func testRowPredicateRejectsNegativesAndTheEnd() {
+        XCTAssertFalse(ResultSelection.isRow(-1, in: 3))
+        XCTAssertFalse(ResultSelection.isRow(-7, in: 3))
+        XCTAssertFalse(ResultSelection.isRow(3, in: 3))
+        XCTAssertFalse(ResultSelection.isRow(0, in: 0), "an empty list has no row, not even row 0")
+        XCTAssertFalse(ResultSelection.isRow(-1, in: 0))
     }
 
     // MARK: - rowIndex(forCommandKey:rowCount:)

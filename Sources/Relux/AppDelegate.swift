@@ -10,14 +10,11 @@ private let log = Logger(subsystem: "com.relux.app", category: "appdelegate")
 class AppDelegate: NSObject, NSApplicationDelegate {
     let appState = AppState()
     var panel: FloatingPanel?
+    /// Owns the per-app accessibility state of selection capture; lives as long as the app.
+    let selectionCaptureService = SelectionCaptureService()
 
     func applicationDidFinishLaunching(_: Notification) {
-        UserDefaults.standard.register(defaults: [
-            "showMenuBarIcon": true,
-            "clipboardEnabled": true,
-            "clipboardRetentionMonths": 3,
-            "clipboardDisabledApps": ClipboardMonitor.defaultDisabledApps,
-        ])
+        appState.settings.registerDefaults()
 
         do {
             try appState.setup()
@@ -45,17 +42,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         showPanel()
     }
 
+    func applicationWillTerminate(_: Notification) {
+        appState.shutdown()
+    }
+
     func setupPanel() {
         guard let screen = NSScreen.main else { return }
         let panelWidth: CGFloat = 750
         let panelHeight: CGFloat = 474
         let screenFrame = screen.visibleFrame
 
-        let savedX = UserDefaults.standard.object(forKey: "panelX") as? CGFloat
-        let savedY = UserDefaults.standard.object(forKey: "panelY") as? CGFloat
-
-        let posX = savedX ?? (screenFrame.midX - panelWidth / 2)
-        let posY = savedY ?? (screenFrame.origin.y + screenFrame.height * 0.65 - panelHeight / 2)
+        let savedOrigin = appState.settings.panelOrigin
+        let posX = savedOrigin?.x ?? (screenFrame.midX - panelWidth / 2)
+        let posY = savedOrigin?.y ?? (screenFrame.origin.y + screenFrame.height * 0.65 - panelHeight / 2)
 
         let contentRect = NSRect(x: posX, y: posY, width: panelWidth, height: panelHeight)
         let floatingPanel = FloatingPanel(contentRect: contentRect)
@@ -117,8 +116,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let panel else { return }
         if panel.isVisible {
             let frame = panel.frame
-            UserDefaults.standard.set(frame.origin.x, forKey: "panelX")
-            UserDefaults.standard.set(frame.origin.y, forKey: "panelY")
+            appState.settings.panelOrigin = frame.origin
             appState.currentSelection = nil
             appState.panelClosedAt = Date()
             panel.close()
@@ -134,19 +132,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             if SelectionCapture.isClipboardOnly(previousApp?.bundleIdentifier) {
                 // ⌘C must be synthesized while the source app is still key — before the panel.
-                appState.currentSelection = SelectionCapture.captureViaClipboard()
+                appState.currentSelection = selectionCaptureService.captureViaClipboard()
                 showPanel()
             } else {
                 // Panel first so keystrokes are never dropped; read the selection via AX
                 // off the main thread and fill it in when ready.
                 showPanel()
                 if let pid = previousApp?.processIdentifier {
-                    Task.detached(priority: .userInitiated) { [appState] in
-                        guard let text = SelectionCapture.captureViaAX(pid: pid) else { return }
-                        await MainActor.run {
-                            appState.currentSelection = text
-                            appState.selectionCaptureID = UUID()
-                        }
+                    Task(priority: .userInitiated) {
+                        guard let text = await selectionCaptureService.capture(from: pid) else { return }
+                        appState.currentSelection = text
+                        appState.selectionCaptureID = UUID()
                     }
                 }
             }
@@ -157,8 +153,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let panel else { return }
         if panel.isVisible, appState.panelMode == .clipboard {
             let frame = panel.frame
-            UserDefaults.standard.set(frame.origin.x, forKey: "panelX")
-            UserDefaults.standard.set(frame.origin.y, forKey: "panelY")
+            appState.settings.panelOrigin = frame.origin
             appState.panelClosedAt = Date()
             panel.close()
             return
@@ -175,13 +170,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applyAppearance() {
-        let mode = UserDefaults.standard.string(forKey: "appAppearance") ?? "system"
+        let mode = appState.settings.appAppearance
         Appearance.apply(mode)
     }
 
     private func applyForcedInputSource() {
-        guard let sourceId = UserDefaults.standard.string(forKey: "forceInputSourceId"),
-              !sourceId.isEmpty else { return }
+        let sourceId = appState.settings.forceInputSourceID
+        guard !sourceId.isEmpty else { return }
         let filter = [kTISPropertyInputSourceID: sourceId] as CFDictionary
         guard let sources = TISCreateInputSourceList(filter, false)?.takeRetainedValue() as? [TISInputSource],
               let source = sources.first else { return }

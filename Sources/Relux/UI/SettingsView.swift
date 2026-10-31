@@ -14,10 +14,8 @@ struct SettingsView: View {
     @State private var selectedAppearance: String = "system"
     @State private var availableInputSources: [(id: String, name: String)] = []
     @State private var showMaxResults: Int = 10
-    @State private var clipboardEnabled: Bool =
-        UserDefaults.standard.object(forKey: "clipboardEnabled") as? Bool ?? true
-    @State private var clipboardRetention: Int =
-        UserDefaults.standard.object(forKey: "clipboardRetentionMonths") as? Int ?? 3
+    @State private var clipboardEnabled: Bool = SettingsStore().clipboardEnabled
+    @State private var clipboardRetention: Int = SettingsStore().clipboardRetentionMonths
     @State private var disabledApps: [DisabledApp] = []
     @State private var showClearConfirmation = false
     @State private var anthropicApiKey: String = ""
@@ -42,13 +40,14 @@ struct SettingsView: View {
         }
         .frame(width: 450, height: 500)
         .onAppear {
-            selectedInputSourceId = UserDefaults.standard.string(forKey: "forceInputSourceId") ?? ""
-            clearQueryOnOpen = UserDefaults.standard.bool(forKey: "clearQueryOnOpen")
+            selectedInputSourceId = appState.settings.forceInputSourceID
+            clearQueryOnOpen = appState.settings.clearQueryOnOpen
             launchAtLogin = SMAppService.mainApp.status == .enabled
-            selectedAppearance = UserDefaults.standard.string(forKey: "appAppearance") ?? "system"
+            selectedAppearance = appState.settings.appAppearance
             availableInputSources = Self.getKeyboardLayouts()
-            showMaxResults = UserDefaults.standard.object(forKey: "maxSearchResults") as? Int ?? 10
+            showMaxResults = appState.settings.maxSearchResults
             searchPaths = appState.appSearcher.searchPaths
+            scriptsModel.attach(appState.scriptSearcher)
         }
     }
 
@@ -81,7 +80,7 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
                 .onChange(of: selectedAppearance) { _, newValue in
-                    UserDefaults.standard.set(newValue, forKey: "appAppearance")
+                    appState.settings.appAppearance = newValue
                     applyAppearance(newValue)
                 }
 
@@ -91,12 +90,12 @@ struct SettingsView: View {
             Section("Behavior") {
                 Toggle("Clear search on open", isOn: $clearQueryOnOpen)
                     .onChange(of: clearQueryOnOpen) { _, newValue in
-                        UserDefaults.standard.set(newValue, forKey: "clearQueryOnOpen")
+                        appState.settings.clearQueryOnOpen = newValue
                     }
 
                 Stepper("Max results: \(showMaxResults)", value: $showMaxResults, in: 5 ... 20)
                     .onChange(of: showMaxResults) { _, newValue in
-                        UserDefaults.standard.set(newValue, forKey: "maxSearchResults")
+                        appState.settings.maxSearchResults = newValue
                     }
             }
 
@@ -161,11 +160,7 @@ struct SettingsView: View {
                     }
                 }
                 .onChange(of: selectedInputSourceId) { _, newValue in
-                    if newValue.isEmpty {
-                        UserDefaults.standard.removeObject(forKey: "forceInputSourceId")
-                    } else {
-                        UserDefaults.standard.set(newValue, forKey: "forceInputSourceId")
-                    }
+                    appState.settings.forceInputSourceID = newValue
                 }
             }
 
@@ -186,8 +181,7 @@ struct SettingsView: View {
 
     // MARK: - Scripts Tab
 
-    @State private var expandedScriptId: String?
-    @State private var editingScript: ScriptItem?
+    @State private var scriptsModel = ScriptsSettingsModel()
 
     private var scriptsTab: some View {
         Form {
@@ -195,7 +189,7 @@ struct SettingsView: View {
                 Text("Scripts")
                 Spacer()
                 Button {
-                    appState.scriptSearcher.load()
+                    scriptsModel.reload()
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 11))
@@ -203,27 +197,22 @@ struct SettingsView: View {
                 .buttonStyle(.borderless)
                 .help("Reload scripts from disk")
             }) {
-                if appState.scriptSearcher.scripts.isEmpty {
+                if scriptsModel.scripts.isEmpty {
                     Text("No scripts added yet")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(appState.scriptSearcher.scripts) { script in
+                    ForEach(scriptsModel.scripts) { script in
                         scriptRow(script)
                     }
                 }
 
                 // Show draft row for unsaved new script
-                if let draft = editingScript,
-                   !appState.scriptSearcher.scripts.contains(where: { $0.id == draft.id })
-                {
+                if let draft = scriptsModel.editingScript, !scriptsModel.isPersisted(draft) {
                     scriptRow(draft)
                 }
 
                 Button {
-                    commitEditing()
-                    let draft = ScriptItem(title: "", command: "")
-                    expandedScriptId = draft.id
-                    editingScript = draft
+                    scriptsModel.beginAdding()
                 } label: {
                     Label("Add Script", systemImage: "plus")
                 }
@@ -231,15 +220,15 @@ struct SettingsView: View {
             }
 
             Section {
-                ForEach(appState.scriptSearcher.envVars) { envVar in
+                ForEach(scriptsModel.envVars) { envVar in
                     EnvVarRow(envVar: envVar) { updated in
-                        appState.scriptSearcher.updateEnvVar(updated)
+                        scriptsModel.updateEnvVar(updated)
                     } onDelete: {
-                        appState.scriptSearcher.removeEnvVar(id: envVar.id)
+                        scriptsModel.removeEnvVar(id: envVar.id)
                     }
                 }
                 Button {
-                    appState.scriptSearcher.addEnvVar()
+                    scriptsModel.addEnvVar()
                 } label: {
                     Label("Add Variable", systemImage: "plus")
                 }
@@ -250,12 +239,12 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
-        .onDisappear { commitEditing() }
+        .onDisappear { scriptsModel.commitEditing() }
     }
 
     @ViewBuilder
     private func scriptRow(_ script: ScriptItem) -> some View {
-        let isExpanded = expandedScriptId == script.id
+        let isExpanded = scriptsModel.expandedScriptId == script.id
 
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -281,13 +270,7 @@ struct SettingsView: View {
                 }
 
                 Button(role: .destructive) {
-                    if appState.scriptSearcher.scripts.contains(where: { $0.id == script.id }) {
-                        appState.scriptSearcher.remove(id: script.id)
-                    }
-                    if expandedScriptId == script.id {
-                        expandedScriptId = nil
-                        editingScript = nil
-                    }
+                    scriptsModel.remove(script)
                 } label: {
                     Image(systemName: "trash")
                 }
@@ -296,18 +279,11 @@ struct SettingsView: View {
             .contentShape(Rectangle())
             .onTapGesture {
                 withAnimation(.easeInOut(duration: 0.15)) {
-                    commitEditing()
-                    if isExpanded {
-                        expandedScriptId = nil
-                        editingScript = nil
-                    } else {
-                        expandedScriptId = script.id
-                        editingScript = script
-                    }
+                    scriptsModel.toggleExpansion(of: script)
                 }
             }
 
-            if isExpanded, editingScript != nil {
+            if isExpanded, scriptsModel.editingScript != nil {
                 Divider()
                     .padding(.vertical, 6)
 
@@ -340,20 +316,20 @@ struct SettingsView: View {
 
     @ViewBuilder
     private func scriptEditForm() -> some View {
-        if editingScript != nil {
+        if scriptsModel.editingScript != nil {
             VStack(alignment: .leading, spacing: 12) {
                 scriptFieldRow("Title") {
                     TextField("", text: Binding(
-                        get: { editingScript?.title ?? "" },
-                        set: { editingScript?.title = $0 }
+                        get: { scriptsModel.editingScript?.title ?? "" },
+                        set: { scriptsModel.editingScript?.title = $0 }
                     ), prompt: Text("Script title").foregroundStyle(.tertiary))
                         .textFieldStyle(.roundedBorder)
                 }
 
                 scriptFieldRow("Command") {
                     TextField("", text: Binding(
-                        get: { editingScript?.command ?? "" },
-                        set: { editingScript?.command = $0 }
+                        get: { scriptsModel.editingScript?.command ?? "" },
+                        set: { scriptsModel.editingScript?.command = $0 }
                     ), prompt: Text("Shell command").foregroundStyle(.tertiary))
                         .font(.system(size: 12, design: .monospaced))
                         .textFieldStyle(.roundedBorder)
@@ -390,8 +366,8 @@ struct SettingsView: View {
                 .textCase(.uppercase)
 
             Picker("", selection: Binding(
-                get: { editingScript?.inputMode ?? .none },
-                set: { editingScript?.inputMode = $0 }
+                get: { scriptsModel.editingScript?.inputMode ?? .none },
+                set: { scriptsModel.editingScript?.inputMode = $0 }
             )) {
                 ForEach(InputMode.allCases, id: \.self) { mode in
                     Text(mode.label).tag(mode)
@@ -400,12 +376,15 @@ struct SettingsView: View {
             .pickerStyle(.segmented)
             .frame(width: 220)
 
-            if editingScript?.inputMode.acceptsInput == true {
+            if scriptsModel.editingScript?.inputMode.acceptsInput == true {
                 Picker("Filter", selection: Binding(
-                    get: { editingScript?.inputFilter.tag ?? "any" },
+                    get: { scriptsModel.editingScript?.inputFilter.tag ?? "any" },
                     set: { newValue in
-                        let pattern = editingScript?.inputFilter.regexPattern
-                        editingScript?.inputFilter = InputFilter.fromTag(newValue, existingPattern: pattern)
+                        let pattern = scriptsModel.editingScript?.inputFilter.regexPattern
+                        scriptsModel.editingScript?.inputFilter = InputFilter.fromTag(
+                            newValue,
+                            existingPattern: pattern
+                        )
                     }
                 )) {
                     Text("Any").tag("any")
@@ -418,11 +397,11 @@ struct SettingsView: View {
                 }
                 .frame(width: 220)
 
-                if editingScript?.inputFilter.regexPattern != nil {
+                if scriptsModel.editingScript?.inputFilter.regexPattern != nil {
                     scriptFieldRow("Pattern") {
                         TextField("", text: Binding(
-                            get: { editingScript?.inputFilter.regexPattern ?? "" },
-                            set: { editingScript?.inputFilter = .regex($0) }
+                            get: { scriptsModel.editingScript?.inputFilter.regexPattern ?? "" },
+                            set: { scriptsModel.editingScript?.inputFilter = .regex($0) }
                         ), prompt: Text("Regular expression").foregroundStyle(.tertiary))
                             .font(.system(size: 11, design: .monospaced))
                             .textFieldStyle(.roundedBorder)
@@ -440,8 +419,8 @@ struct SettingsView: View {
                 .textCase(.uppercase)
 
             Picker("", selection: Binding(
-                get: { editingScript?.outputMode ?? .none },
-                set: { editingScript?.outputMode = $0 }
+                get: { scriptsModel.editingScript?.outputMode ?? .none },
+                set: { scriptsModel.editingScript?.outputMode = $0 }
             )) {
                 ForEach(ScriptOutputMode.allCases, id: \.self) { mode in
                     Text(mode.label).tag(mode)
@@ -449,20 +428,6 @@ struct SettingsView: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 220)
-        }
-    }
-
-    private func commitEditing() {
-        guard let editing = editingScript else { return }
-        let exists = appState.scriptSearcher.scripts.contains { $0.id == editing.id }
-        if editing.title.isEmpty, editing.command.isEmpty {
-            if exists {
-                appState.scriptSearcher.remove(id: editing.id)
-            }
-        } else if exists {
-            appState.scriptSearcher.update(editing)
-        } else {
-            appState.scriptSearcher.insert(editing)
         }
     }
 
@@ -544,7 +509,7 @@ struct SettingsView: View {
                         if let monitor = ClipboardServices.monitor(appState) {
                             monitor.isEnabled = newValue
                         } else {
-                            UserDefaults.standard.set(newValue, forKey: "clipboardEnabled")
+                            appState.settings.clipboardEnabled = newValue
                         }
                     }
 
@@ -558,7 +523,7 @@ struct SettingsView: View {
                     Text("6 Months").tag(6)
                 }
                 .onChange(of: clipboardRetention) { _, newValue in
-                    UserDefaults.standard.set(newValue, forKey: "clipboardRetentionMonths")
+                    appState.settings.clipboardRetentionMonths = newValue
                 }
 
                 Button("Clear All History", role: .destructive) {
@@ -662,7 +627,7 @@ struct SettingsView: View {
 
                 TextField("Model", text: $translateModel)
                     .onChange(of: translateModel) { _, newValue in
-                        UserDefaults.standard.set(newValue, forKey: "translateModel")
+                        appState.settings.translateModel = newValue
                     }
             }
 
@@ -671,12 +636,12 @@ struct SettingsView: View {
                     .font(.system(size: 12, design: .monospaced))
                     .frame(minHeight: 80)
                     .onChange(of: translateSystemPrompt) { _, newValue in
-                        UserDefaults.standard.set(newValue, forKey: "translateSystemPrompt")
+                        appState.settings.translateSystemPrompt = newValue
                     }
 
                 Button("Reset to Default") {
                     translateSystemPrompt = AnthropicService.defaultSystemPrompt
-                    UserDefaults.standard.removeObject(forKey: "translateSystemPrompt")
+                    appState.settings.translateSystemPrompt = nil
                 }
                 .font(.system(size: 12))
             }
@@ -696,12 +661,12 @@ struct SettingsView: View {
                     }
                     .onMove { from, destination in
                         translateLanguages.move(fromOffsets: from, toOffset: destination)
-                        UserDefaults.standard.set(translateLanguages, forKey: "translateLanguages")
+                        appState.settings.translateLanguages = translateLanguages
                     }
                     .onDelete { offsets in
                         guard translateLanguages.count > 1 else { return }
                         translateLanguages.remove(atOffsets: offsets)
-                        UserDefaults.standard.set(translateLanguages, forKey: "translateLanguages")
+                        appState.settings.translateLanguages = translateLanguages
                     }
                 }
                 .frame(minHeight: 80)
@@ -713,7 +678,7 @@ struct SettingsView: View {
                         let trimmed = newLanguage.trimmingCharacters(in: .whitespaces)
                         guard !trimmed.isEmpty, !translateLanguages.contains(trimmed) else { return }
                         translateLanguages.append(trimmed)
-                        UserDefaults.standard.set(translateLanguages, forKey: "translateLanguages")
+                        appState.settings.translateLanguages = translateLanguages
                         newLanguage = ""
                     }
                     .disabled(newLanguage.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -738,10 +703,10 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .onAppear {
             anthropicApiKey = KeychainHelper.load(key: "anthropicApiKey") ?? ""
-            translateModel = UserDefaults.standard.string(forKey: "translateModel") ?? AnthropicService.defaultModel
-            translateSystemPrompt = UserDefaults.standard.string(forKey: "translateSystemPrompt")
+            translateModel = appState.settings.translateModel ?? AnthropicService.defaultModel
+            translateSystemPrompt = appState.settings.translateSystemPrompt
                 ?? AnthropicService.defaultSystemPrompt
-            translateLanguages = UserDefaults.standard.stringArray(forKey: "translateLanguages") ?? ["English"]
+            translateLanguages = appState.settings.translateLanguages
         }
     }
 

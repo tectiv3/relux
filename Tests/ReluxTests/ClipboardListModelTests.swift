@@ -1,3 +1,4 @@
+import Foundation
 import ReluxCore
 import XCTest
 
@@ -70,8 +71,10 @@ final class ClipboardListModelTests: XCTestCase {
 
     // MARK: - Filtering
 
+    /// Search goes through the trigram FTS index, so any substring of three characters or more
+    /// matches across the entire retained history, in the body or in the source app name.
     @MainActor
-    func testSearchMatchesBodyFirstLineAndSourceName() throws {
+    func testSearchMatchesSubstringsAnywhereInTheRow() throws {
         let (_, store) = try makeStore()
         let deploy = try insertText("deploy the build\nsecond line", into: store)
         try insertText("unrelated body", into: store)
@@ -81,38 +84,193 @@ final class ClipboardListModelTests: XCTestCase {
         model.reload()
         XCTAssertEqual(model.entries.count, 3, "an empty query keeps every row")
 
-        model.searchText = "dpl"
-        XCTAssertEqual(model.filteredEntries.map(\.id), [deploy.id], "first line fuzzy match")
+        model.searchText = "depl"
+        XCTAssertEqual(model.filteredEntries.map(\.id), [deploy.id], "a leading substring matches")
+
+        model.searchText = "eplo"
+        XCTAssertEqual(model.filteredEntries.map(\.id), [deploy.id], "a substring from inside a word matches")
 
         model.searchText = "second"
-        XCTAssertEqual(model.filteredEntries.map(\.id), [deploy.id], "whole body substring match")
+        XCTAssertEqual(model.filteredEntries.map(\.id), [deploy.id], "the whole body is searchable, not just line one")
 
-        model.searchText = "sfr"
-        XCTAssertEqual(model.filteredEntries.map(\.id), [safari.id], "source name fuzzy match")
+        model.searchText = "Saf"
+        XCTAssertEqual(model.filteredEntries.map(\.id), [safari.id], "the source app name is indexed too")
 
-        model.searchText = "  DPL  "
+        model.searchText = "  DEPL  "
         XCTAssertEqual(model.filteredEntries.map(\.id), [deploy.id], "the query is trimmed and folded")
 
-        model.searchText = "zzz"
+        model.searchText = "zzzz"
         XCTAssertTrue(model.filteredEntries.isEmpty)
         XCTAssertNil(model.selectedEntry)
+    }
+
+    /// A query the trigram index cannot answer — any term below three characters — falls back to
+    /// the in-memory page filter, which is the only path that matches a shorter substring.
+    @MainActor
+    func testShortQueryFallsBackToThePageFilter() throws {
+        let (_, store) = try makeStore()
+        let row = try insertText("grab the cab", into: store)
+        try insertText("unrelated text", into: store)
+
+        XCTAssertNil(store.search(matching: "ab"), "the store cannot answer a two-character query")
+
+        let model = ClipboardListModel(store: store)
+        model.reload()
+        model.searchText = "ab"
+        XCTAssertEqual(model.filteredEntries.map(\.id), [row.id], "the page filter still finds the row")
+    }
+
+    /// Images are stored without text, so `type: .image` plus a query legitimately matches nothing.
+    /// The copy has to say that instead of implying the history holds no images.
+    @MainActor
+    func testImageFilterWithAQueryExplainsThatImagesHaveNoText() throws {
+        let (_, store) = try makeStore()
+        let image = try insertImage(path: "a.png", into: store)
+        try insertText("some text", into: store)
+
+        let model = ClipboardListModel(store: store)
+        model.reload()
+        model.setTypeFilter(.image)
+        XCTAssertEqual(model.filteredEntries.map(\.id), [image.id], "the filter alone shows the image")
+
+        model.searchText = "photo"
+        XCTAssertTrue(model.filteredEntries.isEmpty, "nothing in an image can be matched by a text query")
+        XCTAssertEqual(model.entries.count, 2, "the history is not empty")
+        XCTAssertEqual(model.emptyState, ClipboardEmptyState.noMatches(.image))
+        XCTAssertEqual(model.emptyState?.message, "Images have no text to search")
+        XCTAssertNotEqual(model.emptyState?.message, "No images in history")
+    }
+
+    /// The filter on its own, with no query, still means "no images in history".
+    @MainActor
+    func testFilterWithNoRowsKeepsTheFilterCopy() throws {
+        let (_, store) = try makeStore()
+        try insertText("only text", into: store)
+
+        let model = ClipboardListModel(store: store)
+        model.reload()
+        model.setTypeFilter(.image)
+        XCTAssertEqual(model.emptyState, ClipboardEmptyState.noRowsForFilter(.image))
+        XCTAssertEqual(model.emptyState?.message, "No images in history")
+    }
+
+    @MainActor
+    func testAbsentWordReadsAsNoMatches() throws {
+        let (_, store) = try makeStore()
+        try insertText("alpha", into: store)
+
+        let model = ClipboardListModel(store: store)
+        model.reload()
+        model.searchText = "zzzz"
+        XCTAssertTrue(model.filteredEntries.isEmpty)
+        XCTAssertEqual(model.emptyState, ClipboardEmptyState.noMatches(nil))
+        XCTAssertEqual(model.emptyState?.message, "No matches")
+    }
+
+    @MainActor
+    func testAnEmptyHistorySaysSo() throws {
+        let (_, store) = try makeStore()
+        let model = ClipboardListModel(store: store)
+        model.reload()
+        XCTAssertEqual(model.emptyState, ClipboardEmptyState.noHistory)
+        XCTAssertEqual(model.emptyState?.message, "No clipboard history")
     }
 
     @MainActor
     func testSearchResetsSelectionToTheTop() throws {
         let (_, store) = try makeStore()
         try insertText("alpha", into: store)
-        try insertText("beta", into: store)
+        try insertText("alpine", into: store)
 
         let model = ClipboardListModel(store: store)
         model.reload()
         model.select(row: 1)
-        XCTAssertEqual(model.selectedEntry?.textContent, "alpha", "newest row first, so row 1 is the older one")
+        XCTAssertEqual(model.selectedIndex, 1)
 
-        model.searchText = "a"
+        model.searchText = "al"
         XCTAssertEqual(model.filteredEntries.count, 2)
         XCTAssertEqual(model.selectedIndex, 0, "typing resets the selection, as the panel did before")
-        XCTAssertEqual(model.selectedEntry?.textContent, "beta")
+        XCTAssertNotNil(model.selectedEntry)
+    }
+
+    /// The selection is an index, so the row it names has to come from the result set the panel is
+    /// showing now. A query that changes the first row must move the selection with it.
+    @MainActor
+    func testQueryChangeSelectsTheFirstRowOfTheNewResultSet() throws {
+        let (database, store) = try makeStore()
+        let alphaOlder = try insertText("alpha older", into: store)
+        let beta = try insertText("beta row", into: store)
+        let alphaNewer = try insertText("alpha newer", into: store)
+        try database.execute("UPDATE clipboard_history SET updated_at = 3000 WHERE id = \(alphaNewer.id)")
+        try database.execute("UPDATE clipboard_history SET updated_at = 2000 WHERE id = \(beta.id)")
+        try database.execute("UPDATE clipboard_history SET updated_at = 1000 WHERE id = \(alphaOlder.id)")
+
+        let model = ClipboardListModel(store: store)
+        model.reload()
+        XCTAssertEqual(model.filteredEntries.map(\.id), [alphaNewer.id, beta.id, alphaOlder.id])
+        model.select(row: 1)
+        XCTAssertEqual(model.selectedEntry?.id, beta.id)
+
+        model.searchText = "alpha"
+
+        XCTAssertEqual(model.selectedIndex, 0)
+        XCTAssertEqual(model.filteredEntries.map(\.id), [alphaNewer.id, alphaOlder.id], "chronological, one date order")
+        XCTAssertEqual(
+            model.selectedEntry?.id,
+            model.filteredEntries.first?.id,
+            "the selection names a row of the new result set, not an index carried over"
+        )
+        XCTAssertEqual(model.selectedEntry?.id, alphaNewer.id)
+    }
+
+    /// A new copy lands at the top while the panel is open. The selection follows its entry, and
+    /// the index it ends up on is always inside the list — the model never indexes a shorter one.
+    @MainActor
+    func testANewTopEntryKeepsTheSelectionOnTheSameRow() throws {
+        let (database, store) = try makeStore()
+        let first = try insertText("first", into: store)
+        let second = try insertText("second", into: store)
+        let third = try insertText("third", into: store)
+        try database.execute("UPDATE clipboard_history SET updated_at = 3000 WHERE id = \(first.id)")
+        try database.execute("UPDATE clipboard_history SET updated_at = 2000 WHERE id = \(second.id)")
+        try database.execute("UPDATE clipboard_history SET updated_at = 1000 WHERE id = \(third.id)")
+
+        let model = ClipboardListModel(store: store)
+        model.reload()
+        model.select(row: 2)
+        XCTAssertEqual(model.selectedEntry?.id, third.id)
+
+        try insertText("newest", into: store)
+        model.refreshEntries()
+
+        XCTAssertEqual(model.filteredEntries.count, 4)
+        XCTAssertEqual(model.selectedIndex, 3, "one row was inserted above it")
+        XCTAssertEqual(model.selectedEntry?.id, third.id, "the selection follows the entry, not its index")
+    }
+
+    /// The list can also shrink underneath the selection; the index must be clamped, not carried.
+    @MainActor
+    func testARefreshThatLosesTheSelectedRowKeepsTheIndexInRange() throws {
+        let (database, store) = try makeStore()
+        let first = try insertText("first", into: store)
+        let second = try insertText("second", into: store)
+        let third = try insertText("third", into: store)
+        try database.execute("UPDATE clipboard_history SET updated_at = 3000 WHERE id = \(first.id)")
+        try database.execute("UPDATE clipboard_history SET updated_at = 2000 WHERE id = \(second.id)")
+        try database.execute("UPDATE clipboard_history SET updated_at = 1000 WHERE id = \(third.id)")
+
+        let model = ClipboardListModel(store: store)
+        model.reload()
+        model.select(row: 2)
+        XCTAssertEqual(model.selectedEntry?.id, third.id)
+
+        try store.delete(id: third.id)
+        model.refreshEntries()
+
+        XCTAssertEqual(model.filteredEntries.count, 2)
+        XCTAssertEqual(model.selectedIndex, 1)
+        XCTAssertTrue(model.selectedIndex < model.filteredEntries.count)
+        XCTAssertEqual(model.selectedEntry?.id, second.id, "the selection lands on a row that exists")
     }
 
     @MainActor
@@ -146,23 +304,119 @@ final class ClipboardListModelTests: XCTestCase {
     @MainActor
     func testUnfilteredListKeepsStoreOrder() throws {
         let (database, store) = try makeStore()
-        try insertText("newest", into: store)
-        try insertText("oldest", into: store)
-        try insertText("pinned", into: store)
+        try insertText("newest note", into: store)
+        try insertText("oldest note", into: store)
+        try insertText("pinned note", into: store)
         try database.execute("UPDATE clipboard_history SET updated_at = 5000 WHERE id = 1")
         try database.execute("UPDATE clipboard_history SET updated_at = 1000 WHERE id = 2")
         try database.execute("UPDATE clipboard_history SET updated_at = 100, pinned_at = 200 WHERE id = 3")
 
         let model = ClipboardListModel(store: store)
         model.reload()
-        XCTAssertEqual(model.filteredEntries.map(\.textContent), ["pinned", "newest", "oldest"])
+        XCTAssertEqual(model.filteredEntries.map(\.textContent), ["pinned note", "newest note", "oldest note"])
 
-        model.searchText = "e"
+        model.searchText = "note"
         XCTAssertEqual(
-            model.filteredEntries.map(\.textContent),
-            ["newest", "oldest", "pinned"],
-            "a query re-sorts by recency; pinned-first order is the store's and only survives unfiltered"
+            model.filteredEntries.first?.textContent,
+            "pinned note",
+            "a query keeps the pinned row first; the ordering is pinned, then recency — `MATCH` only filters"
         )
+        XCTAssertEqual(Set(model.filteredEntries.map(\.textContent)), ["pinned note", "newest note", "oldest note"])
+    }
+
+    // MARK: - Sections
+
+    private func day(_ year: Int, _ month: Int, _ day: Int, hour: Int = 9) -> Date {
+        Calendar.current.date(from: DateComponents(year: year, month: month, day: day, hour: hour)) ?? .distantPast
+    }
+
+    private func entry(id: Int64, at date: Date, pinnedAt: Date? = nil) -> ClipboardEntry {
+        ClipboardEntry(
+            id: id,
+            contentType: ContentType.text,
+            textContent: "row \(id)",
+            rawData: nil,
+            imagePath: nil,
+            imageWidth: nil,
+            imageHeight: nil,
+            imageSize: nil,
+            sourceApp: nil,
+            sourceName: nil,
+            charCount: nil,
+            wordCount: nil,
+            createdAt: date,
+            updatedAt: date,
+            pinnedAt: pinnedAt
+        )
+    }
+
+    /// What `bm25` used to hand the list: one calendar day split over several non-adjacent runs,
+    /// because relevance interleaved the dates. Grouping must still produce one heading per day,
+    /// newest first, with every section id distinct — a duplicate id is what corrupted the list.
+    func testInterleavedDatesStillYieldUniqueChronologicalSections() {
+        let may = day(2026, 5, 19)
+        let june = day(2026, 6, 12)
+        let september = day(2026, 9, 4)
+        let entries = [
+            entry(id: 1, at: september),
+            entry(id: 2, at: may),
+            entry(id: 3, at: june),
+            entry(id: 4, at: september),
+            entry(id: 5, at: may),
+            entry(id: 6, at: june),
+        ]
+
+        let sections = ClipboardListModel.sections(for: entries, isFiltering: true)
+
+        XCTAssertEqual(sections.count, 3, "one heading per day, not one per run of rows")
+        XCTAssertEqual(Set(sections.map(\.id)).count, sections.count, "section ids must be unique")
+
+        let days = sections.compactMap { section -> Date? in
+            if case let .day(day) = section.id {
+                return day
+            }
+            return nil
+        }
+        XCTAssertEqual(
+            days,
+            [september, june, may].map { Calendar.current.startOfDay(for: $0) },
+            "headings run newest to oldest, not in the order the rows arrived"
+        )
+        XCTAssertTrue(
+            zip(days, days.dropFirst()).allSatisfy { $0 > $1 },
+            "strictly descending days: an equal pair would repeat a heading"
+        )
+        XCTAssertEqual(sections.flatMap(\.rows).count, entries.count, "grouping loses no rows")
+        XCTAssertEqual(Set(sections.flatMap(\.rows).map(\.entry.id)), Set(entries.map(\.id)), "same rows, regrouped")
+        XCTAssertEqual(
+            sections.first { $0.id == .day(Calendar.current.startOfDay(for: september)) }?.rows.map(\.entry.id),
+            [1, 4],
+            "rows inside a day keep their incoming order"
+        )
+    }
+
+    /// Pinned rows get their own heading only while the list is unfiltered, and that heading never
+    /// collides with a day heading.
+    func testPinnedRowsFormADistinctSectionOnlyWhileUnfiltered() {
+        let older = day(2026, 5, 19)
+        let newer = day(2026, 9, 4)
+        let entries = [
+            entry(id: 1, at: older, pinnedAt: newer),
+            entry(id: 2, at: newer),
+            entry(id: 3, at: older),
+        ]
+
+        let unfiltered = ClipboardListModel.sections(for: entries, isFiltering: false)
+        XCTAssertEqual(
+            unfiltered.map(\.id),
+            [.pinned, .day(Calendar.current.startOfDay(for: newer)), .day(Calendar.current.startOfDay(for: older))]
+        )
+        XCTAssertEqual(Set(unfiltered.map(\.id)).count, unfiltered.count)
+
+        let filtered = ClipboardListModel.sections(for: entries, isFiltering: true)
+        XCTAssertEqual(filtered.count, 2, "a query keeps pinned rows under their own date")
+        XCTAssertEqual(Set(filtered.map(\.id)).count, filtered.count)
+        XCTAssertEqual(filtered.flatMap(\.rows).count, 3)
     }
 
     // MARK: - Selection
@@ -381,6 +635,97 @@ final class ClipboardListModelTests: XCTestCase {
         XCTAssertTrue(recorder.pastedText.isEmpty, "copy must not simulate Cmd+V")
         XCTAssertTrue(recorder.pastedImages.isEmpty)
         XCTAssertEqual(recorder.dismissals, 1)
+    }
+
+    // MARK: - Store-backed search
+
+    /// The search field reaches rows that are on disk but outside the 500-row page the panel
+    /// loads; that is the whole reason the query moved into SQLite.
+    @MainActor
+    func testSearchReadsTheStoreBeyondTheLoadedPage() throws {
+        let (_, store) = try makeStore()
+        try insertText("prehistoric needle", into: store)
+        for index in 0 ..< 520 {
+            try insertText("filler \(index)", into: store)
+        }
+
+        let model = ClipboardListModel(store: store)
+        model.reload()
+        XCTAssertEqual(model.entries.count, 500)
+        XCTAssertFalse(model.filteredEntries.contains { $0.textContent == "prehistoric needle" })
+
+        model.searchText = "needle"
+        XCTAssertEqual(model.filteredEntries.map(\.textContent), ["prehistoric needle"])
+    }
+
+    @MainActor
+    func testEmptyQueryKeepsTheLoadedPagePath() throws {
+        let (database, store) = try makeStore()
+        let older = try insertText("older", into: store)
+        let newest = try insertText("newest", into: store)
+        try database.execute("UPDATE clipboard_history SET updated_at = 2000 WHERE id = \(newest.id)")
+        try database.execute("UPDATE clipboard_history SET updated_at = 1000 WHERE id = \(older.id)")
+
+        let model = ClipboardListModel(store: store)
+        model.reload()
+        XCTAssertEqual(model.filteredEntries.map(\.id), [newest.id, older.id], "store order, untouched")
+
+        model.searchText = "old"
+        XCTAssertEqual(model.filteredEntries.map(\.id), [older.id])
+
+        model.resetSearch()
+        XCTAssertEqual(model.filteredEntries.map(\.id), model.entries.map(\.id), "clearing returns the page")
+    }
+
+    /// A database whose FTS table is missing must search the loaded page the way the panel did
+    /// before the index existed — including the fuzzy matcher that only survives on that path.
+    @MainActor
+    func testSearchFallsBackToThePageWhenTheIndexIsMissing() throws {
+        let (database, store) = try makeStore()
+        let deploy = try insertText("deploy the build", into: store)
+        let desktop = try insertText("remote desktop connection notes", into: store)
+        try insertText("unrelated", into: store)
+        for trigger in ["clipboard_fts_ai", "clipboard_fts_ad", "clipboard_fts_au"] {
+            try database.execute("DROP TRIGGER \(trigger)")
+        }
+        try database.execute("DROP TABLE clipboard_fts")
+
+        let model = ClipboardListModel(store: store)
+        model.reload()
+
+        model.searchText = "dpl"
+        XCTAssertEqual(
+            model.filteredEntries.map(\.id),
+            [deploy.id],
+            "the page filter's subsequence match is what runs when the index is unusable"
+        )
+
+        model.searchText = "esktop"
+        XCTAssertEqual(
+            model.filteredEntries.map(\.id),
+            [desktop.id],
+            "the fallback still matches a mid-word substring, as it did before the index existed"
+        )
+
+        model.searchText = "🚀"
+        XCTAssertTrue(model.filteredEntries.isEmpty, "no row contains the emoji, and none was invented")
+        XCTAssertEqual(model.entries.count, 3, "the page itself is untouched")
+    }
+
+    @MainActor
+    func testSearchIsDebounced() async throws {
+        let (_, store) = try makeStore()
+        try insertText("alpha", into: store)
+        try insertText("beta", into: store)
+
+        let model = ClipboardListModel(store: store, searchDebounceNanos: 60_000_000)
+        model.reload()
+
+        model.searchText = "alpha"
+        XCTAssertEqual(model.filteredEntries.count, 2, "the query waits out the debounce")
+
+        try await Task.sleep(nanoseconds: 400_000_000)
+        XCTAssertEqual(model.filteredEntries.map(\.textContent), ["alpha"])
     }
 
     // MARK: - Missing store

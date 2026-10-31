@@ -17,7 +17,11 @@ enum ClipboardServices {
     /// A list model wired to the live pasteboard. Settings uses it for `deleteAll`; the panel
     /// keeps its own instance because the model also owns panel-local filter/selection state.
     static func model(_ appState: AppState) -> ClipboardListModel {
-        ClipboardListModel(store: store(appState), board: .live(monitor: monitor(appState)))
+        ClipboardListModel(
+            store: store(appState),
+            board: .live(monitor: monitor(appState)),
+            searchDebounceNanos: ClipboardListModel.panelSearchDebounceNanos
+        )
     }
 }
 

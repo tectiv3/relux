@@ -56,12 +56,26 @@ targets:
       # FrecencyTracker owns the ranking-time usage log; it depends only on ReluxCore
       # and Foundation, so its migration and persistence are covered host-free.
       - path: Sources/Relux/Search/FrecencyTracker.swift
+      # The ambient activity observer's filters (boot guard, coalescing, dwell,
+      # self-suppression) are decisions over an injected clock, scheduler, frontmost
+      # probe and event source, so they are covered without a running workspace.
+      - path: Sources/Relux/Search/AppActivityObserver.swift
       # The icon cache is AppKit-only (no SwiftUI, no AppState), so its fetch-once and
       # 48x48 downsample behaviour is testable without a test host.
       - path: Sources/Relux/AppIconCache.swift
+      # The AX capture flow is a main-actor type over an injected AX bridge, so its read order,
+      # enhanced-AX retry policy and once-per-app rule are covered without an AX connection.
+      - path: Sources/Relux/SelectionCapture.swift
       # The clipboard list model is state over the store with its pasteboard side effects
       # injected, so the panel's filtering/selection rules run host-free too.
       - path: Sources/Relux/Clipboard/ClipboardListModel.swift
+      # SettingsStore is a Foundation-only wrapper over UserDefaults; compiling it into the test
+      # bundle pins every persisted key string and default against a scratch suite.
+      - path: Sources/Relux/Util/SettingsStore.swift
+      # The Scripts tab's state over scripts.json: the searcher takes an injectable directory, so
+      # the commit ordering and the on-disk round-trip run host-free.
+      - path: Sources/Relux/Search/ScriptSearcher.swift
+      - path: Sources/Relux/Search/ScriptsSettingsModel.swift
     dependencies:
       - target: ReluxCore
     settings:

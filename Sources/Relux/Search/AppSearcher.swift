@@ -3,37 +3,42 @@ import Foundation
 import ReluxCore
 
 struct AppItem {
+    /// Always the stripped name (no `.app`): the ranker scores exactly what the row displays.
     let name: String
     let path: URL
     let bundleID: String?
+
+    init(name: String, path: URL, bundleID: String?) {
+        self.name = AppDisplayName.from(bundleName: name)
+        self.path = path
+        self.bundleID = bundleID
+    }
 }
 
 @MainActor
 final class AppSearcher {
-    static let defaultSearchPaths: [String] = [
-        "/Applications",
-        "/Applications/Utilities",
-        "/System/Applications",
-        "/System/Applications/Utilities",
-        "/System/Library/CoreServices/Applications",
-        NSHomeDirectory() + "/Applications",
-    ]
+    /// Kept as the name the settings UI resets to; the array itself lives in `SettingsStore` so
+    /// there is one source of truth for the default search paths.
+    static var defaultSearchPaths: [String] {
+        SettingsStore.defaultAppSearchPaths
+    }
 
     private var apps: [AppItem] = []
     private var query: NSMetadataQuery?
     private var newlyDetected: Set<String> = []
     private var watchSources: [DispatchSourceFileSystemObject] = []
+    private let settings: SettingsStore
 
     var searchPaths: [String] {
         didSet {
-            UserDefaults.standard.set(searchPaths, forKey: "appSearchPaths")
+            settings.appSearchPaths = searchPaths
             restartSpotlightQuery()
         }
     }
 
-    init() {
-        searchPaths = UserDefaults.standard.stringArray(forKey: "appSearchPaths")
-            ?? Self.defaultSearchPaths
+    init(settings: SettingsStore = SettingsStore()) {
+        self.settings = settings
+        searchPaths = settings.appSearchPaths
         startSpotlightQuery()
         startDirectoryWatchers()
     }
@@ -94,7 +99,7 @@ final class AppSearcher {
             let path = url.path
             guard !knownPaths.contains(path) else { continue }
 
-            let name = url.deletingPathExtension().lastPathComponent
+            let name = url.lastPathComponent
             let bundleID = Bundle(url: url)?.bundleIdentifier
             apps.append(AppItem(name: name, path: url, bundleID: bundleID))
             newlyDetected.insert(path)
@@ -141,11 +146,16 @@ final class AppSearcher {
             else { continue }
 
             let url = URL(fileURLWithPath: path)
-            let name = item.value(forAttribute: kMDItemDisplayName as String) as? String
-                ?? url.deletingPathExtension().lastPathComponent
-            if found[name] == nil {
-                let bundleID = item.value(forAttribute: kMDItemCFBundleIdentifier as String) as? String
-                found[name] = AppItem(name: name, path: url, bundleID: bundleID)
+            // Keyed by the normalised name so a Spotlight name (`Safari.app`) and an
+            // FSEvents-detected one (`Safari`) resolve to the same entry.
+            let app = AppItem(
+                name: item.value(forAttribute: kMDItemDisplayName as String) as? String
+                    ?? url.lastPathComponent,
+                path: url,
+                bundleID: item.value(forAttribute: kMDItemCFBundleIdentifier as String) as? String
+            )
+            if found[app.name] == nil {
+                found[app.name] = app
             }
         }
 
@@ -158,10 +168,13 @@ final class AppSearcher {
         // Merge: preserve FSEvents-detected apps that Spotlight hasn't indexed yet
         for path in newlyDetected {
             let url = URL(fileURLWithPath: path)
-            let name = url.deletingPathExtension().lastPathComponent
-            if found[name] == nil {
-                let bundleID = Bundle(url: url)?.bundleIdentifier
-                found[name] = AppItem(name: name, path: url, bundleID: bundleID)
+            let app = AppItem(
+                name: url.lastPathComponent,
+                path: url,
+                bundleID: Bundle(url: url)?.bundleIdentifier
+            )
+            if found[app.name] == nil {
+                found[app.name] = app
             }
         }
 

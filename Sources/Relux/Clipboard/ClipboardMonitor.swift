@@ -14,6 +14,7 @@ private extension NSPasteboard.PasteboardType {
 @Observable
 final class ClipboardMonitor {
     private let store: ClipboardStore
+    private let settings: SettingsStore
     private var timer: Timer?
     private var lastChangeCount: Int = 0
     var suppressNextCapture = false
@@ -21,29 +22,27 @@ final class ClipboardMonitor {
     /// Bundle IDs of apps whose copies should be ignored
     var disabledApps: Set<String> {
         didSet {
-            UserDefaults.standard.set(Array(disabledApps), forKey: "clipboardDisabledApps")
+            settings.clipboardDisabledApps = disabledApps
         }
     }
 
     var isEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: "clipboardEnabled") as? Bool ?? true }
+        get { settings.clipboardEnabled }
         set {
-            UserDefaults.standard.set(newValue, forKey: "clipboardEnabled")
-            if newValue { start() } else { stop() }
+            settings.clipboardEnabled = newValue
+            if newValue {
+                start()
+            } else {
+                stop()
+            }
         }
     }
 
-    static let defaultDisabledApps = [
-        "com.apple.keychainaccess",
-        "com.apple.Passwords",
-    ]
-
-    init(store: ClipboardStore) {
+    init(store: ClipboardStore, settings: SettingsStore) {
         self.store = store
+        self.settings = settings
         lastChangeCount = NSPasteboard.general.changeCount
-        let arr = UserDefaults.standard.stringArray(forKey: "clipboardDisabledApps")
-            ?? Self.defaultDisabledApps
-        disabledApps = Set(arr)
+        disabledApps = settings.clipboardDisabledApps
     }
 
     func start() {

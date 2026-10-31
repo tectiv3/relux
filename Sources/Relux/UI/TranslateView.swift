@@ -1,12 +1,12 @@
 import AppKit
+import ReluxCore
 import SwiftUI
 
 struct TranslateView: View {
     @Environment(AppState.self) private var appState
     @State private var inputText: String = ""
     @State private var selectedIndex: Int = 0
-    @State private var showActions: Bool = false
-    @State private var actionIndex: Int = 0
+    @State private var menu = ActionSelection()
     @FocusState private var isInputFocused: Bool
 
     private var service: TranslationService? {
@@ -26,7 +26,8 @@ struct TranslateView: View {
     }
 
     private var languages: [String] {
-        let stored = UserDefaults.standard.stringArray(forKey: "translateLanguages") ?? ["English"]
+        // An empty list is still possible from the stored value; the picker needs one language.
+        let stored = appState.settings.translateLanguages
         return stored.isEmpty ? ["English"] : stored
     }
 
@@ -37,19 +38,26 @@ struct TranslateView: View {
         return entries[selectedIndex]
     }
 
-    private var currentActions: [TranslateAction] {
+    private var currentActions: [Action] {
         guard let entry = selectedEntry else { return [] }
-        return [
-            TranslateAction(label: "Re-translate", icon: "arrow.clockwise", shortcut: "⌘R") {
-                retranslate(entry)
-            },
-            TranslateAction(label: "Copy to Clipboard", icon: "doc.on.clipboard", shortcut: "⌘⏎") {
-                copyTranslation(entry)
-            },
-            TranslateAction(label: "Delete", icon: "trash", shortcut: "⌫") {
-                deleteEntry(entry)
-            },
-        ]
+        return PanelActions.translate().map { descriptor in
+            Action(descriptor) {
+                switch descriptor.kind {
+                case .retranslate: retranslate(entry)
+                case .copyToClipboard: copyTranslation(entry)
+                case .delete: deleteEntry(entry)
+                default: break
+                }
+            }
+        }
+    }
+
+    /// Runs a menu row and closes the menu, for both the mouse and the Return key.
+    private func runAction(_ index: Int) {
+        let actions = currentActions
+        guard index >= 0, index < actions.count else { return }
+        actions[index].handler()
+        menu.close()
     }
 
     var body: some View {
@@ -79,8 +87,15 @@ struct TranslateView: View {
         .frame(maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay {
-            if showActions {
-                actionsOverlay
+            if menu.isOpen {
+                ActionOverlay(
+                    actions: currentActions,
+                    selectedIndex: menu.index,
+                    width: 280,
+                    onSelect: runAction,
+                    header: { actionMenuHeader }
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .bottomTrailing)))
             }
         }
         .onAppear {
@@ -104,8 +119,8 @@ struct TranslateView: View {
             }
         }
         .onKeyPress(.escape) {
-            if showActions {
-                showActions = false
+            if menu.isOpen {
+                menu.close()
                 return .handled
             }
             return .ignored
@@ -113,9 +128,7 @@ struct TranslateView: View {
         .background(PanelKeyMonitor(handler: handlePanelKey))
         .background {
             Button("") {
-                guard selectedEntry != nil else { return }
-                actionIndex = 0
-                showActions.toggle()
+                menu.toggle(isAvailable: selectedEntry != nil)
             }
             .keyboardShortcut("k", modifiers: .command)
             .hidden()
@@ -356,16 +369,16 @@ struct TranslateView: View {
 
     private var bottomBar: some View {
         HStack(spacing: 16) {
-            if showActions {
-                keyboardHint(key: "\u{23CE}", label: "Select")
-                keyboardHint(key: "\u{2191}\u{2193}", label: "Navigate")
-                keyboardHint(key: "esc", label: "Back")
+            if menu.isOpen {
+                KeyboardHint(key: "\u{23CE}", label: "Select")
+                KeyboardHint(key: "\u{2191}\u{2193}", label: "Navigate")
+                KeyboardHint(key: "esc", label: "Back")
             } else {
-                keyboardHint(key: "\u{23CE}", label: "Translate")
-                keyboardHint(key: "\u{2318}K", label: "Actions")
-                keyboardHint(key: "\u{2326}", label: "Delete")
-                keyboardHint(key: "\u{2191}\u{2193}", label: "Navigate")
-                keyboardHint(key: "esc", label: "Close")
+                KeyboardHint(key: "\u{23CE}", label: "Translate")
+                KeyboardHint(key: "\u{2318}K", label: "Actions")
+                KeyboardHint(key: "\u{2326}", label: "Delete")
+                KeyboardHint(key: "\u{2191}\u{2193}", label: "Navigate")
+                KeyboardHint(key: "esc", label: "Close")
             }
             Spacer()
             if !entries.isEmpty {
@@ -380,82 +393,23 @@ struct TranslateView: View {
         .foregroundColor(.secondary)
     }
 
-    private func keyboardHint(key: String, label: String) -> some View {
-        HStack(spacing: 4) {
-            Text(key)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 1)
-                .background(
-                    RoundedRectangle(cornerRadius: 3)
-                        .stroke(Color.secondary.opacity(0.5), lineWidth: 0.5)
-                )
-            Text(label)
-        }
-    }
-
     // MARK: - Actions Overlay
 
-    private var actionsOverlay: some View {
-        VStack(spacing: 0) {
-            if let entry = selectedEntry {
-                HStack(spacing: 6) {
-                    Image(systemName: "character.book.closed")
-                        .font(.system(size: 11))
-                    Text(String(entry.sourceText.prefix(40)))
-                        .font(.system(size: 12, weight: .medium))
-                    Spacer()
-                }
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                Divider()
+    @ViewBuilder
+    private var actionMenuHeader: some View {
+        if let entry = selectedEntry {
+            HStack(spacing: 6) {
+                Image(systemName: "character.book.closed")
+                    .font(.system(size: 11))
+                Text(String(entry.sourceText.prefix(40)))
+                    .font(.system(size: 12, weight: .medium))
+                Spacer()
             }
-
-            ForEach(Array(currentActions.enumerated()), id: \.offset) { index, action in
-                actionRow(action: action, isSelected: index == actionIndex)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        action.action()
-                        showActions = false
-                    }
-            }
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            Divider()
         }
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.vertical, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(.ultraThickMaterial)
-                .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .frame(width: 280)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        .padding(.trailing, 8)
-        .padding(.bottom, 8)
-        .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .bottomTrailing)))
-    }
-
-    private func actionRow(action: TranslateAction, isSelected: Bool) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: action.icon)
-                .foregroundColor(isSelected ? .white.opacity(0.8) : .secondary)
-                .font(.system(size: 13))
-                .frame(width: 20)
-            Text(action.label)
-                .font(.system(size: 13))
-            Spacer()
-            Text(action.shortcut)
-                .font(.system(size: 11))
-                .foregroundColor(isSelected ? .white.opacity(0.6) : .secondary)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Color.accentColor : Color.clear)
-                .padding(.horizontal, 4)
-        )
-        .foregroundColor(isSelected ? .white : .primary)
     }
 
     // MARK: - Key Monitor
@@ -464,35 +418,32 @@ struct TranslateView: View {
     private func handlePanelKey(_ event: NSEvent) -> NSEvent? {
         let key = event.specialKey
         if key == .upArrow {
-            if showActions {
-                guard !currentActions.isEmpty else { return event }
-                actionIndex = actionIndex <= 0 ? currentActions.count - 1 : actionIndex - 1
+            if menu.isOpen {
+                guard menu.moveUp(count: currentActions.count) else { return event }
             } else {
                 guard !entries.isEmpty else { return event }
-                selectedIndex = selectedIndex <= 0 ? entries.count - 1 : selectedIndex - 1
+                selectedIndex = ResultSelection.retreated(selectedIndex, count: entries.count)
             }
             return nil
         }
         if key == .downArrow {
-            if showActions {
-                guard !currentActions.isEmpty else { return event }
-                actionIndex = actionIndex >= currentActions.count - 1 ? 0 : actionIndex + 1
+            if menu.isOpen {
+                guard menu.moveDown(count: currentActions.count) else { return event }
             } else {
                 guard !entries.isEmpty else { return event }
-                selectedIndex = selectedIndex >= entries.count - 1 ? 0 : selectedIndex + 1
+                selectedIndex = ResultSelection.advanced(selectedIndex, count: entries.count)
             }
             return nil
         }
         if key == .carriageReturn || key == .newline {
-            if showActions {
-                guard actionIndex < currentActions.count else { return event }
-                currentActions[actionIndex].action()
-                showActions = false
+            if menu.isOpen {
+                guard let index = menu.activationIndex(count: currentActions.count) else { return event }
+                runAction(index)
                 return nil
             }
         }
         if key == .deleteForward {
-            if !showActions, let entry = selectedEntry {
+            if !menu.isOpen, let entry = selectedEntry {
                 deleteEntry(entry)
                 return nil
             }
@@ -511,7 +462,7 @@ struct TranslateView: View {
     }
 
     private func retranslate(_ entry: TranslationEntry) {
-        showActions = false
+        menu.close()
         inputText = entry.sourceText
         selectedLanguage = entry.targetLang
 
@@ -522,7 +473,7 @@ struct TranslateView: View {
     private func copyTranslation(_ entry: TranslationEntry) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(entry.translatedText, forType: .string)
-        showActions = false
+        menu.close()
     }
 
     private func deleteEntry(_ entry: TranslationEntry) {
@@ -530,7 +481,7 @@ struct TranslateView: View {
         if selectedIndex >= entries.count {
             selectedIndex = max(0, entries.count - 1)
         }
-        showActions = false
+        menu.close()
     }
 
     private func formatTime(_ date: Date) -> String {
@@ -545,13 +496,4 @@ struct TranslateView: View {
         formatter.timeStyle = .short
         return formatter.string(from: date)
     }
-}
-
-// MARK: - Supporting Types
-
-private struct TranslateAction {
-    let label: String
-    let icon: String
-    let shortcut: String
-    let action: () -> Void
 }

@@ -113,12 +113,97 @@ final class ClipboardStore {
         ORDER BY CASE WHEN pinned_at IS NOT NULL THEN 0 ELSE 1 END, pinned_at ASC, updated_at DESC \
         LIMIT ?
         """
-        guard let statement = try? database.prepare(sql) else { return [] }
-        try? statement.bind(1, limit)
+        let statement: Statement
+        do {
+            statement = try database.prepare(sql)
+        } catch {
+            // The list keeps its "no history" contract (a missing table would otherwise read as an
+            // empty history with no trace), but the cause is no longer swallowed.
+            log.error("fetchAll: could not prepare the history query: \(error)")
+            return []
+        }
 
         var entries: [ClipboardEntry] = []
-        while (try? statement.step()) == true {
-            entries.append(readRow(statement))
+        do {
+            try statement.bind(1, limit)
+            while try statement.step() {
+                entries.append(readRow(statement))
+            }
+        } catch {
+            // A read that fails mid-way still shows the rows it produced, as it did when the
+            // failure was swallowed; only the silence is gone.
+            log.error("fetchAll: history read stopped after \(entries.count) rows: \(error)")
+        }
+        return entries
+    }
+
+    /// Rows matching an FTS5 query across the whole table, pinned first and then chronologically.
+    ///
+    /// `MATCH` filters here, it does not rank. The panel shows a copy history under a date
+    /// heading, so a relevance order interleaves the dates and the same day appears in several
+    /// non-adjacent runs; the list then renders one heading per run with a colliding id and
+    /// SwiftUI draws it wrong (blank bands, stale fills). Relevance over a substring match of the
+    /// user's own clipboard also has little signal: every hit is a literal substring.
+    ///
+    /// The index is trigram-tokenized (schema 3), so a query matches any substring of three or
+    /// more characters in `text_content` or `source_name` — mid-word, sub-word CJK and source app
+    /// names included.
+    ///
+    /// `nil` means the FTS index could not answer at all: the query has a term shorter than three
+    /// characters (which no trigram index can match, see `ClipboardFTSQuery`), or the table is
+    /// missing or unusable. The caller then filters the loaded page, which is what the panel did
+    /// before the index existed. An empty array is the honest answer "no row matches" and must
+    /// not be treated as a fallback trigger: with substring matching, an empty result means the
+    /// text is not in the history.
+    func search(matching query: String, type: ClipboardTypeFilter? = nil, limit: Int = 500) -> [ClipboardEntry]? {
+        guard let expression = ClipboardFTSQuery.matchExpression(for: query) else { return nil }
+
+        var sql = """
+        SELECT h.id, h.content_type, h.text_content, NULL, h.image_path, \
+        h.image_width, h.image_height, h.image_size, h.source_app, \
+        h.source_name, h.char_count, h.word_count, h.created_at, h.updated_at, h.pinned_at \
+        FROM clipboard_fts \
+        JOIN clipboard_history h ON h.id = clipboard_fts.rowid \
+        WHERE clipboard_fts MATCH ?
+        """
+        let contentTypes = type?.contentTypes ?? []
+        if !contentTypes.isEmpty {
+            let placeholders = Array(repeating: "?", count: contentTypes.count).joined(separator: ", ")
+            sql += " AND h.content_type IN (\(placeholders))"
+        }
+        // Chronological, matching the unfiltered page (`fetchAll`): pinned first, then most
+        // recently used. `id DESC` breaks equal timestamps so the order is deterministic.
+        sql += """
+         ORDER BY CASE WHEN h.pinned_at IS NOT NULL THEN 0 ELSE 1 END, \
+        h.updated_at DESC, h.id DESC \
+        LIMIT ?
+        """
+
+        let statement: Statement
+        do {
+            statement = try database.prepare(sql)
+        } catch {
+            logOnceSearchFailure(error)
+            return nil
+        }
+
+        var entries: [ClipboardEntry] = []
+        do {
+            try statement.bind(1, expression)
+            var index: Int32 = 2
+            for contentType in contentTypes {
+                try statement.bind(index, contentType)
+                index += 1
+            }
+            try statement.bind(index, limit)
+            while try statement.step() {
+                entries.append(readRow(statement))
+            }
+        } catch {
+            // A partial result is still better than the fallback here, but a failure that hides
+            // the index is worth one line in the log, not one per keystroke.
+            logOnceSearchFailure(error)
+            return entries.isEmpty ? nil : entries
         }
         return entries
     }
@@ -213,13 +298,17 @@ final class ClipboardStore {
         try database.execute("DELETE FROM clipboard_history WHERE pinned_at IS NULL")
     }
 
-    /// Delete entries older than the given date and their associated image files
+    /// Delete entries whose last activity — the insert or a later re-copy — is older than the
+    /// given date, and their associated image files.
+    ///
+    /// Expiry keys off both timestamps because the ordering does: re-copying an entry bumps
+    /// `updated_at` and leaves `created_at` at the first sighting, so expiring on `created_at`
+    /// alone deleted rows that had been used that day. Pinned rows are never expired.
     func deleteExpired(before date: Date) throws {
+        let stale = "MAX(COALESCE(created_at, 0), COALESCE(updated_at, 0)) < ? AND pinned_at IS NULL"
+
         // Collect image paths first
-        let sql = """
-        SELECT image_path FROM clipboard_history \
-        WHERE created_at < ? AND pinned_at IS NULL AND image_path IS NOT NULL
-        """
+        let sql = "SELECT image_path FROM clipboard_history WHERE \(stale) AND image_path IS NOT NULL"
         let statement = try database.prepare(sql)
         try statement.bind(1, date.timeIntervalSince1970)
 
@@ -235,13 +324,22 @@ final class ClipboardStore {
             try? FileManager.default.removeItem(at: fullPath)
         }
 
-        let deleteSql = "DELETE FROM clipboard_history WHERE created_at < ? AND pinned_at IS NULL"
+        let deleteSql = "DELETE FROM clipboard_history WHERE \(stale)"
         let deleteStatement = try database.prepare(deleteSql)
         try deleteStatement.bind(1, date.timeIntervalSince1970)
         try deleteStatement.stepToCompletion()
     }
 
     // MARK: - Private
+
+    /// Search failures repeat on every keystroke; the first one carries the diagnosis.
+    private var didLogSearchFailure = false
+
+    private func logOnceSearchFailure(_ error: Error) {
+        guard !didLogSearchFailure else { return }
+        didLogSearchFailure = true
+        log.error("search: FTS index unusable, filtering the loaded page instead: \(error)")
+    }
 
     private func fetchById(id: Int64) -> ClipboardEntry? {
         let sql = """
@@ -267,16 +365,22 @@ final class ClipboardStore {
             textContent: statement.columnText(2),
             rawData: statement.columnBlob(3),
             imagePath: statement.columnText(4),
-            imageWidth: statement.columnInt(5),
-            imageHeight: statement.columnInt(6),
-            imageSize: statement.columnInt(7),
+            imageWidth: intColumn(statement, 5),
+            imageHeight: intColumn(statement, 6),
+            imageSize: intColumn(statement, 7),
             sourceApp: statement.columnText(8),
             sourceName: statement.columnText(9),
-            charCount: statement.columnInt(10),
-            wordCount: statement.columnInt(11),
+            charCount: intColumn(statement, 10),
+            wordCount: intColumn(statement, 11),
             createdAt: Date(timeIntervalSince1970: createdAt),
             updatedAt: Date(timeIntervalSince1970: updatedRaw > 0 ? updatedRaw : createdAt),
             pinnedAt: statement.columnDouble(14).map { Date(timeIntervalSince1970: $0) }
         )
+    }
+
+    /// Counts and sizes are bound as 64-bit `INTEGER`s, so they are read back the same way:
+    /// `columnInt` truncates anything above `Int32.max`.
+    private func intColumn(_ statement: Statement, _ index: Int32) -> Int? {
+        statement.columnInt64(index).map(Int.init)
     }
 }

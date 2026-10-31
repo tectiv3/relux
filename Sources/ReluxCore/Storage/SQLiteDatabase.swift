@@ -3,8 +3,10 @@ import SQLite3
 
 /// A single SQLite connection shared by every store.
 ///
-/// The connection is opened with `SQLITE_OPEN_FULLMUTEX`, so callers may use it from any
-/// thread; ownership of the handle lives here and nowhere else.
+/// The handle is owned here and nowhere else. `SQLITE_OPEN_FULLMUTEX` only makes the handle safe
+/// to *call* from several threads; every store is `@MainActor`, and the type is not `Sendable`, so
+/// the real contract is: main-actor-owned, transactions flat (a nested `BEGIN` fails and
+/// `busy_timeout` waits out a competing *connection*, not yourself).
 public final class SQLiteDatabase {
     private var handle: OpaquePointer?
 
@@ -17,6 +19,9 @@ public final class SQLiteDatabase {
         }
         handle = connection
         do {
+            // Only a competing connection (another process, another handle) can make this one busy:
+            // it cannot deadlock against itself, so this is not what makes nested transactions or
+            // concurrent use from several threads safe.
             try execute("PRAGMA busy_timeout=5000")
         } catch {
             sqlite3_close(connection)
@@ -40,8 +45,9 @@ public final class SQLiteDatabase {
         }
     }
 
-    /// `BEGIN IMMEDIATE` … `COMMIT`, rolled back when `body` throws. Not reentrant: a nested
-    /// call would start a second transaction and fail, so keep transactions flat.
+    /// `BEGIN IMMEDIATE` … `COMMIT`, rolled back when `body` throws. Not reentrant: a nested call
+    /// would start a second transaction and fail, so keep transactions flat. Entrants are
+    /// serialised by the callers' main-actor isolation, not by this type.
     public func transaction(_ body: () throws -> Void) throws {
         try execute("BEGIN IMMEDIATE")
         do {
@@ -126,9 +132,11 @@ public final class Statement {
         try check(result)
     }
 
+    /// `Int` is 64-bit here, so it binds as a 64-bit `INTEGER` instead of being narrowed (which
+    /// trapped above `Int32.max`); read those columns back with `columnInt64`.
     public func bind(_ index: Int32, _ value: Int?) throws {
         let result = if let value {
-            sqlite3_bind_int(handle, index, Int32(value))
+            sqlite3_bind_int64(handle, index, Int64(value))
         } else {
             sqlite3_bind_null(handle, index)
         }
@@ -201,6 +209,8 @@ public final class Statement {
         return String(cString: cString)
     }
 
+    /// 32-bit read: anything outside `Int32` is truncated, so this is only for schema-sized values
+    /// (`PRAGMA user_version`); counts and sizes go through `columnInt64`.
     public func columnInt(_ index: Int32) -> Int? {
         guard !isNull(index) else { return nil }
         return Int(sqlite3_column_int(handle, index))

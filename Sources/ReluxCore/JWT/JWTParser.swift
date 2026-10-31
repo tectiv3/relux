@@ -112,6 +112,26 @@ public struct JWTClaims: Equatable, Sendable {
         }
     }
 
+    /// The instant at which `expiryState(at:)` next changes value, or `nil`
+    /// when the state is already final. Mirrors `expiryState`'s precedence:
+    /// `nbf` is evaluated first, so a not-yet-valid token schedules against
+    /// `nbf` even when `exp` has already passed.
+    public func nextStateTransition(after date: Date = Date()) -> Date? {
+        if let notBefore, date < notBefore {
+            return notBefore
+        }
+        if let expiresAt, date < expiresAt {
+            return expiresAt
+        }
+        return nil
+    }
+
+    /// Seconds to wait before the badge can change, or `nil` when it cannot
+    /// change any more. Lets the UI sleep to the boundary instead of polling.
+    public func badgeRefreshDelay(after date: Date = Date()) -> TimeInterval? {
+        nextStateTransition(after: date).map { $0.timeIntervalSince(date) }
+    }
+
     /// Built per call: DateFormatter is not Sendable, so it cannot be shared
     /// under Swift 6 strict concurrency.
     private static func badgeFormatter(

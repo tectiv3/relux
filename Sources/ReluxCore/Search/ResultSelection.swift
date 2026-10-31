@@ -13,17 +13,46 @@ public enum ResultSelection {
         return items.firstIndex { $0.id == id }
     }
 
-    /// Index to select after a results refresh: the previous selection's new position, or 0
-    /// when it is gone (the historical "snap to top when nothing matches" behaviour).
-    public static func restoredIndex(of id: String?, in items: [SearchItem]) -> Int {
-        index(of: id, in: items) ?? 0
+    /// Index to select after a results refresh, where `userMoved` records whether the user has
+    /// explicitly navigated the list since `previousQuery` was typed.
+    ///
+    /// A query change always resets to 0: the ranking was recomputed for new input, so the best
+    /// result is what the user is looking at. Inside one query, a refresh (selection-capture bump,
+    /// a late Spotlight gather) follows the highlight by identity only when the user put it there;
+    /// otherwise it stays on row 0 and keeps tracking the ranking. Restoring unconditionally is
+    /// what made an untouched highlight ride the previous query's top result down the list.
+    public static func indexAfterRefresh(
+        of id: String?,
+        userMoved: Bool,
+        in items: [SearchItem],
+        previousQuery: String,
+        newQuery: String
+    ) -> Int {
+        guard !items.isEmpty, previousQuery == newQuery, userMoved else { return 0 }
+        return index(of: id, in: items) ?? 0
+    }
+
+    /// Whether `index` addresses a row of a `count`-element list.
+    ///
+    /// This is the predicate for every guard in front of `items[index]`. It has to test the lower
+    /// bound too: a list that has just become empty leaves the highlight at `-1`, and a bounds
+    /// check written as `index < count` lets `-1 < 0` through, so the read traps.
+    public static func isRow(_ index: Int, in count: Int) -> Bool {
+        index >= 0 && index < count
     }
 
     /// Next row for Tab/Down-style forward movement, wrapping past the end. An empty list or
     /// an out-of-range index falls back to 0 so callers never index outside the array.
     public static func advanced(_ index: Int, count: Int) -> Int {
-        guard count > 0, index >= 0, index < count else { return 0 }
+        guard isRow(index, in: count) else { return 0 }
         return index >= count - 1 ? 0 : index + 1
+    }
+
+    /// Previous row for Up/Shift-Tab-style backward movement, wrapping past the start. An empty
+    /// list or an out-of-range index falls back to 0 for the same reason as `advanced`.
+    public static func retreated(_ index: Int, count: Int) -> Int {
+        guard isRow(index, in: count) else { return 0 }
+        return index == 0 ? count - 1 : index - 1
     }
 
     /// 0-based row for the Cmd+N shortcut: `number` is the 1-based key cap, only 1...9 exist,
