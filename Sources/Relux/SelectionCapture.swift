@@ -3,31 +3,18 @@ import os
 
 private let log = Logger(subsystem: "com.relux.app", category: "selection")
 
-/// Apps that don't expose selection via standard AX — capture via simulated Cmd+C instead.
-/// Chromium browsers (AXEnhancedUserInterface interferes) plus other non-AX toolkits (Telegram).
-private let clipboardOnlyBundleIDs: Set<String> = [
-    "com.google.Chrome",
-    "com.google.Chrome.canary",
-    "com.brave.Browser",
-    "com.microsoft.edgemac",
-    "company.thebrowser.Browser",
-    "com.vivaldi.Vivaldi",
-    "com.operasoftware.Opera",
-    "com.nickvision.nicegab",
-    "org.chromium.Chromium",
-    "ru.keepcoder.Telegram",
-]
-
-/// Stateless accessibility primitives. The capture flow itself — and every piece of mutable
-/// state it needs — lives in `SelectionCaptureService`.
+/// Stateless accessibility primitives. The capture flow itself lives in `SelectionCaptureService`.
 enum SelectionCapture {
     /// Apps that don't expose selection via AX. The caller must use
     /// `SelectionCaptureService.captureViaClipboard()` synchronously while they're still the key
     /// app — the synthesized ⌘C goes to whichever window is key, so it has to happen before
     /// Relux's panel takes focus.
-    static func isClipboardOnly(_ bundleID: String?) -> Bool {
+    ///
+    /// The list is a user setting (`SettingsStore.clipboardOnlySelectionApps`) and is passed in so
+    /// this stays a pure predicate.
+    static func isClipboardOnly(_ bundleID: String?, in apps: Set<String>) -> Bool {
         guard let bundleID else { return false }
-        return clipboardOnlyBundleIDs.contains(bundleID)
+        return apps.contains(bundleID)
     }
 
     static func replaceSelectedText(with replacement: String, in app: NSRunningApplication) -> Bool {
@@ -58,14 +45,52 @@ enum SelectionCapture {
     }
 }
 
+// MARK: - Read outcome
+
+/// One selection read. The failure case travels with the empty result because an app whose AX tree
+/// is missing and an app where the user has nothing selected both come back as `nil` text but need
+/// opposite treatment: only the first one is worth switching enhanced AX on for.
+struct SelectionRead: Sendable, Equatable {
+    enum Failure: Sendable, Equatable {
+        /// `kAXFocusedUIElementAttribute` itself failed, so the app's tree is missing or not built
+        /// yet. Electron 44 answers `-25212` (`kAXErrorNoValue`) here.
+        case noFocusedElement(axError: Int32)
+        /// The focused element answered, but neither selection attribute produced a value — the
+        /// shape WebKit reports until enhanced AX is on.
+        case noSelectionValue(textError: Int32, markerError: Int32)
+        /// A selection attribute answered with an empty value: nothing is selected. No flag can
+        /// change that, so the caller must not retry for it.
+        case emptySelection
+
+        var warrantsEnhancedAX: Bool {
+            switch self {
+            case .noFocusedElement, .noSelectionValue: true
+            case .emptySelection: false
+            }
+        }
+    }
+
+    var text: String?
+    var failure: Failure?
+
+    static func captured(_ text: String) -> SelectionRead {
+        SelectionRead(text: text, failure: nil)
+    }
+
+    static func failed(_ failure: Failure) -> SelectionRead {
+        SelectionRead(text: nil, failure: failure)
+    }
+}
+
 // MARK: - Accessibility bridge
 
 /// The AX primitives the capture flow needs, injected so the retry policy and attribute-read
 /// order can be tested without a live accessibility connection.
 struct SelectionAXBridge: Sendable {
     /// Reads the focused element's selection: standard attribute first, text markers second.
-    var selectedText: @Sendable (pid_t) async -> String?
-    /// Switches the app into enhanced AX. Rebuilds the app's AX tree, so callers do it once.
+    var selectedText: @Sendable (pid_t) async -> SelectionRead
+    /// Switches the app into enhanced AX. Rebuilds the app's AX tree, so callers only do it when a
+    /// read says the tree is missing.
     var enableEnhancedAX: @Sendable (pid_t) async -> Void
 }
 
@@ -91,64 +116,94 @@ private actor AXCaptureExecutor {
 /// AX-only reads for a specific app. Isolated to `AXCaptureExecutor`; holds no local state.
 @AXCaptureExecutor
 private enum AXSelectionReader {
-    static func selectedText(pid: pid_t) -> String? {
+    /// The Chromium/WebKit marker attributes — ApplicationServices exports no `kAX…` constant for
+    /// either.
+    private static var markerRangeAttribute: CFString {
+        "AXSelectedTextMarkerRange" as CFString
+    }
+
+    private static var textMarkerStringAttribute: CFString {
+        "AXStringForTextMarkerRange" as CFString
+    }
+
+    private static let enhancedUserInterfaceAttribute: CFString = "AXEnhancedUserInterface" as CFString
+    private static let manualAccessibilityAttribute: CFString = "AXManualAccessibility" as CFString
+
+    static func selectedText(pid: pid_t) -> SelectionRead {
         let appElement = AXUIElementCreateApplication(pid)
         return selectedText(in: appElement)
     }
 
-    /// Enables enhanced AX via the app-level element, which is the same proxy
-    /// `AXUIElementCreateApplication` hands out for the capture read.
+    /// Both opt-in flags are always written: `AXEnhancedUserInterface` is the WebKit one,
+    /// `AXManualAccessibility` the Chromium one, and the target app picks whichever it implements.
     static func enableEnhancedAccessibility(pid: pid_t) {
         let appElement = AXUIElementCreateApplication(pid)
-        AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
-        AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        _ = AXUIElementSetAttributeValue(
+            appElement,
+            enhancedUserInterfaceAttribute,
+            kCFBooleanTrue
+        )
+        _ = AXUIElementSetAttributeValue(
+            appElement,
+            manualAccessibilityAttribute,
+            kCFBooleanTrue
+        )
     }
 
-    private static func selectedText(in appElement: AXUIElement) -> String? {
+    private static func selectedText(in appElement: AXUIElement) -> SelectionRead {
         var focusedElement: AnyObject?
-        guard AXUIElementCopyAttributeValue(
+        let focusedResult = AXUIElementCopyAttributeValue(
             appElement,
             kAXFocusedUIElementAttribute as CFString,
             &focusedElement
-        ) == .success else { return nil }
+        )
+        guard focusedResult == .success else {
+            return .failed(.noFocusedElement(axError: focusedResult.rawValue))
+        }
         // swiftlint:disable:next force_cast
         let element = focusedElement as! AXUIElement
 
+        let textProbe = probe(element, kAXSelectedTextAttribute as CFString)
+        let markerProbe = probe(element, markerRangeAttribute)
+
         // Standard path — works for most native apps
-        var selectedText: AnyObject?
-        if AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selectedText) == .success,
-           let text = selectedText as? String,
+        if let text = textProbe.value as? String,
            !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         {
-            return text
+            return .captured(text)
         }
 
         // Text marker path — WebKit views (Safari, Orion) use markers instead
-        if let text = selectedTextViaMarkers(from: element),
-           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        {
-            return text
+        let markerRangeFound = markerProbe.error == .success && markerProbe.value != nil
+        if markerRangeFound {
+            if let text = markerString(of: markerProbe.value, on: element),
+               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                return .captured(text)
+            }
+            return .failed(.emptySelection)
         }
 
-        return nil
+        // Neither attribute answered: WebKit reports `kAXErrorNoValue` for both until enhanced AX
+        // is on, so this is the case the opt-in flags exist for.
+        guard textProbe.error == .success else {
+            return .failed(
+                .noSelectionValue(
+                    textError: textProbe.error.rawValue,
+                    markerError: markerProbe.error.rawValue
+                )
+            )
+        }
+        return .failed(.emptySelection)
     }
 
-    private static func selectedTextViaMarkers(from element: AXUIElement) -> String? {
-        var markerRange: AnyObject?
-        let mrResult = AXUIElementCopyAttributeValue(
-            element,
-            "AXSelectedTextMarkerRange" as CFString,
-            &markerRange
-        )
-        guard mrResult == .success, markerRange != nil else {
-            return nil
-        }
-
+    private static func markerString(of markerRange: AnyObject?, on element: AXUIElement) -> String? {
+        guard let markerRange else { return nil }
         var text: AnyObject?
         let stResult = AXUIElementCopyParameterizedAttributeValue(
             element,
-            "AXStringForTextMarkerRange" as CFString,
-            markerRange!,
+            textMarkerStringAttribute,
+            markerRange,
             &text
         )
         guard stResult == .success else {
@@ -156,41 +211,68 @@ private enum AXSelectionReader {
         }
         return text as? String
     }
+
+    /// One attribute read that keeps the raw `AXError` next to the value: a failed read and an
+    /// empty value are different bugs, and the retry only exists for the first.
+    private static func probe(
+        _ element: AXUIElement,
+        _ attribute: CFString
+    ) -> (error: AXError, value: AnyObject?) {
+        var value: AnyObject?
+        let error = AXUIElementCopyAttributeValue(element, attribute, &value)
+        return (error, error == .success ? value : nil)
+    }
 }
 
 // MARK: - Capture flow
 
-/// The selection capture flow. Its only mutable state — the apps already switched into enhanced
-/// AX — is main-actor isolated by construction, so there is no unsynchronised global; the blocking
-/// AX work hops to `AXCaptureExecutor` inside `SelectionAXBridge`.
+/// The selection capture flow: one read, and — only when the read says the app's AX tree is
+/// missing — an opt-in write followed by a bounded re-read schedule. The blocking AX work hops to
+/// `AXCaptureExecutor` inside `SelectionAXBridge`, so no AX call runs on the main actor.
 @MainActor
 final class SelectionCaptureService {
     private let bridge: SelectionAXBridge
-    private var enhancedAXPIDs: Set<pid_t> = []
 
     init(bridge: SelectionAXBridge = .live) {
         self.bridge = bridge
     }
 
+    /// Re-read delays after the opt-in writes. Chromium flips its accessibility mode on in the
+    /// renderer, so a zero-delay re-read races it — a marker read that only answers on the read
+    /// *after* the enable call was observed. Three re-reads, ~560 ms in total: bounded, and short
+    /// enough that the panel is never waiting on it (capture fills the field when it lands).
+    nonisolated static let retryDelaysMilliseconds: [UInt64] = [80, 160, 320]
+
     /// AX-only selection read for a specific app. Injects no events, so it can run *after* Relux's
     /// panel is already key — capture never blocks panel presentation or keyboard input.
     func capture(from pid: pid_t) async -> String? {
-        if let text = await bridge.selectedText(pid) {
+        let first = await bridge.selectedText(pid)
+        if let text = first.text {
             return text
         }
 
-        // Stubborn apps (Firefox, some Electron) only expose selection once enhanced AX is on.
-        // Setting it rebuilds the app's AX tree, so do it once per app and retry — never on
-        // every activation, which was the prior latency hit.
-        guard firstEnhancedAXRequest(for: pid) else { return nil }
-        await bridge.enableEnhancedAX(pid)
-        return await bridge.selectedText(pid)
-    }
+        // Nothing selected is nothing selected: rebuilding the app's AX tree cannot produce a
+        // selection, and the rebuild is the latency this path exists to avoid.
+        guard (first.failure ?? .emptySelection).warrantsEnhancedAX else {
+            return nil
+        }
 
-    /// True the first time an app is asked to switch enhanced AX on, so the retry runs at most
-    /// once per app for this process's lifetime.
-    private func firstEnhancedAXRequest(for pid: pid_t) -> Bool {
-        enhancedAXPIDs.insert(pid).inserted
+        // The opt-in is (re-)written whenever the read says the tree is missing, even for an app
+        // that accepted it before: Chromium drops accessibility mode again when it idles, and a
+        // single raced attempt must not disable the retry for the process's lifetime.
+        await bridge.enableEnhancedAX(pid)
+
+        for delay in Self.retryDelaysMilliseconds {
+            do {
+                try await Task.sleep(nanoseconds: delay * 1_000_000)
+            } catch {
+                return nil
+            }
+            if let text = await bridge.selectedText(pid).text {
+                return text
+            }
+        }
+        return nil
     }
 
     // MARK: - Chromium clipboard fallback
