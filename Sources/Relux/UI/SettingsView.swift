@@ -16,7 +16,6 @@ struct SettingsView: View {
     @State private var showMaxResults: Int = 10
     @State private var clipboardEnabled: Bool = SettingsStore().clipboardEnabled
     @State private var clipboardRetention: Int = SettingsStore().clipboardRetentionMonths
-    @State private var disabledApps: [DisabledApp] = []
     @State private var showClearConfirmation = false
     @State private var anthropicApiKey: String = ""
     @State private var translateModel: String = AnthropicService.defaultModel
@@ -495,12 +494,6 @@ struct SettingsView: View {
 
     // MARK: - Clipboard Tab
 
-    private struct DisabledApp: Identifiable {
-        let id: String // bundle ID
-        let name: String
-        let icon: NSImage?
-    }
-
     private var clipboardTab: some View {
         Form {
             Section("Monitoring") {
@@ -542,73 +535,39 @@ struct SettingsView: View {
                 }
             }
 
-            Section {
-                Button("Select More Apps") {
-                    selectDisabledApp()
-                }
+            AppListSection(
+                title: "Disabled Applications",
+                caption: "Clipboard history will not record copies from these apps.",
+                bundleIDs: disabledAppsBinding
+            )
 
-                ForEach(disabledApps) { app in
-                    HStack {
-                        if let icon = app.icon {
-                            Image(nsImage: icon)
-                                .resizable()
-                                .frame(width: 20, height: 20)
-                        }
-                        Text(app.name)
-                        Spacer()
-                        Button {
-                            removeDisabledApp(bundleId: app.id)
-                        } label: {
-                            Image(systemName: "xmark.circle")
-                                .foregroundColor(.secondary)
-                        }
-                        .buttonStyle(.borderless)
-                    }
-                }
-            } header: {
-                Text("Disabled Applications")
-            } footer: {
-                Text("Clipboard history will not record copies from these apps.")
-                    .font(.caption)
-            }
+            AppListSection(
+                title: "Clipboard-Only Apps",
+                caption: """
+                Relux simulates ⌘C and reads the pasteboard for these apps instead of reading the \
+                selection directly. Add an app here when its selection comes up empty.
+                """,
+                bundleIDs: clipboardOnlyAppsBinding
+            )
         }
         .formStyle(.grouped)
         .padding()
-        .onAppear {
-            loadDisabledApps()
-        }
     }
 
-    private func loadDisabledApps() {
-        let bundleIds = ClipboardServices.monitor(appState)?.disabledApps ?? []
-        disabledApps = bundleIds.compactMap { bundleId in
-            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else {
-                return DisabledApp(id: bundleId, name: bundleId, icon: nil)
-            }
-            let name = FileManager.default.displayName(atPath: url.path)
-            let icon = NSWorkspace.shared.icon(forFile: url.path)
-            return DisabledApp(id: bundleId, name: name, icon: icon)
-        }
+    /// Writes go through the monitor, which persists them to `SettingsStore` — the same path the
+    /// inline section used before the list was extracted.
+    private var disabledAppsBinding: Binding<Set<String>> {
+        Binding(
+            get: { ClipboardServices.monitor(appState)?.disabledApps ?? [] },
+            set: { ClipboardServices.monitor(appState)?.disabledApps = $0 }
+        )
     }
 
-    private func selectDisabledApp() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.application]
-        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard let bundle = Bundle(url: url),
-              let bundleId = bundle.bundleIdentifier else { return }
-
-        ClipboardServices.monitor(appState)?.disabledApps.insert(bundleId)
-        loadDisabledApps()
-    }
-
-    private func removeDisabledApp(bundleId: String) {
-        ClipboardServices.monitor(appState)?.disabledApps.remove(bundleId)
-        loadDisabledApps()
+    private var clipboardOnlyAppsBinding: Binding<Set<String>> {
+        Binding(
+            get: { appState.settings.clipboardOnlySelectionApps },
+            set: { appState.settings.clipboardOnlySelectionApps = $0 }
+        )
     }
 
     // MARK: - Translate Tab

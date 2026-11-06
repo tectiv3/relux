@@ -130,7 +130,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             applyForcedInputSource()
 
-            if SelectionCapture.isClipboardOnly(previousApp?.bundleIdentifier) {
+            if SelectionCapture.isClipboardOnly(
+                previousApp?.bundleIdentifier,
+                in: appState.settings.clipboardOnlySelectionApps
+            ) {
                 // ⌘C must be synthesized while the source app is still key — before the panel.
                 appState.currentSelection = selectionCaptureService.captureViaClipboard()
                 showPanel()

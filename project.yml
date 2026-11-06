@@ -63,8 +63,8 @@ targets:
       # The icon cache is AppKit-only (no SwiftUI, no AppState), so its fetch-once and
       # 48x48 downsample behaviour is testable without a test host.
       - path: Sources/Relux/AppIconCache.swift
-      # The AX capture flow is a main-actor type over an injected AX bridge, so its read order,
-      # enhanced-AX retry policy and once-per-app rule are covered without an AX connection.
+      # The AX capture flow is a main-actor type over an injected AX bridge, so its read order and
+      # enhanced-AX retry policy are covered without an AX connection.
       - path: Sources/Relux/SelectionCapture.swift
       # The clipboard list model is state over the store with its pasteboard side effects
       # injected, so the panel's filtering/selection rules run host-free too.

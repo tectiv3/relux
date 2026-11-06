@@ -5,8 +5,9 @@ import Foundation
 ///
 /// Each accessor reproduces the exact read the call site used before (`object(forKey:) as? Bool`,
 /// `bool(forKey:)`, `stringArray(forKey:)`, ...) so absent keys keep yielding the same value they
-/// always did. Only the four keys the app has always registered at launch are registered here —
-/// registering more would change what `object(forKey:)` returns for unset keys.
+/// always did. Only the keys listed in `registerDefaults()` are registered here — registering more
+/// would change what `object(forKey:)` returns for unset keys, so that list grows only when a key
+/// needs a default visible to raw lookups.
 final class SettingsStore {
     enum DefaultsKey: String, CaseIterable {
         case showMenuBarIcon
@@ -19,6 +20,7 @@ final class SettingsStore {
         case clipboardEnabled
         case clipboardRetentionMonths
         case clipboardDisabledApps
+        case clipboardOnlySelectionApps
         case translateModel
         case translateSystemPrompt
         case translateLanguages
@@ -39,6 +41,22 @@ final class SettingsStore {
     static let defaultDisabledClipboardApps = [
         "com.apple.keychainaccess",
         "com.apple.Passwords",
+    ]
+
+    /// Apps whose selection must be captured via a synthesized ⌘C instead of an AX read: Chromium
+    /// browsers (AXEnhancedUserInterface interferes) plus other non-AX toolkits (Telegram). Seeded
+    /// as the default so an existing user keeps the routing they had before the list was editable.
+    static let defaultClipboardOnlySelectionApps = [
+        "com.google.Chrome",
+        "com.google.Chrome.canary",
+        "com.brave.Browser",
+        "com.microsoft.edgemac",
+        "company.thebrowser.Browser",
+        "com.vivaldi.Vivaldi",
+        "com.operasoftware.Opera",
+        "com.nickvision.nicegab",
+        "org.chromium.Chromium",
+        "ru.keepcoder.Telegram",
     ]
 
     /// Directories `AppSearcher` scans for app bundles. Computed once per process, as it always
@@ -65,6 +83,7 @@ final class SettingsStore {
             DefaultsKey.clipboardEnabled.rawValue: true,
             DefaultsKey.clipboardRetentionMonths.rawValue: 3,
             DefaultsKey.clipboardDisabledApps.rawValue: Self.defaultDisabledClipboardApps,
+            DefaultsKey.clipboardOnlySelectionApps.rawValue: Self.defaultClipboardOnlySelectionApps,
         ])
     }
 
@@ -134,6 +153,14 @@ final class SettingsStore {
                 ?? Self.defaultDisabledClipboardApps)
         }
         set { defaults.set(Array(newValue), forKey: DefaultsKey.clipboardDisabledApps.rawValue) }
+    }
+
+    var clipboardOnlySelectionApps: Set<String> {
+        get {
+            Set(defaults.stringArray(forKey: DefaultsKey.clipboardOnlySelectionApps.rawValue)
+                ?? Self.defaultClipboardOnlySelectionApps)
+        }
+        set { defaults.set(Array(newValue), forKey: DefaultsKey.clipboardOnlySelectionApps.rawValue) }
     }
 
     // MARK: - Translate

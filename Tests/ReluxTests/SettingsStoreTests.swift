@@ -39,6 +39,7 @@ final class SettingsStoreTests: XCTestCase {
             "clipboardEnabled",
             "clipboardRetentionMonths",
             "clipboardDisabledApps",
+            "clipboardOnlySelectionApps",
             "translateModel",
             "translateSystemPrompt",
             "translateLanguages",
@@ -89,6 +90,9 @@ final class SettingsStoreTests: XCTestCase {
 
         settings.clipboardDisabledApps = ["com.example.app"]
         XCTAssertEqual(defaults.stringArray(forKey: "clipboardDisabledApps"), ["com.example.app"])
+
+        settings.clipboardOnlySelectionApps = ["com.example.editor"]
+        XCTAssertEqual(defaults.stringArray(forKey: "clipboardOnlySelectionApps"), ["com.example.editor"])
 
         settings.translateModel = "model-x"
         XCTAssertEqual(defaults.string(forKey: "translateModel"), "model-x")
@@ -150,6 +154,29 @@ final class SettingsStoreTests: XCTestCase {
             ["com.apple.keychainaccess", "com.apple.Passwords"]
         )
         XCTAssertEqual(SettingsStore.defaultDisabledClipboardApps, ["com.apple.keychainaccess", "com.apple.Passwords"])
+
+        // The ⌘C list is registered too, so the pre-editability behaviour survives the first launch
+        // after the update: an existing user has never written this key.
+        XCTAssertEqual(
+            defaults.stringArray(forKey: "clipboardOnlySelectionApps"),
+            SettingsStore.defaultClipboardOnlySelectionApps
+        )
+        XCTAssertEqual(
+            SettingsStore.defaultClipboardOnlySelectionApps,
+            [
+                "com.google.Chrome",
+                "com.google.Chrome.canary",
+                "com.brave.Browser",
+                "com.microsoft.edgemac",
+                "company.thebrowser.Browser",
+                "com.vivaldi.Vivaldi",
+                "com.operasoftware.Opera",
+                "com.nickvision.nicegab",
+                "org.chromium.Chromium",
+                "ru.keepcoder.Telegram",
+            ],
+            "the seeded list is the one SelectionCapture always routed through ⌘C"
+        )
     }
 
     func testRegisterDefaultsDoesNotLeakIntoOtherKeys() {
@@ -188,6 +215,8 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(settings.clipboardEnabled, true)
         XCTAssertEqual(settings.clipboardRetentionMonths, 3)
         XCTAssertEqual(settings.clipboardDisabledApps, ["com.apple.keychainaccess", "com.apple.Passwords"])
+        XCTAssertEqual(settings.clipboardOnlySelectionApps, Set(SettingsStore.defaultClipboardOnlySelectionApps))
+        XCTAssertEqual(settings.clipboardOnlySelectionApps.count, 10)
         XCTAssertNil(settings.translateModel)
         XCTAssertNil(settings.translateSystemPrompt)
         XCTAssertEqual(settings.translateLanguages, ["English"])
@@ -211,6 +240,7 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(settings.clipboardEnabled, true)
         XCTAssertEqual(settings.clipboardRetentionMonths, 3)
         XCTAssertEqual(settings.clipboardDisabledApps, ["com.apple.keychainaccess", "com.apple.Passwords"])
+        XCTAssertEqual(settings.clipboardOnlySelectionApps, Set(SettingsStore.defaultClipboardOnlySelectionApps))
     }
 
     // MARK: - Round trips
@@ -319,6 +349,15 @@ final class SettingsStoreTests: XCTestCase {
         settings.clipboardDisabledApps = []
         XCTAssertEqual(settings.clipboardDisabledApps, [])
         XCTAssertEqual(defaults.stringArray(forKey: "clipboardDisabledApps"), [])
+
+        settings.clipboardOnlySelectionApps = ["com.example.a", "com.example.b"]
+        XCTAssertEqual(settings.clipboardOnlySelectionApps, ["com.example.a", "com.example.b"])
+        // An emptied ⌘C list stays empty: no app is routed through the synthesized ⌘C.
+        settings.clipboardOnlySelectionApps = []
+        XCTAssertEqual(settings.clipboardOnlySelectionApps, [])
+        XCTAssertEqual(defaults.stringArray(forKey: "clipboardOnlySelectionApps"), [])
+        settings.clipboardOnlySelectionApps = ["com.google.Chrome"]
+        XCTAssertEqual(settings.clipboardOnlySelectionApps, ["com.google.Chrome"])
     }
 
     func testPanelOriginRoundTrip() {
